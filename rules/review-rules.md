@@ -9,6 +9,7 @@ Review must check:
 - Are non-goals preserved?
 - Are behavior, API, data, and security contracts preserved?
 - Is proof present and relevant?
+- For experiments, is the production boundary preserved?
 - Is there hidden high-risk work?
 - Are follow-up risks explicit?
 

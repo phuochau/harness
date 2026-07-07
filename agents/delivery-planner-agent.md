@@ -10,6 +10,7 @@ Convert a request into a delivery brief and task graph.
 - Relevant product, architecture, and workflow docs.
 - `templates/delivery-brief.md`
 - `templates/task.md`
+- `templates/experiment.md` when planning an experiment task.
 - `rules/artifact-analysis.md`
 
 ## Procedure
@@ -20,8 +21,10 @@ Convert a request into a delivery brief and task graph.
 4. Identify affected surfaces and risks.
 5. Define required proof.
 6. Split work into task files.
-7. Mark tasks that are safe to run in parallel.
-8. Run artifact analysis before implementation.
+7. For experiment tasks, define the hypothesis, success criteria, storage
+   location, proof, and production-boundary rule.
+8. Mark tasks that are safe to run in parallel.
+9. Run artifact analysis before implementation.
 
 ## Output
 
@@ -37,3 +40,5 @@ Convert a request into a delivery brief and task graph.
 - Every brief requirement has a task or explicit non-goal.
 - No hidden high-risk work remains in a lower lane.
 - Parallel tasks have disjoint files, surfaces, or state.
+- Experiment tasks define hypothesis, success criteria, storage location,
+  proof, and production-boundary rule.

@@ -70,11 +70,21 @@ Use these values in verification artifacts:
 - `not_applicable`
 - `risk_accepted`
 
+## Experiment Result Values
+
+Use these values in experiment artifacts:
+
+- `proven`: the proposed solution satisfied the success criteria.
+- `disproven`: the proposed solution failed the success criteria.
+- `inconclusive`: the proof did not clearly prove or disprove the solution.
+- `blocked`: proof could not be collected.
+
 ## ID Prefixes
 
 - `REQ`: raw request.
 - `BRIEF`: delivery brief.
 - `TASK`: task.
+- `EXP`: experiment or proof-of-concept artifact.
 - `REVIEW`: review note.
 - `VERIFY`: verification note.
 - `TRACE`: execution trace.
@@ -89,11 +99,14 @@ docs/delivery/
   requests/
   briefs/
   tasks/
+  experiments/
   reviews/
   verification/
   traces/
   decisions/
   templates/
+
+experiments/
 
 docs/workflow/
   README.md
@@ -111,6 +124,17 @@ docs/workflow/
 This repository keeps the workflow package self-contained. A real project can
 move the workflow files into `docs/workflow/` and the delivery templates into
 `docs/delivery/`.
+
+## Experiment Location Rule
+
+Experiment code defaults to `experiments/` at the repository root unless the
+user, delivery brief, or task names another location. Experiment artifacts
+belong under the delivery artifact area, such as
+`docs/delivery/experiments/`, when the receiving project uses that layout.
+
+Experiment code is not production code. Production code must not import from
+`experiments/`. If experiment code should become part of the product, create
+normal implementation tasks and pass it through review, verification, and trace.
 
 ## Agent-Neutral Rule
 
@@ -141,6 +165,6 @@ Use this exact marker when a requirement is unclear:
 NEEDS CLARIFICATION: specific question
 ```
 
-Clarification markers are allowed in requests and research tasks. They should
-not remain in ready delivery briefs or implementation tasks unless the task is
-explicitly to answer that question.
+Clarification markers are allowed in requests, research tasks, and experiment
+tasks. They should not remain in ready delivery briefs or implementation tasks
+unless the task is explicitly to answer that question.

@@ -10,7 +10,7 @@ Request
   -> Artifact analysis
   -> Orchestrator routing when needed
   -> Agent assignment
-  -> Build or investigate
+  -> Build, investigate, or experiment
   -> Review
   -> Verify
   -> Trace and learn
@@ -60,6 +60,7 @@ Task types:
 
 - `build`: implementation work.
 - `research`: codebase or product investigation.
+- `experiment`: bounded proof of concept for a specific proposed solution.
 - `review`: independent review of a change.
 - `verify`: proof collection.
 - `docs`: documentation or decision updates.
@@ -79,6 +80,8 @@ Before implementation, review the request, brief, and task files for:
 - High-risk work hidden inside normal or tiny tasks.
 - Contradictions between scope, non-goals, and task instructions.
 - Parallel tasks that share files, surfaces, or state.
+- Experiment tasks without hypothesis, success criteria, storage location,
+  proof, or production-boundary rule.
 
 ## 6. Orchestrator Routing
 
@@ -103,7 +106,7 @@ Assign each task to a role, not a vendor-specific agent:
 
 The actual runtime can be Codex, Claude, Cursor, Copilot, a human, or a CI job.
 
-## 8. Build Or Investigate
+## 8. Build, Investigate, Or Experiment
 
 The assigned agent works inside the task boundary.
 
@@ -114,6 +117,20 @@ The agent should:
 - Avoid unrelated refactors.
 - Preserve user changes.
 - Update the task with blockers or important decisions.
+
+For `experiment` tasks, use `templates/experiment.md` and default experiment
+work to `experiments/` unless the user, delivery brief, or task names another
+location. Experiment code is not production code, and production code must not
+import from `experiments/`.
+
+An experiment must record:
+
+- The hypothesis being tested.
+- Success criteria.
+- Proof collected.
+- Result: `proven`, `disproven`, `inconclusive`, or `blocked`.
+- Whether to discard the experiment, revise the approach, run another
+  experiment, or promote the learning into production implementation.
 
 ## 9. Review
 

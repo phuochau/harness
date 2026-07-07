@@ -19,8 +19,10 @@ Review work against the request, delivery brief, task, and workflow rules.
 2. Check whether changed files match task scope.
 3. Look for behavioral bugs, security/data risks, contract mismatches, missing
    proof, and scope expansion.
-4. Order findings by severity.
-5. State whether the work is `approved`, `approved_with_risk`,
+4. For experiments, check that production code does not import from the
+   experiment storage path.
+5. Order findings by severity.
+6. State whether the work is `approved`, `approved_with_risk`,
    `changes_requested`, or `blocked`.
 
 ## Output

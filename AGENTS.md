@@ -51,12 +51,14 @@ When handing work to another agent, provide:
 - The risk lane.
 - The proof required.
 - Any blockers or assumptions.
+- The experiment artifact and storage path when the task type is `experiment`.
 
 ## Completion Rule
 
 A task is complete only when all of these are true:
 
-- The requested change is implemented or the investigation result is recorded.
+- The requested change is implemented, or the investigation or experiment
+  result is recorded.
 - Required proof has been run or the inability to run it is documented.
 - Review findings are resolved or explicitly accepted.
 - A trace records what changed, what proof was collected, and what remains.

@@ -81,12 +81,15 @@ templates/
   request.md
   delivery-brief.md
   task.md
+  experiment.md
   review.md
   verification.md
   trace.md
   decision.md
 adapters/
   agent-adapters.md
+experiments/
+  README.md
 ```
 
 When copying this workflow into another project, the receiving project can keep
@@ -104,7 +107,7 @@ Request
   -> Artifact analysis
   -> Orchestrator routing when needed
   -> Agent assignment
-  -> Build or investigate
+  -> Build, investigate, or experiment
   -> Review
   -> Verify
   -> Trace and learn
@@ -133,8 +136,9 @@ See `workflow/influence-map.md` for the full mapping.
 
 Read `HOW_TO_USE.md` to choose a flow family, flow recipe, or
 Orchestrator-guided next step. The included recipes cover common cases such as
-greenfield, brownfield, feature work, bug fixes, security audit, and QA, but the
-workflow is meant to compose into more flows as the project needs them.
+greenfield, brownfield, feature work, bug fixes, experiments, security audit,
+and QA, but the workflow is meant to compose into more flows as the project
+needs them.
 
 Then use the concrete building blocks:
 

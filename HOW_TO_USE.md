@@ -40,7 +40,7 @@ Request
   -> Artifact analysis when tasks exist
   -> Orchestrator routing when needed
   -> Agent assignment
-  -> Build / investigate / review / verify
+  -> Build / investigate / experiment / review / verify
   -> Trace
 ```
 
@@ -79,7 +79,8 @@ Use these to change product or technical behavior.
 | Change behavior | Refining accepted behavior | intake, delivery-brief, task-planning, review | old and new behavior are explicit |
 | Bug fix | Actual behavior differs from expected behavior | debugging, verification, trace | reproduction or regression proof |
 | Refactor | Internal change without intended behavior change | delivery-brief, task-planning, review | behavior-preserving tests pass |
-| Spike/research | Answering an implementation uncertainty | intake, next-step, trace | finding, recommendation, or blocker |
+| Spike/research | Learning what options, constraints, or unknowns exist | intake, next-step, trace | finding, recommendation, or blocker |
+| Experiment / proof of concept | Proving a specific proposed solution can work before production implementation | intake, delivery-brief, task-planning, verification | experiment proof, result, and promotion or cleanup decision |
 | Documentation update | Updating product or technical truth | intake, review, trace | docs match current behavior |
 
 ### Quality And Risk Flows
@@ -171,6 +172,31 @@ Do not expand feature scope during implementation.
 
 Debugging starts with evidence, not guesses.
 
+### Run An Experiment
+
+Use an experiment when research or prior knowledge has produced a specific
+candidate solution, but the team needs evidence that it can work before real
+implementation.
+
+1. Run `skills/intake.md` to capture the uncertainty and proposed approach.
+2. Classify the lane with `rules/risk-lanes.md`.
+3. Write a short delivery brief with explicit non-goals.
+4. Create an `experiment` task and an experiment artifact from
+   `templates/experiment.md`.
+5. Store experiment code under `experiments/` unless the user, brief, or task
+   names another location.
+6. Define the hypothesis, success criteria, and required proof before coding.
+7. Build only the bounded proof of concept.
+8. Verify the proof and record the result as `proven`, `disproven`,
+   `inconclusive`, or `blocked`.
+9. Record whether to discard the experiment, revise the approach, run another
+   experiment, or promote the learning into production implementation.
+10. If the result constrains future work, write a decision record.
+
+Experiment code is not production code. Production code must not import from
+`experiments/`. To reuse experiment code, create normal implementation tasks
+and pass through review, verification, and trace.
+
 ### Security Audit
 
 1. Run `skills/security-audit.md`.
@@ -192,7 +218,8 @@ Do not claim the system is secure. State what was checked.
 3. Convert criteria into test cases.
 4. Run automated proof.
 5. Run manual exploratory checks where automation is weak.
-6. Record `passed`, `failed`, `blocked`, and `risk_accepted` results.
+6. Record `passed`, `failed`, `blocked`, `not_applicable`, and
+   `risk_accepted` results.
 7. Create follow-up tasks for failures.
 8. Write verification and trace notes.
 

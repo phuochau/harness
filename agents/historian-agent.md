@@ -23,8 +23,10 @@ Preserve what future humans and agents need to know.
 4. Link source artifacts: request, brief, tasks, review, verification.
 5. Record proof collected and proof gaps.
 6. Record remaining risk and follow-up work.
-7. Write a decision record if future work is constrained.
-8. Record workflow friction.
+7. For experiments, record the result and whether the experiment is discarded,
+   revised, repeated, or promoted into normal implementation tasks.
+8. Write a decision record if future work is constrained.
+9. Record workflow friction.
 
 ## Output
 
@@ -36,4 +38,3 @@ Preserve what future humans and agents need to know.
 
 - The next agent can understand what changed, why, how it was verified, and
   what remains.
-

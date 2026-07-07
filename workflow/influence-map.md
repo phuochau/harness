@@ -70,11 +70,12 @@ Adopt:
 - Work should be transparent, inspectable, and bounded.
 - Delivery teams need clear ownership, review, and definition of done.
 - QA and security are part of delivery, not afterthoughts.
+- Hard decisions often need experiments that prove a candidate solution before
+  production implementation.
 - Retrospective learning should change future rules.
 
 Adaptation:
 
 - Roles make responsibilities explicit.
 - Flows describe standard work patterns: greenfield, brownfield, feature, bug,
-  security audit, and QA.
-
+  experiment, security audit, and QA.

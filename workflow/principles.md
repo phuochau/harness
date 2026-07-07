@@ -40,6 +40,11 @@ Tiny work can move quickly. Normal work needs a request, brief, task, review,
 verification, and trace. High-risk work needs stronger design, review,
 verification, and human confirmation where needed.
 
+When a hard decision needs evidence, run an experiment before production
+implementation. Experiment code defaults to `experiments/` and must not become a
+production dependency unless it is promoted through normal review and
+verification.
+
 ## 6. Agents Have Roles
 
 One agent should not silently act as product manager, engineer, reviewer,

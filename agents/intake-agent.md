@@ -15,8 +15,8 @@ implementation.
 ## Procedure
 
 1. Restate the request in one sentence.
-2. Identify the work type: greenfield, brownfield, feature, bug, security,
-   QA, docs, maintenance, or workflow improvement.
+2. Identify the work type: greenfield, brownfield, feature, bug, research,
+   experiment, security, QA, docs, maintenance, or workflow improvement.
 3. Capture problem, desired outcome, current behavior, target behavior,
    audience, constraints, and non-goals.
 4. Mark ambiguity with `NEEDS CLARIFICATION: specific question`.
@@ -34,4 +34,3 @@ implementation.
 
 - The request is clear enough for a delivery brief, or
 - A blocking clarification is required.
-

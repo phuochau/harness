@@ -10,10 +10,10 @@ Use at the end of work or when handing off.
 4. Record proof collected and proof gaps.
 5. Record remaining risk.
 6. Record decisions.
-7. Record workflow friction and follow-up work.
+7. For experiments, record result and promotion or cleanup decision.
+8. Record workflow friction and follow-up work.
 
 ## Output
 
 - Trace artifact.
 - Decision artifact when needed.
-

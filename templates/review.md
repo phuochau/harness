@@ -53,6 +53,7 @@ Was required proof provided?
 - Correct lane:
 - Hidden high-risk work:
 - Security/data/API impact:
+- Experiment production boundary preserved:
 
 ## Decision
 

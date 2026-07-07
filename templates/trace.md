@@ -29,6 +29,10 @@ What happened in this run.
 
 - Decision or link to decision record.
 
+## Experiment Results
+
+- Experiment artifact, result, proof summary, and promotion or cleanup decision.
+
 ## Source Traceability
 
 - Request:
@@ -36,6 +40,7 @@ What happened in this run.
 - Tasks:
 - Review:
 - Verification:
+- Experiments:
 
 ## Proof Collected
 

@@ -10,6 +10,8 @@ The workflow package is clean when:
 - The docs explicitly learn from Spec Kit, Superpowers, and repository-harness.
 - Each standard flow has clear purpose, steps, rules, and required artifacts.
 - Templates support ambiguity marking, risk lanes, proof, review, and trace.
+- Experiments have clear artifact, storage, proof, result, and production
+  boundary rules.
 - No document requires a specific CLI, database, or agent runtime.
 - No placeholder markers remain in the authored docs.
 
@@ -200,3 +202,54 @@ Actions:
   recommended layout.
 - Verified no stale source-path wording, placeholder markers, missing top-level
   Markdown headings, or whitespace errors remain in the reviewed documents.
+
+## Review Loop 12
+
+Findings:
+
+- User feedback clarified that research and experiment are different workflow
+  concepts.
+- The existing `Spike/research` flow supported investigation, but the workflow
+  did not make proof-of-concept experiments first-class.
+- The package did not define a default experiment storage location, experiment
+  result values, production-boundary rule, or reusable experiment template.
+
+Actions:
+
+- Added an `Experiment / proof of concept` flow for proving a specific proposed
+  solution before production implementation.
+- Added `experiment` as a task type and `EXP` as an artifact prefix.
+- Added `templates/experiment.md` and a tracked `experiments/README.md`.
+- Documented that experiment code defaults to `experiments/` unless overridden
+  by the user, brief, or task.
+- Documented that production code must not import from `experiments/`, and that
+  promotion into product code must pass through normal implementation, review,
+  verification, and trace.
+- Aligned lifecycle, file contracts, proof gates, artifact analysis, review,
+  verification, trace, install guidance, and role docs with the new experiment
+  workflow.
+
+## Review Loop 13
+
+Findings:
+
+- Full-document review after adding experiments found several follow-on
+  alignment gaps.
+- Lifecycle artifact analysis did not include the experiment-specific readiness
+  check.
+- Intake did not list research or experiment as work types.
+- QA guidance still omitted `not_applicable` from verification result values.
+- Experiment artifacts were introduced, but installation and folder docs needed
+  clearer separation between experiment records and experiment code.
+- The experiment template defaulted to `done` even though the recipe creates
+  the artifact before proof is collected.
+
+Actions:
+
+- Added the experiment readiness check to lifecycle artifact analysis.
+- Added research and experiment to Intake Agent work-type classification.
+- Normalized QA result wording to include `not_applicable`.
+- Added experiment artifact guidance for `docs/delivery/experiments/`.
+- Changed the experiment template default status to `ready`.
+- Aligned handoff, builder, planner, reviewer, task, README, install, and
+  experiment-folder docs with the experiment workflow.

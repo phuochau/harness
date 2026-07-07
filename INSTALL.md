@@ -11,6 +11,8 @@ Create this layout in the target repository:
 AGENTS.md
 docs/workflow/
 docs/delivery/
+docs/delivery/experiments/
+experiments/
 ```
 
 Recommended mapping from this repository:
@@ -25,6 +27,7 @@ rules/*                -> docs/workflow/rules/*
 workflow/*             -> docs/workflow/*
 templates/*            -> docs/delivery/templates/*
 adapters/*             -> docs/workflow/adapters/*
+experiments/README.md  -> experiments/README.md
 ```
 
 Then update `AGENTS.md` paths to match the target project layout. If the
@@ -50,6 +53,8 @@ Minimum Codex install:
 AGENTS.md
 docs/workflow/
 docs/delivery/templates/
+docs/delivery/experiments/
+experiments/
 ```
 
 Recommended `AGENTS.md` entry for a target project:
@@ -124,6 +129,8 @@ CLAUDE.md
 AGENTS.md
 docs/workflow/
 docs/delivery/templates/
+docs/delivery/experiments/
+experiments/
 ```
 
 Recommended `CLAUDE.md`:
@@ -193,8 +200,12 @@ pause, escalate, or ask the human one concrete question.
 6. Run the matching skills from `docs/workflow/skills/`.
 7. Enforce rules from `docs/workflow/rules/`.
 8. If the next step is unclear, use the Orchestrator Agent and next-step skill.
-9. Review and verify before completion.
-10. Write a trace.
+9. For proof-of-concept work, write the experiment artifact under
+   `docs/delivery/experiments/`.
+10. Store experiment code in `experiments/` unless the user, brief, or task
+   names another location.
+11. Review and verify before completion.
+12. Write a trace.
 
 ## Suggested First Commit
 

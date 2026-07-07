@@ -22,8 +22,8 @@ What this task should accomplish.
 
 ## Trace To Source
 
-Request, brief section, acceptance criterion, finding, or QA case that justifies
-this task.
+Request, brief section, acceptance criterion, finding, experiment result, or QA
+case that justifies this task.
 
 ## Inputs
 
@@ -34,6 +34,9 @@ this task.
 ## Expected Changes
 
 What the assigned agent may change.
+
+For `experiment` tasks, include the experiment artifact path and storage path.
+Experiment code defaults to `experiments/` unless another location is named.
 
 ## Out Of Scope
 
@@ -48,6 +51,9 @@ What the assigned agent must not change.
 ## Proof Required
 
 - Proof item.
+
+For `experiment` tasks, proof must be sufficient to mark the result as
+`proven`, `disproven`, `inconclusive`, or `blocked`.
 
 ## Parallel Safety
 

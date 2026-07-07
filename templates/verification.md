@@ -44,6 +44,9 @@ Choose one:
 
 Summarize relevant output or link to artifacts.
 
+For experiments, state whether the evidence supports `proven`, `disproven`,
+`inconclusive`, or `blocked`.
+
 ## Gaps
 
 What was not verified and why.

@@ -26,6 +26,8 @@ These rules decide who should act next.
 - Task split unclear: Delivery Planner Agent.
 - Implementation unclear: Builder Agent may research, or Orchestrator may split
   a research task.
+- Solution feasibility unclear: Builder Agent may run a bounded experiment, or
+  Orchestrator may split an experiment task.
 - Review finding unclear: Reviewer Agent clarifies.
 - Proof unclear: Verifier Agent defines proof.
 - Security impact unclear: Security Agent.

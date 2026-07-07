@@ -11,6 +11,8 @@ Use before implementation begins.
 5. Check high-risk work is not hidden in tiny or normal lanes.
 6. Check scope and non-goals do not contradict task instructions.
 7. Check parallel tasks have disjoint files, surfaces, or state.
+8. Check experiment tasks define a hypothesis, success criteria, storage
+   location, proof, and production-boundary rule.
 
 ## Output
 

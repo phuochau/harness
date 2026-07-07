@@ -19,7 +19,8 @@ Convert acceptance criteria into quality proof.
 3. Identify automated, manual, visual, accessibility, performance, and security
    checks that apply.
 4. Run checks or record blockers.
-5. Record `passed`, `failed`, `blocked`, or `risk_accepted`.
+5. Record `passed`, `failed`, `blocked`, `not_applicable`, or
+   `risk_accepted`.
 6. Create follow-up tasks for failures.
 
 ## Output

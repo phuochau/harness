@@ -69,6 +69,8 @@ Risk lane and reason.
 - High-risk work is not hidden in a lower lane:
 - Non-goals are protected:
 - Parallel tasks have disjoint files, surfaces, or state:
+- Experiment tasks define hypothesis, success criteria, storage location,
+  proof, and production-boundary rule:
 
 ## Task Graph
 

@@ -22,6 +22,8 @@ Collect proof that the work satisfies the delivery brief.
    `risk_accepted`.
 5. For blocked proof, record command/check, reason, risk, and next-best
    evidence.
+6. For experiments, confirm the recorded proof supports the experiment result:
+   `proven`, `disproven`, `inconclusive`, or `blocked`.
 
 ## Output
 

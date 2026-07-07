@@ -9,7 +9,8 @@ Use to validate a feature, release, bug fix, or quality standard.
 3. Identify automated checks.
 4. Identify manual checks.
 5. Run checks or record blockers.
-6. Record `passed`, `failed`, `blocked`, or `risk_accepted`.
+6. Record `passed`, `failed`, `blocked`, `not_applicable`, or
+   `risk_accepted`.
 7. Create follow-up tasks for failures.
 
 ## Output
