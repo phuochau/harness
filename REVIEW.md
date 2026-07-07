@@ -1,0 +1,154 @@
+# Concept Review
+
+This file records the alignment review for the portable workflow concept.
+
+## Review Standard
+
+The concept is clean when:
+
+- The workflow is file-based and agent-neutral.
+- The docs explicitly learn from Spec Kit, Superpowers, and repository-harness.
+- Each standard flow has clear purpose, steps, rules, and required artifacts.
+- Templates support ambiguity marking, risk lanes, proof, review, and trace.
+- No document requires a specific CLI, database, or agent runtime.
+- No placeholder markers remain in the authored docs.
+
+## Review Loop 1
+
+Findings:
+
+- The first version mentioned the influences but did not make the translation
+  explicit enough for future agents.
+- Templates needed stronger Spec Kit-style structure: scenarios, acceptance
+  tests, ambiguity markers, and parallelizable task metadata.
+- The lifecycle needed a clearer pre-execution artifact analysis gate.
+- The workflow needed a durable review record.
+
+Actions:
+
+- Added `concept/workflow/influence-map.md`.
+- Added clarification-marker rules.
+- Strengthened request, brief, task, review, verification, and trace templates.
+- Added this review file.
+
+## Review Loop 2
+
+Findings:
+
+- No banned placeholder markers were found.
+- All Markdown files have a top-level heading.
+- The workflow now explicitly maps lessons from Spec Kit, Superpowers, and
+  repository-harness.
+- Core lifecycle docs, README, and feature flow include the artifact-analysis
+  gate.
+- Templates now include ambiguity markers, traceability, parallel-safety
+  metadata, risk/proof checks, and blocked-proof details.
+
+Actions:
+
+- No further content changes required by this review loop.
+
+## Review Loop 3
+
+Findings:
+
+- User feedback showed the package still looked like documentation, not an
+  agent workflow kit.
+- Agents, skills, and workflow rules needed first-class folders.
+- Scenario flows should be usage guidance, not standalone flow definition
+  files.
+
+Actions:
+
+- Added `concept/agents/` with role prompts.
+- Added `concept/skills/` with reusable workflow procedures.
+- Added `concept/rules/` with enforceable rule files.
+- Added `concept/HOW_TO_USE.md` and moved scenario guidance there.
+- Moved scenario guidance out of standalone flow files and into
+  `concept/HOW_TO_USE.md`.
+
+## Review Loop 4
+
+Findings:
+
+- The package needed a help/orchestration role for moments when the next step,
+  owner, lane, proof, or escalation path is unclear.
+
+Actions:
+
+- Added `concept/agents/orchestrator-agent.md`.
+- Added `concept/skills/next-step.md`.
+- Added `concept/rules/orchestration-rules.md`.
+- Updated entrypoints so agents ask the Orchestrator instead of guessing.
+
+## Review Loop 5
+
+Findings:
+
+- The summary lifecycle placed Artifact Analysis before Task Graph, but the
+  analysis checks task coverage and therefore must run after task planning.
+- The installed layout in file contracts still mentioned the older
+  workflow-only structure before this loop.
+
+Actions:
+
+- Reordered lifecycle summaries to run Task Graph before Artifact Analysis.
+- Updated file contracts to show `agents/`, `skills/`, and `rules/` as
+  first-class installed folders.
+
+## Review Loop 6
+
+Findings:
+
+- `INSTALL.md` needed concrete installation guidance for at least Codex and
+  Claude, not just generic adapter notes.
+
+Actions:
+
+- Added a Codex install section with minimum files, recommended `AGENTS.md`,
+  optional `.codex/skills/*` adapters, and an example adapter body.
+- Added a Claude install section with minimum files, recommended `CLAUDE.md`,
+  optional `.claude/commands/*` adapters, and an example command body.
+
+## Review Loop 7
+
+Findings:
+
+- `HOW_TO_USE.md` implied the example flows were the full set instead of a
+  starting set.
+- Entry points repeated the six examples as if no other flows existed.
+
+Actions:
+
+- Reworked `HOW_TO_USE.md` into flow families, a clean approach, and common
+  recipes.
+- Updated README, AGENTS, and INSTALL to describe examples as composable
+  recipes rather than the complete workflow universe.
+
+## Review Loop 8
+
+Findings:
+
+- `HOW_TO_USE.md` included Orchestrator routing in the standard loop, but the
+  canonical lifecycle did not.
+
+Actions:
+
+- Added optional Orchestrator routing to README and lifecycle.
+- Renumbered lifecycle sections after the new routing step.
+
+## Review Loop 9
+
+Findings:
+
+- Artifact vocabulary was inconsistent in a few places: `planner` vs
+  `delivery-planner`, display labels for review decisions, and `in_progress`
+  instead of `in_progress`.
+
+Actions:
+
+- Added owner, review decision, and verification result value lists to
+  `file-contracts.md`.
+- Normalized delivery brief owner to `delivery-planner`.
+- Normalized review decisions and verification results across templates,
+  skills, agents, and usage docs.
