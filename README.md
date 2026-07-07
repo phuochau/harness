@@ -64,6 +64,10 @@ HOW_TO_USE.md
 REVIEW.md
 AGENTS.md
 INSTALL.md
+scripts/
+  install-claude-workflow.sh
+tests/
+  install_claude_workflow_test.sh
 agents/
   orchestrator-agent.md
   intake-agent.md
@@ -118,7 +122,7 @@ experiments/
 ```
 
 When copying this workflow into another project, the receiving project can keep
-the same folder layout or move the workflow files under `docs/workflow/`. The
+the same folder layout or move the workflow files under `harness/`. The
 important part is that `AGENTS.md` points every agent to the workflow
 entrypoints.
 

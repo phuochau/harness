@@ -1,7 +1,8 @@
 # Copying This Workflow Into Another Project
 
 This workflow package is intentionally file-based. It does not require a CLI,
-database, hosted service, or specific coding agent.
+database, hosted service, or specific coding agent. The Claude installer script
+only automates the file copy and adapter setup described below.
 
 ## Minimal Install
 
@@ -9,7 +10,7 @@ Create this layout in the target repository:
 
 ```text
 AGENTS.md
-docs/workflow/
+harness/
 docs/delivery/
 docs/delivery/experiments/
 experiments/
@@ -19,29 +20,70 @@ Recommended mapping from this repository:
 
 ```text
 AGENTS.md              -> AGENTS.md
-README.md              -> docs/workflow/README.md
-HOW_TO_USE.md          -> docs/workflow/HOW_TO_USE.md
-agents/*               -> docs/workflow/agents/*
-skills/*               -> docs/workflow/skills/*
-rules/*                -> docs/workflow/rules/*
-workflow/*             -> docs/workflow/*
+README.md              -> harness/README.md
+HOW_TO_USE.md          -> harness/HOW_TO_USE.md
+agents/*               -> harness/agents/*
+skills/*               -> harness/skills/*
+rules/*                -> harness/rules/*
+workflow/*             -> harness/*
 templates/*            -> docs/delivery/templates/*
-adapters/*             -> docs/workflow/adapters/*
+adapters/*             -> harness/adapters/*
 experiments/README.md  -> experiments/README.md
 ```
 
 Then update `AGENTS.md` paths to match the target project layout. If the
-workflow files live under `docs/workflow/`, use the sample `AGENTS.md` section
+workflow files live under `harness/`, use the sample `AGENTS.md` section
 below.
 
 Also keep `REVIEW.md` in this source repository or copy it to
-`docs/workflow/REVIEW.md` if the target project wants an audit trail for why the
+`harness/REVIEW.md` if the target project wants an audit trail for why the
 workflow exists.
 
 ## Keep It Agent-Neutral
 
 Do not make Codex, Claude, Cursor, or Copilot the source of truth. Add adapter
 files only after the base workflow works as plain repo files.
+
+## Install For Claude With The CLI
+
+From this workflow repository, run:
+
+```bash
+./scripts/install-claude-workflow.sh /path/to/claude-project
+```
+
+The installer creates:
+
+- `CLAUDE.md`
+- `AGENTS.md`
+- `harness/`
+- `docs/delivery/templates/`
+- `docs/delivery/experiments/`
+- `experiments/README.md`
+- `.claude/commands/` command adapters
+
+The script refuses to overwrite existing installed files unless `--force` is
+provided:
+
+```bash
+./scripts/install-claude-workflow.sh --force /path/to/claude-project
+```
+
+Preview the planned writes without changing the target project:
+
+```bash
+./scripts/install-claude-workflow.sh --dry-run /path/to/claude-project
+```
+
+Skip Claude command adapters when the target project only wants `CLAUDE.md` and
+the workflow files:
+
+```bash
+./scripts/install-claude-workflow.sh --no-commands /path/to/claude-project
+```
+
+After install, review the generated `CLAUDE.md` and `AGENTS.md` before mixing
+the workflow install with product code changes.
 
 ## Install For Codex
 
@@ -51,7 +93,7 @@ Minimum Codex install:
 
 ```text
 AGENTS.md
-docs/workflow/
+harness/
 docs/delivery/templates/
 docs/delivery/experiments/
 experiments/
@@ -64,24 +106,24 @@ Recommended `AGENTS.md` entry for a target project:
 
 This repository uses an agentic delivery workflow. Before changing code, read:
 
-- `docs/workflow/README.md`
-- `docs/workflow/HOW_TO_USE.md`
-- `docs/workflow/influence-map.md`
-- `docs/workflow/file-contracts.md`
-- `docs/workflow/rules/core-rules.md`
-- `docs/workflow/rules/orchestration-rules.md`
-- `docs/workflow/rules/risk-lanes.md`
-- `docs/workflow/rules/proof-gates.md`
-- `docs/workflow/rules/tdd-rules.md`
-- `docs/workflow/rules/artifact-analysis.md`
-- `docs/workflow/rules/handoff-rules.md`
+- `harness/README.md`
+- `harness/HOW_TO_USE.md`
+- `harness/influence-map.md`
+- `harness/file-contracts.md`
+- `harness/rules/core-rules.md`
+- `harness/rules/orchestration-rules.md`
+- `harness/rules/risk-lanes.md`
+- `harness/rules/proof-gates.md`
+- `harness/rules/tdd-rules.md`
+- `harness/rules/artifact-analysis.md`
+- `harness/rules/handoff-rules.md`
 
-Choose a role from `docs/workflow/agents/`, run the matching skill from
-`docs/workflow/skills/`, and use the role/skill/rule map in
-`docs/workflow/HOW_TO_USE.md` when the artifact does not already name the
+Choose a role from `harness/agents/`, run the matching skill from
+`harness/skills/`, and use the role/skill/rule map in
+`harness/HOW_TO_USE.md` when the artifact does not already name the
 owner. Write artifacts from `docs/delivery/templates/`.
-If the next step is unclear, use `docs/workflow/skills/next-step.md` and route
-through `docs/workflow/agents/orchestrator-agent.md`.
+If the next step is unclear, use `harness/skills/next-step.md` and route
+through `harness/agents/orchestrator-agent.md`.
 ```
 
 Optional Codex skill adapters:
@@ -97,8 +139,8 @@ Optional Codex skill adapters:
 ```
 
 Each adapter should be small. It should point Codex back to the generic files
-under `docs/workflow/agents/`, `docs/workflow/skills/`, and
-`docs/workflow/rules/`.
+under `harness/agents/`, `harness/skills/`, and
+`harness/rules/`.
 
 Example Codex adapter body:
 
@@ -110,11 +152,11 @@ Use this skill when a request first enters the workflow.
 Read:
 
 - `AGENTS.md`
-- `docs/workflow/HOW_TO_USE.md`
-- `docs/workflow/agents/intake-agent.md`
-- `docs/workflow/skills/intake.md`
-- `docs/workflow/rules/core-rules.md`
-- `docs/workflow/rules/risk-lanes.md`
+- `harness/HOW_TO_USE.md`
+- `harness/agents/intake-agent.md`
+- `harness/skills/intake.md`
+- `harness/rules/core-rules.md`
+- `harness/rules/risk-lanes.md`
 
 Then create or update a request artifact from
 `docs/delivery/templates/request.md`.
@@ -130,7 +172,7 @@ Minimum Claude install:
 ```text
 CLAUDE.md
 AGENTS.md
-docs/workflow/
+harness/
 docs/delivery/templates/
 docs/delivery/experiments/
 experiments/
@@ -146,26 +188,26 @@ This repository uses an agentic delivery workflow.
 Before changing code, read:
 
 - `AGENTS.md`
-- `docs/workflow/README.md`
-- `docs/workflow/HOW_TO_USE.md`
-- `docs/workflow/influence-map.md`
-- `docs/workflow/file-contracts.md`
-- `docs/workflow/rules/core-rules.md`
-- `docs/workflow/rules/orchestration-rules.md`
-- `docs/workflow/rules/risk-lanes.md`
-- `docs/workflow/rules/proof-gates.md`
-- `docs/workflow/rules/tdd-rules.md`
-- `docs/workflow/rules/artifact-analysis.md`
-- `docs/workflow/rules/handoff-rules.md`
+- `harness/README.md`
+- `harness/HOW_TO_USE.md`
+- `harness/influence-map.md`
+- `harness/file-contracts.md`
+- `harness/rules/core-rules.md`
+- `harness/rules/orchestration-rules.md`
+- `harness/rules/risk-lanes.md`
+- `harness/rules/proof-gates.md`
+- `harness/rules/tdd-rules.md`
+- `harness/rules/artifact-analysis.md`
+- `harness/rules/handoff-rules.md`
 
-Use roles from `docs/workflow/agents/`, skills from `docs/workflow/skills/`,
-rules from `docs/workflow/rules/`, and templates from
+Use roles from `harness/agents/`, skills from `harness/skills/`,
+rules from `harness/rules/`, and templates from
 `docs/delivery/templates/`. Use the role/skill/rule map in
-`docs/workflow/HOW_TO_USE.md` when the artifact does not already name the
+`harness/HOW_TO_USE.md` when the artifact does not already name the
 owner.
 
-If the next step is unclear, use `docs/workflow/skills/next-step.md` and ask
-the Orchestrator Agent in `docs/workflow/agents/orchestrator-agent.md`.
+If the next step is unclear, use `harness/skills/next-step.md` and ask
+the Orchestrator Agent in `harness/agents/orchestrator-agent.md`.
 ```
 
 Optional Claude command adapters:
@@ -187,9 +229,9 @@ Use when the next action, role, lane, owner, or proof is unclear.
 
 Read:
 
-- `docs/workflow/skills/next-step.md`
-- `docs/workflow/agents/orchestrator-agent.md`
-- `docs/workflow/rules/orchestration-rules.md`
+- `harness/skills/next-step.md`
+- `harness/agents/orchestrator-agent.md`
+- `harness/rules/orchestration-rules.md`
 
 Return the next role, next skill, required artifact, and whether to continue,
 pause, escalate, or ask the human one concrete question.
@@ -197,16 +239,16 @@ pause, escalate, or ask the human one concrete question.
 
 ## First Use In A Project
 
-1. Read `docs/workflow/HOW_TO_USE.md` and choose the smallest fitting flow
+1. Read `harness/HOW_TO_USE.md` and choose the smallest fitting flow
    family or recipe.
 2. Create a request from `docs/delivery/templates/request.md`.
 3. Classify the risk lane.
 4. For normal or high-risk work, create a delivery brief.
-5. Choose agent roles from `docs/workflow/agents/`.
-6. Run the matching skills from `docs/workflow/skills/`.
-7. Use the role/skill/rule map in `docs/workflow/HOW_TO_USE.md`.
-8. Enforce rules from `docs/workflow/rules/`.
-9. For production implementation, follow `docs/workflow/rules/tdd-rules.md`.
+5. Choose agent roles from `harness/agents/`.
+6. Run the matching skills from `harness/skills/`.
+7. Use the role/skill/rule map in `harness/HOW_TO_USE.md`.
+8. Enforce rules from `harness/rules/`.
+9. For production implementation, follow `harness/rules/tdd-rules.md`.
 10. If the next step is unclear, use the Orchestrator Agent and next-step skill.
 11. For proof-of-concept work, write the experiment artifact under
    `docs/delivery/experiments/`.

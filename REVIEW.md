@@ -341,3 +341,66 @@ Proof:
   the TDD rule's procedural shape.
 - Targeted searches confirmed Orchestrator and next-step routing now include
   rule files to apply.
+
+## Review Loop 17
+
+Findings:
+
+- User requested a CLI script or equivalent path for installing the workflow
+  into a Claude project.
+- `INSTALL.md` documented manual Claude installation but did not provide an
+  executable install path.
+- The package claimed no CLI was required, which remains true, but it did not
+  distinguish optional automation from source-of-truth workflow files.
+
+Actions:
+
+- Added `scripts/install-claude-workflow.sh`.
+- Added `tests/install_claude_workflow_test.sh`.
+- Updated `INSTALL.md` with Claude CLI usage, `--force`, `--dry-run`, and
+  `--no-commands` examples.
+- Updated the README folder shape to include `scripts/` and `tests/`.
+
+TDD evidence:
+
+- Red: `sh tests/install_claude_workflow_test.sh` failed because
+  `scripts/install-claude-workflow.sh` did not exist.
+- Green: after adding the installer, `sh tests/install_claude_workflow_test.sh`
+  passed.
+
+Proof:
+
+- The test verifies generated `CLAUDE.md`, `AGENTS.md`, `harness/`,
+  `docs/delivery/templates/`, `docs/delivery/experiments/`,
+  `experiments/README.md`, and `.claude/commands/`.
+- The test verifies overwrite protection, `--force`, `--dry-run`,
+  `--no-commands`, and installing into a nested target path.
+
+## Review Loop 18
+
+Findings:
+
+- User feedback clarified that Claude projects should receive a top-level
+  `harness/` folder instead of burying the workflow package under
+  `docs/workflow/`.
+- The installer, generated Claude instructions, command adapters, install docs,
+  adapter examples, and file-contract layout all still pointed at
+  `docs/workflow/`.
+
+Actions:
+
+- Updated the installer to copy workflow files into `harness/`.
+- Updated generated `CLAUDE.md`, generated `AGENTS.md`, and generated
+  `.claude/commands/*` adapters to read from `harness/`.
+- Updated `INSTALL.md`, `adapters/agent-adapters.md`,
+  `workflow/file-contracts.md`, and README install wording to use `harness/`.
+- Updated the installer test to require `harness/` and reject a fresh
+  `docs/workflow/` install.
+
+TDD evidence:
+
+- Red: after changing the test expectation to `harness/`, `sh
+  tests/install_claude_workflow_test.sh` failed because
+  `harness/README.md` was missing.
+- Green: after updating the installer and docs, `sh
+  tests/install_claude_workflow_test.sh` passed.

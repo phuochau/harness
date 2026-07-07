@@ -34,18 +34,18 @@ workflow file and record the adapter mismatch in the trace or review note.
 Possible files in a target project:
 
 ```text
-.codex/skills/intake/SKILL.md              wraps docs/workflow/skills/intake.md
-.codex/skills/next-step/SKILL.md           wraps docs/workflow/skills/next-step.md
-.codex/skills/delivery-planner/SKILL.md    wraps docs/workflow/skills/delivery-brief.md and task-planning.md
-.codex/skills/builder/SKILL.md             wraps docs/workflow/agents/builder-agent.md
-.codex/skills/reviewer/SKILL.md            wraps docs/workflow/skills/review.md
-.codex/skills/verifier/SKILL.md            wraps docs/workflow/skills/verification.md
-.codex/skills/historian/SKILL.md           wraps docs/workflow/skills/trace.md
+.codex/skills/intake/SKILL.md              wraps harness/skills/intake.md
+.codex/skills/next-step/SKILL.md           wraps harness/skills/next-step.md
+.codex/skills/delivery-planner/SKILL.md    wraps harness/skills/delivery-brief.md and task-planning.md
+.codex/skills/builder/SKILL.md             wraps harness/agents/builder-agent.md
+.codex/skills/reviewer/SKILL.md            wraps harness/skills/review.md
+.codex/skills/verifier/SKILL.md            wraps harness/skills/verification.md
+.codex/skills/historian/SKILL.md           wraps harness/skills/trace.md
 ```
 
-Each Codex skill should read `AGENTS.md`, `docs/workflow/HOW_TO_USE.md`, the
-relevant files under `docs/workflow/agents/`, `docs/workflow/skills/`, and
-`docs/workflow/rules/`, then the assigned artifact path before acting.
+Each Codex skill should read `AGENTS.md`, `harness/HOW_TO_USE.md`, the
+relevant files under `harness/agents/`, `harness/skills/`, and
+`harness/rules/`, then the assigned artifact path before acting.
 
 ## Claude Adapter
 
@@ -53,11 +53,11 @@ Possible files:
 
 ```text
 CLAUDE.md
-.claude/commands/intake.md          wraps docs/workflow/skills/intake.md
-.claude/commands/next-step.md       wraps docs/workflow/skills/next-step.md
-.claude/commands/plan-delivery.md   wraps docs/workflow/skills/delivery-brief.md and task-planning.md
-.claude/commands/review-task.md     wraps docs/workflow/skills/review.md
-.claude/commands/verify-task.md     wraps docs/workflow/skills/verification.md
+.claude/commands/intake.md          wraps harness/skills/intake.md
+.claude/commands/next-step.md       wraps harness/skills/next-step.md
+.claude/commands/plan-delivery.md   wraps harness/skills/delivery-brief.md and task-planning.md
+.claude/commands/review-task.md     wraps harness/skills/review.md
+.claude/commands/verify-task.md     wraps harness/skills/verification.md
 ```
 
 `CLAUDE.md` should import or reference `AGENTS.md` and the workflow files.
@@ -67,10 +67,10 @@ CLAUDE.md
 Possible files:
 
 ```text
-.cursor/rules/delivery.mdc      mirrors docs/workflow/HOW_TO_USE.md
-.cursor/rules/agents.mdc        mirrors docs/workflow/agents/
-.cursor/rules/proof-gates.mdc   mirrors docs/workflow/rules/proof-gates.md
-.cursor/rules/tdd.mdc           mirrors docs/workflow/rules/tdd-rules.md
+.cursor/rules/delivery.mdc      mirrors harness/HOW_TO_USE.md
+.cursor/rules/agents.mdc        mirrors harness/agents/
+.cursor/rules/proof-gates.mdc   mirrors harness/rules/proof-gates.md
+.cursor/rules/tdd.mdc           mirrors harness/rules/tdd-rules.md
 ```
 
 Cursor rules should keep the same lifecycle and role names.

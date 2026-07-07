@@ -108,7 +108,7 @@ docs/delivery/
 
 experiments/
 
-docs/workflow/
+harness/
   README.md
   HOW_TO_USE.md
   agents/
@@ -122,7 +122,7 @@ docs/workflow/
 ```
 
 This repository keeps the workflow package self-contained. A real project can
-move the workflow files into `docs/workflow/` and the delivery templates into
+move the workflow files into `harness/` and the delivery templates into
 `docs/delivery/`.
 
 ## Experiment Location Rule
