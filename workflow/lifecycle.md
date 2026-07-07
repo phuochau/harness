@@ -21,7 +21,7 @@ Request
 A request is the raw input: issue, product request, bug report, audit request,
 QA request, or human prompt.
 
-Use `concept/templates/request.md`.
+Use `templates/request.md`.
 
 ## 2. Intake
 
@@ -46,7 +46,7 @@ guessed.
 A delivery brief is the execution contract. It should be short, concrete, and
 reviewable.
 
-Use `concept/templates/delivery-brief.md`.
+Use `templates/delivery-brief.md`.
 
 Do not write a delivery brief for tiny work unless the tiny change is unclear.
 
@@ -54,7 +54,7 @@ Do not write a delivery brief for tiny work unless the tiny change is unclear.
 
 Split the brief into task files. Tasks may depend on each other.
 
-Use `concept/templates/task.md`.
+Use `templates/task.md`.
 
 Task types:
 
@@ -72,12 +72,13 @@ without sharing files, state, or ordering assumptions.
 
 Before implementation, review the request, brief, and task files for:
 
-- Unresolved `NEEDS CLARIFICATION` markers.
+- Unresolved clarification markers.
 - Acceptance criteria without proof.
 - Tasks that do not trace to the brief.
-- Brief requirements with no task.
+- Brief requirements with no task or explicit non-goal.
 - High-risk work hidden inside normal or tiny tasks.
 - Contradictions between scope, non-goals, and task instructions.
+- Parallel tasks that share files, surfaces, or state.
 
 ## 6. Orchestrator Routing
 
@@ -119,7 +120,7 @@ The agent should:
 Review checks whether the work matches the brief, not whether it merely looks
 reasonable.
 
-Use `concept/templates/review.md`.
+Use `templates/review.md`.
 
 Review should prioritize:
 
@@ -133,7 +134,7 @@ Review should prioritize:
 
 Verification collects evidence that the change works.
 
-Use `concept/templates/verification.md`.
+Use `templates/verification.md`.
 
 Verification can include:
 
@@ -151,8 +152,8 @@ Verification can include:
 
 Trace records what happened and what future agents should know.
 
-Use `concept/templates/trace.md`.
+Use `templates/trace.md`.
 
 If the work changed architecture, product behavior, security posture, public
 contracts, data ownership, or validation standards, also write a decision record
-using `concept/templates/decision.md`.
+using `templates/decision.md`.

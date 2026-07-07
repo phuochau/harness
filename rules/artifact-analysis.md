@@ -2,7 +2,7 @@
 
 Run these checks before implementation:
 
-1. No ready brief has unresolved `NEEDS CLARIFICATION` markers.
+1. No ready brief has unresolved clarification markers.
 2. Every acceptance criterion has proof.
 3. Every task traces to the brief.
 4. Every brief requirement has a task or explicit non-goal.
@@ -11,4 +11,3 @@ Run these checks before implementation:
 7. Parallel tasks have disjoint files, surfaces, or state.
 
 If any check fails, fix the artifacts before build work starts.
-

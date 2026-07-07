@@ -1,11 +1,11 @@
 # Copying This Workflow Into Another Project
 
-This concept package is intentionally file-based. It does not require a CLI,
+This workflow package is intentionally file-based. It does not require a CLI,
 database, hosted service, or specific coding agent.
 
 ## Minimal Install
 
-Copy these files into the target repository:
+Create this layout in the target repository:
 
 ```text
 AGENTS.md
@@ -13,25 +13,27 @@ docs/workflow/
 docs/delivery/
 ```
 
-Recommended mapping from this concept folder:
+Recommended mapping from this repository:
 
 ```text
-concept/AGENTS.md              -> AGENTS.md
-concept/README.md              -> docs/workflow/README.md
-concept/HOW_TO_USE.md          -> docs/workflow/HOW_TO_USE.md
-concept/agents/*               -> docs/workflow/agents/*
-concept/skills/*               -> docs/workflow/skills/*
-concept/rules/*                -> docs/workflow/rules/*
-concept/workflow/*             -> docs/workflow/*
-concept/templates/*            -> docs/delivery/templates/*
-concept/adapters/*             -> docs/workflow/adapters/*
+AGENTS.md              -> AGENTS.md
+README.md              -> docs/workflow/README.md
+HOW_TO_USE.md          -> docs/workflow/HOW_TO_USE.md
+agents/*               -> docs/workflow/agents/*
+skills/*               -> docs/workflow/skills/*
+rules/*                -> docs/workflow/rules/*
+workflow/*             -> docs/workflow/*
+templates/*            -> docs/delivery/templates/*
+adapters/*             -> docs/workflow/adapters/*
 ```
 
-Then update `AGENTS.md` paths from `concept/...` to `docs/...`.
+Then update `AGENTS.md` paths to match the target project layout. If the
+workflow files live under `docs/workflow/`, use the sample `AGENTS.md` section
+below.
 
-Also keep `concept/REVIEW.md` in the source repository or copy it to
-`docs/workflow/REVIEW.md` if the target project wants an audit trail for why
-the workflow exists.
+Also keep `REVIEW.md` in this source repository or copy it to
+`docs/workflow/REVIEW.md` if the target project wants an audit trail for why the
+workflow exists.
 
 ## Keep It Agent-Neutral
 

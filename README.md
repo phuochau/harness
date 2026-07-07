@@ -1,6 +1,6 @@
-# Agentic Delivery Workflow Concept
+# Agentic Delivery Workflow
 
-This folder contains a portable, file-based workflow for software delivery teams
+This repository contains a portable, file-based workflow for software delivery teams
 using one or more coding agents.
 
 The goal is not to copy Spec Kit, Superpowers, or repository-harness. The goal
@@ -35,64 +35,64 @@ Agent-specific tools are adapters, not the source of truth.
 ## Folder Shape
 
 ```text
-concept/
-  README.md
-  HOW_TO_USE.md
-  REVIEW.md
-  AGENTS.md
-  INSTALL.md
-  agents/
-    orchestrator-agent.md
-    intake-agent.md
-    delivery-planner-agent.md
-    builder-agent.md
-    reviewer-agent.md
-    verifier-agent.md
-    security-agent.md
-    qa-agent.md
-    historian-agent.md
-  skills/
-    next-step.md
-    intake.md
-    principles.md
-    brownfield-discovery.md
-    delivery-brief.md
-    task-planning.md
-    artifact-analysis.md
-    debugging.md
-    security-audit.md
-    qa.md
-    review.md
-    verification.md
-    trace.md
-  rules/
-    core-rules.md
-    orchestration-rules.md
-    risk-lanes.md
-    proof-gates.md
-    artifact-analysis.md
-    review-rules.md
-    handoff-rules.md
-  workflow/
-    influence-map.md
-    principles.md
-    lifecycle.md
-    file-contracts.md
-  templates/
-    request.md
-    delivery-brief.md
-    task.md
-    review.md
-    verification.md
-    trace.md
-    decision.md
-  adapters/
-    agent-adapters.md
+README.md
+HOW_TO_USE.md
+REVIEW.md
+AGENTS.md
+INSTALL.md
+agents/
+  orchestrator-agent.md
+  intake-agent.md
+  delivery-planner-agent.md
+  builder-agent.md
+  reviewer-agent.md
+  verifier-agent.md
+  security-agent.md
+  qa-agent.md
+  historian-agent.md
+skills/
+  next-step.md
+  intake.md
+  principles.md
+  brownfield-discovery.md
+  delivery-brief.md
+  task-planning.md
+  artifact-analysis.md
+  debugging.md
+  security-audit.md
+  qa.md
+  review.md
+  verification.md
+  trace.md
+rules/
+  core-rules.md
+  orchestration-rules.md
+  risk-lanes.md
+  proof-gates.md
+  artifact-analysis.md
+  review-rules.md
+  handoff-rules.md
+workflow/
+  influence-map.md
+  principles.md
+  lifecycle.md
+  file-contracts.md
+templates/
+  request.md
+  delivery-brief.md
+  task.md
+  review.md
+  verification.md
+  trace.md
+  decision.md
+adapters/
+  agent-adapters.md
 ```
 
-When copying this into another project, the receiving project can keep the same
-folder layout or move the files under `docs/workflow/`. The important part is
-that `AGENTS.md` points every agent to the workflow entrypoints.
+When copying this workflow into another project, the receiving project can keep
+the same folder layout or move the workflow files under `docs/workflow/`. The
+important part is that `AGENTS.md` points every agent to the workflow
+entrypoints.
 
 ## Standard Lifecycle
 
@@ -116,7 +116,7 @@ behavior.
 
 ## What This System Learns From Others
 
-This concept intentionally adopts a few proven patterns:
+This workflow package intentionally adopts a few proven patterns:
 
 - From Spec Kit: keep intent and specifications ahead of implementation, mark
   ambiguity instead of guessing, use project principles as gates, split work by
@@ -127,19 +127,19 @@ This concept intentionally adopts a few proven patterns:
   validation proof, preserve decisions, and leave traces that help the next
   agent.
 
-See `concept/workflow/influence-map.md` for the full mapping.
+See `workflow/influence-map.md` for the full mapping.
 
 ## How To Start
 
-Read `concept/HOW_TO_USE.md` to choose a flow family, flow recipe, or
+Read `HOW_TO_USE.md` to choose a flow family, flow recipe, or
 Orchestrator-guided next step. The included recipes cover common cases such as
 greenfield, brownfield, feature work, bug fixes, security audit, and QA, but the
 workflow is meant to compose into more flows as the project needs them.
 
 Then use the concrete building blocks:
 
-- Ask `concept/agents/orchestrator-agent.md` when the next step is unclear.
-- Pick an agent role from `concept/agents/`.
-- Run the matching skill from `concept/skills/`.
-- Enforce the rules in `concept/rules/`.
-- Write artifacts from `concept/templates/`.
+- Ask `agents/orchestrator-agent.md` when the next step is unclear.
+- Pick an agent role from `agents/`.
+- Run the matching skill from `skills/`.
+- Enforce the rules in `rules/`.
+- Write artifacts from `templates/`.

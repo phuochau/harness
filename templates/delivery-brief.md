@@ -62,10 +62,13 @@ Risk lane and reason.
 
 ## Artifact Analysis
 
-- No unresolved `NEEDS CLARIFICATION` markers:
+- No unresolved clarification markers:
 - Every acceptance criterion has proof:
-- Every task traces to scope:
+- Every task traces to the brief:
+- Every brief requirement has a task or explicit non-goal:
+- High-risk work is not hidden in a lower lane:
 - Non-goals are protected:
+- Parallel tasks have disjoint files, surfaces, or state:
 
 ## Task Graph
 

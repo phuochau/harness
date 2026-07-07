@@ -3,10 +3,10 @@
 This guide explains how to choose and compose flows. The reusable building
 blocks live in:
 
-- `concept/agents/`: role prompts for agents.
-- `concept/skills/`: repeatable workflow skills.
-- `concept/rules/`: enforceable operating rules.
-- `concept/templates/`: artifact templates.
+- `agents/`: role prompts for agents.
+- `skills/`: repeatable workflow skills.
+- `rules/`: enforceable operating rules.
+- `templates/`: artifact templates.
 
 The examples below are not the only possible flows. They are common operating
 patterns built from the same agents, skills, rules, and templates.
@@ -149,7 +149,7 @@ Preserve current behavior first.
 
 1. Run `skills/intake.md`.
 2. Classify the lane with `rules/risk-lanes.md`.
-3. Mark unclear requirements with `NEEDS CLARIFICATION`.
+3. Mark unclear requirements with `NEEDS CLARIFICATION: specific question`.
 4. Run `skills/delivery-brief.md`.
 5. Run `skills/task-planning.md`.
 6. Run artifact analysis from `rules/artifact-analysis.md`.

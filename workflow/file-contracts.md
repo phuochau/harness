@@ -108,8 +108,9 @@ docs/workflow/
   adapters/
 ```
 
-This `concept/` folder keeps the prototype self-contained. A real project can
-move the files into `docs/workflow/` and `docs/delivery/`.
+This repository keeps the workflow package self-contained. A real project can
+move the workflow files into `docs/workflow/` and the delivery templates into
+`docs/delivery/`.
 
 ## Agent-Neutral Rule
 

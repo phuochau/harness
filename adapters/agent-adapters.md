@@ -80,8 +80,7 @@ and the current task.
 Any agent can use this prompt:
 
 ```text
-Read AGENTS.md, then read HOW_TO_USE.md, agents/, skills/, rules/, and the
-assigned artifact path. Identify your assigned role. Do only the work allowed
-by that role. Before completion, write or update the required proof and trace
-files.
+Read AGENTS.md, then read the workflow files it names and the assigned artifact
+path. Identify your assigned role. Do only the work allowed by that role.
+Before completion, write or update the required proof and trace files.
 ```

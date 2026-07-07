@@ -10,8 +10,8 @@ Review work against the request, delivery brief, task, and workflow rules.
 - Task.
 - Diff or changed files.
 - Builder notes.
-- `concept/templates/review.md`
-- `concept/rules/review-rules.md`
+- `templates/review.md`
+- `rules/review-rules.md`
 
 ## Procedure
 

@@ -10,8 +10,8 @@ Collect proof that the work satisfies the delivery brief.
 - Task.
 - Review artifact.
 - Required proof.
-- `concept/templates/verification.md`
-- `concept/rules/proof-gates.md`
+- `templates/verification.md`
+- `rules/proof-gates.md`
 
 ## Procedure
 

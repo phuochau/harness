@@ -12,8 +12,8 @@ Preserve what future humans and agents need to know.
 - Review artifact.
 - Verification artifact.
 - Final diff summary.
-- `concept/templates/trace.md`
-- `concept/templates/decision.md`
+- `templates/trace.md`
+- `templates/decision.md`
 
 ## Procedure
 

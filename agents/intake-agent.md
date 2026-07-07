@@ -8,9 +8,9 @@ implementation.
 ## Inputs
 
 - Human prompt, issue, ticket, bug report, audit request, or product idea.
-- `concept/rules/core-rules.md`
-- `concept/rules/risk-lanes.md`
-- `concept/templates/request.md`
+- `rules/core-rules.md`
+- `rules/risk-lanes.md`
+- `templates/request.md`
 
 ## Procedure
 

@@ -44,7 +44,8 @@ What happened in this run.
 ## Review Result
 
 Use review decision values: `approved`, `approved_with_risk`,
-`changes_requested`, `blocked`, or `skipped` with reason.
+`changes_requested`, or `blocked`. If review was not required for the lane,
+record `skipped` with the reason.
 
 ## Remaining Risk
 

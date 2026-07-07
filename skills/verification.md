@@ -7,7 +7,8 @@ Use before claiming work is complete.
 1. Identify what proof would make the completion claim true.
 2. Run the full relevant command or check.
 3. Read output and exit status.
-4. Record pass, fail, blocked, or not applicable.
+4. Record `passed`, `failed`, `blocked`, `not_applicable`, or
+   `risk_accepted`.
 5. If blocked, record exact command/check, reason, risk, and next-best
    evidence.
 
@@ -15,4 +16,3 @@ Use before claiming work is complete.
 
 - Verification artifact.
 - Evidence summary.
-

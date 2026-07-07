@@ -71,5 +71,6 @@ Product, technical, timing, UX, data, security, or workflow constraints.
 
 ## Open Questions
 
-Questions that block or weaken planning. Use `NEEDS CLARIFICATION: specific
-question` for ambiguity that should not be guessed.
+Questions that block or weaken planning. Use the exact marker
+`NEEDS CLARIFICATION: specific question` for ambiguity that should not be
+guessed.

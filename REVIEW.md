@@ -1,10 +1,10 @@
-# Concept Review
+# Workflow Package Review
 
-This file records the alignment review for the portable workflow concept.
+This file records the alignment review for the portable workflow package.
 
 ## Review Standard
 
-The concept is clean when:
+The workflow package is clean when:
 
 - The workflow is file-based and agent-neutral.
 - The docs explicitly learn from Spec Kit, Superpowers, and repository-harness.
@@ -26,7 +26,7 @@ Findings:
 
 Actions:
 
-- Added `concept/workflow/influence-map.md`.
+- Added `workflow/influence-map.md`.
 - Added clarification-marker rules.
 - Strengthened request, brief, task, review, verification, and trace templates.
 - Added this review file.
@@ -60,12 +60,12 @@ Findings:
 
 Actions:
 
-- Added `concept/agents/` with role prompts.
-- Added `concept/skills/` with reusable workflow procedures.
-- Added `concept/rules/` with enforceable rule files.
-- Added `concept/HOW_TO_USE.md` and moved scenario guidance there.
+- Added `agents/` with role prompts.
+- Added `skills/` with reusable workflow procedures.
+- Added `rules/` with enforceable rule files.
+- Added `HOW_TO_USE.md` and moved scenario guidance there.
 - Moved scenario guidance out of standalone flow files and into
-  `concept/HOW_TO_USE.md`.
+  `HOW_TO_USE.md`.
 
 ## Review Loop 4
 
@@ -76,9 +76,9 @@ Findings:
 
 Actions:
 
-- Added `concept/agents/orchestrator-agent.md`.
-- Added `concept/skills/next-step.md`.
-- Added `concept/rules/orchestration-rules.md`.
+- Added `agents/orchestrator-agent.md`.
+- Added `skills/next-step.md`.
+- Added `rules/orchestration-rules.md`.
 - Updated entrypoints so agents ask the Orchestrator instead of guessing.
 
 ## Review Loop 5
@@ -152,3 +152,51 @@ Actions:
 - Normalized delivery brief owner to `delivery-planner`.
 - Normalized review decisions and verification results across templates,
   skills, agents, and usage docs.
+
+## Review Loop 10
+
+Findings:
+
+- The workflow package moved from a nested workflow folder inside another
+  project to its own repository.
+- Several entrypoint and role documents still pointed agents at stale
+  nested-folder paths.
+- Installation guidance still described mapping from the old source folder.
+
+Actions:
+
+- Updated source-repository references to use root-relative paths.
+- Updated the README folder shape to show the standalone repository layout.
+- Updated install mapping so target projects copy from this repository into
+  their chosen workflow location.
+- Verified with a Markdown search for the old path prefix that no stale path
+  references remain.
+
+## Review Loop 11
+
+Findings:
+
+- Review of all Markdown documents found a few remaining alignment gaps after
+  the standalone-repository move.
+- Clarification-marker guidance was not consistently using the exact
+  `NEEDS CLARIFICATION: specific question` form.
+- Verification guidance used prose values in a few places instead of the file
+  contract enums.
+- The artifact-analysis skill, template, and delivery-planner stop conditions
+  lagged behind the full rule checklist.
+- Install guidance could be read as if the target `docs/workflow/` layout
+  already existed in this source repository.
+
+Actions:
+
+- Normalized clarification-marker guidance across entrypoints, principles,
+  request templates, lifecycle docs, and rules.
+- Normalized verification result wording to `passed`, `failed`, `blocked`,
+  `not_applicable`, and `risk_accepted`.
+- Brought artifact-analysis skill, lifecycle, delivery-brief template, and
+  Delivery Planner Agent stop conditions into alignment with
+  `rules/artifact-analysis.md`.
+- Clarified installation guidance to say the target project should create the
+  recommended layout.
+- Verified no stale source-path wording, placeholder markers, missing top-level
+  Markdown headings, or whitespace errors remain in the reviewed documents.

@@ -24,8 +24,9 @@ An agent should understand:
 - What is out of scope.
 - What proof will show success.
 
-When the request is ambiguous, mark it with `NEEDS CLARIFICATION: <specific
-question>`. Do not fill gaps with plausible guesses.
+When the request is ambiguous, use the exact marker
+`NEEDS CLARIFICATION: specific question`. Do not fill gaps with plausible
+guesses.
 
 ## 4. Work Should Be Bounded Before It Is Assigned
 
@@ -35,9 +36,9 @@ holding the whole project in context.
 
 ## 5. Risk Determines Process Weight
 
-Tiny work can move quickly. Normal work needs a brief and proof. High-risk work
-needs stronger design, review, verification, and human confirmation where
-needed.
+Tiny work can move quickly. Normal work needs a request, brief, task, review,
+verification, and trace. High-risk work needs stronger design, review,
+verification, and human confirmation where needed.
 
 ## 6. Agents Have Roles
 

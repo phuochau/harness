@@ -8,9 +8,9 @@ Convert a request into a delivery brief and task graph.
 
 - Request artifact.
 - Relevant product, architecture, and workflow docs.
-- `concept/templates/delivery-brief.md`
-- `concept/templates/task.md`
-- `concept/rules/artifact-analysis.md`
+- `templates/delivery-brief.md`
+- `templates/task.md`
+- `rules/artifact-analysis.md`
 
 ## Procedure
 
@@ -34,5 +34,6 @@ Convert a request into a delivery brief and task graph.
 
 - Every task traces to the brief.
 - Every acceptance criterion has proof.
+- Every brief requirement has a task or explicit non-goal.
 - No hidden high-risk work remains in a lower lane.
-
+- Parallel tasks have disjoint files, surfaces, or state.
