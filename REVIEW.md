@@ -108,7 +108,7 @@ Findings:
 Actions:
 
 - Added a Codex install section with minimum files, recommended `AGENTS.md`,
-  optional `.codex/skills/*` adapters, and an example adapter body.
+  optional `.agents/skills/*` adapters, and an example adapter body.
 - Added a Claude install section with minimum files, recommended `CLAUDE.md`,
   optional `.claude/commands/*` adapters, and an example command body.
 

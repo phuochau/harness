@@ -1,8 +1,8 @@
 # Copying This Workflow Into Another Project
 
 This workflow package is intentionally file-based. It does not require a CLI,
-database, hosted service, or specific coding agent. The Claude installer script
-only automates the file copy and adapter setup described below.
+database, hosted service, or specific coding agent. The Claude and Codex
+installer scripts only automate the file copy and adapter setup described below.
 
 ## Minimal Install
 
@@ -43,6 +43,46 @@ workflow exists.
 
 Do not make Codex, Claude, Cursor, or Copilot the source of truth. Add adapter
 files only after the base workflow works as plain repo files.
+
+## Install For Codex With The CLI
+
+From this workflow repository, run:
+
+```bash
+./scripts/install-codex-workflow.sh /path/to/codex-project
+```
+
+The installer creates:
+
+- `AGENTS.md`
+- `harness/`
+- `docs/delivery/templates/`
+- `docs/delivery/experiments/`
+- `experiments/README.md`
+- `.agents/skills/` Codex skill adapters
+
+The script refuses to overwrite existing installed files unless `--force` is
+provided:
+
+```bash
+./scripts/install-codex-workflow.sh --force /path/to/codex-project
+```
+
+Preview the planned writes without changing the target project:
+
+```bash
+./scripts/install-codex-workflow.sh --dry-run /path/to/codex-project
+```
+
+Skip Codex skill adapters when the target project only wants `AGENTS.md` and
+the workflow files:
+
+```bash
+./scripts/install-codex-workflow.sh --no-skills /path/to/codex-project
+```
+
+After install, review the generated `AGENTS.md` before mixing the workflow
+install with product code changes.
 
 ## Install For Claude With The CLI
 
@@ -87,7 +127,9 @@ the workflow install with product code changes.
 
 ## Install For Codex
 
-Codex can use the base install directly because it reads `AGENTS.md`.
+Codex can use the base install directly because it reads `AGENTS.md`. The
+installer above automates this install and, by default, adds repo-scoped Codex
+skill adapters under `.agents/skills`.
 
 Minimum Codex install:
 
@@ -129,18 +171,22 @@ through `harness/agents/orchestrator-agent.md`.
 Optional Codex skill adapters:
 
 ```text
-.codex/skills/intake/SKILL.md
-.codex/skills/next-step/SKILL.md
-.codex/skills/delivery-planner/SKILL.md
-.codex/skills/builder/SKILL.md
-.codex/skills/reviewer/SKILL.md
-.codex/skills/verifier/SKILL.md
-.codex/skills/historian/SKILL.md
+.agents/skills/intake/SKILL.md
+.agents/skills/next-step/SKILL.md
+.agents/skills/delivery-planner/SKILL.md
+.agents/skills/builder/SKILL.md
+.agents/skills/reviewer/SKILL.md
+.agents/skills/verifier/SKILL.md
+.agents/skills/historian/SKILL.md
 ```
 
 Each adapter should be small. It should point Codex back to the generic files
 under `harness/agents/`, `harness/skills/`, and
 `harness/rules/`.
+
+Codex plugins and marketplaces are the right distribution layer when the
+workflow should be packaged for broader sharing, bundled with MCP, or managed
+across a team. They are not required for a single target repository install.
 
 Example Codex adapter body:
 

@@ -66,8 +66,10 @@ AGENTS.md
 INSTALL.md
 scripts/
   install-claude-workflow.sh
+  install-codex-workflow.sh
 tests/
   install_claude_workflow_test.sh
+  install_codex_workflow_test.sh
 agents/
   orchestrator-agent.md
   intake-agent.md

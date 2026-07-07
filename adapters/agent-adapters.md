@@ -34,18 +34,22 @@ workflow file and record the adapter mismatch in the trace or review note.
 Possible files in a target project:
 
 ```text
-.codex/skills/intake/SKILL.md              wraps harness/skills/intake.md
-.codex/skills/next-step/SKILL.md           wraps harness/skills/next-step.md
-.codex/skills/delivery-planner/SKILL.md    wraps harness/skills/delivery-brief.md and task-planning.md
-.codex/skills/builder/SKILL.md             wraps harness/agents/builder-agent.md
-.codex/skills/reviewer/SKILL.md            wraps harness/skills/review.md
-.codex/skills/verifier/SKILL.md            wraps harness/skills/verification.md
-.codex/skills/historian/SKILL.md           wraps harness/skills/trace.md
+.agents/skills/intake/SKILL.md              wraps harness/skills/intake.md
+.agents/skills/next-step/SKILL.md           wraps harness/skills/next-step.md
+.agents/skills/delivery-planner/SKILL.md    wraps harness/skills/delivery-brief.md and task-planning.md
+.agents/skills/builder/SKILL.md             wraps harness/agents/builder-agent.md
+.agents/skills/reviewer/SKILL.md            wraps harness/skills/review.md
+.agents/skills/verifier/SKILL.md            wraps harness/skills/verification.md
+.agents/skills/historian/SKILL.md           wraps harness/skills/trace.md
 ```
 
 Each Codex skill should read `AGENTS.md`, `harness/HOW_TO_USE.md`, the
 relevant files under `harness/agents/`, `harness/skills/`, and
 `harness/rules/`, then the assigned artifact path before acting.
+
+Use repo-scoped `.agents/skills` for checked-in project adapters. Package these
+skills as a Codex plugin only when the workflow needs marketplace distribution,
+bundled MCP, hooks, or team-level sharing.
 
 ## Claude Adapter
 
