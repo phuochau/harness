@@ -11,5 +11,7 @@ These rules apply to all work.
 7. Preserve existing user changes.
 8. Do not expand scope during implementation.
 9. Do not claim completion without proof.
-10. Do not let production code import from `experiments/`.
-11. Record trace and friction when work changes the project or workflow.
+10. Follow test-first implementation for production code unless an exception is
+    recorded.
+11. Do not let production code import from `experiments/`.
+12. Record trace and friction when work changes the project or workflow.

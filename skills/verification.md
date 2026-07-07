@@ -11,7 +11,9 @@ Use before claiming work is complete.
    `risk_accepted`.
 5. If blocked, record exact command/check, reason, risk, and next-best
    evidence.
-6. For experiments, confirm the proof supports the experiment result:
+6. For production implementation, include TDD evidence or the recorded
+   exception when it affects the completion claim.
+7. For experiments, confirm the proof supports the experiment result:
    `proven`, `disproven`, `inconclusive`, or `blocked`.
 
 ## Output

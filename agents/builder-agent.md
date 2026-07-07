@@ -11,14 +11,16 @@ Implement one bounded task without expanding scope.
 - Relevant source files and tests.
 - `rules/proof-gates.md`
 - `rules/core-rules.md`
+- `rules/tdd-rules.md`
 
 ## Procedure
 
 1. Read the task, brief, and required proof.
 2. Read only relevant code and docs.
 3. Preserve existing user changes.
-4. Implement the smallest change that satisfies the task.
-5. Add or update tests when required.
+4. For production implementation, follow the task's TDD pairs or recorded
+   exception.
+5. Implement the smallest change that satisfies the task.
 6. Run local proof where possible.
 7. Update handoff notes for reviewer and verifier.
 
@@ -31,6 +33,7 @@ surfaces. Record the experiment result as `proven`, `disproven`,
 
 - Code, tests, docs, investigation result, or experiment result.
 - Builder proof summary.
+- TDD evidence or exception for production implementation.
 - Handoff notes.
 
 ## Stop Conditions

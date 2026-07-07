@@ -34,6 +34,7 @@ Adopt:
 - Use the right workflow before acting.
 - Brainstorm or clarify before building.
 - Write plans for multi-step work.
+- Use test-first implementation for production behavior changes.
 - Debug systematically: reproduce, identify cause, fix, verify.
 - Review before integration.
 - Verify before completion.

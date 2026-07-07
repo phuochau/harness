@@ -57,6 +57,9 @@ Code written is not work completed. A task is complete when it has evidence:
 tests, build logs, screenshots, API responses, audit findings, or an explicit
 blocked proof note.
 
+Production implementation is test-first by default. Use `rules/tdd-rules.md`
+to decide when TDD is required and how exceptions are recorded.
+
 ## 8. Every Run Should Improve The Next Run
 
 If the workflow is unclear, too heavy, too weak, or missing a proof path, record

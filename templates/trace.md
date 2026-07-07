@@ -45,6 +45,7 @@ What happened in this run.
 ## Proof Collected
 
 - Verification note, command, or evidence summary.
+- TDD evidence or exception for production implementation.
 
 ## Review Result
 

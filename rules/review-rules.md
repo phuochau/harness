@@ -9,6 +9,8 @@ Review must check:
 - Are non-goals preserved?
 - Are behavior, API, data, and security contracts preserved?
 - Is proof present and relevant?
+- For production implementation, is TDD evidence present or is an exception
+  recorded?
 - For experiments, is the production boundary preserved?
 - Is there hidden high-risk work?
 - Are follow-up risks explicit?

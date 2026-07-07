@@ -64,6 +64,7 @@ Risk lane and reason.
 
 - No unresolved clarification markers:
 - Every acceptance criterion has proof:
+- Production implementation tasks have TDD pairs or a recorded exception:
 - Every task traces to the brief:
 - Every brief requirement has a task or explicit non-goal:
 - High-risk work is not hidden in a lower lane:

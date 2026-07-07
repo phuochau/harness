@@ -253,3 +253,47 @@ Actions:
 - Changed the experiment template default status to `ready`.
 - Aligned handoff, builder, planner, reviewer, task, README, install, and
   experiment-folder docs with the experiment workflow.
+
+## Review Loop 14
+
+Findings:
+
+- The workflow required proof before completion, but did not make TDD the
+  default for production implementation.
+- Task planning did not have a standard place to name test/implementation
+  pairs.
+- Builder, reviewer, verifier, handoff, and trace docs could record proof
+  without recording whether production code was test-first or had an exception.
+- Experiments needed to stay separate from production TDD so proof-of-concept
+  code remains lightweight and bounded.
+
+Actions:
+
+- Added `rules/tdd-rules.md` as the source of truth for test-first production
+  implementation, exceptions, UI/manual surfaces, and legacy or untestable
+  surfaces.
+- Updated planning, artifact analysis, task, builder, reviewer, verifier,
+  handoff, verification, and trace docs to reference TDD pairs or recorded
+  exceptions.
+- Updated README, INSTALL, AGENTS, lifecycle, principles, file contracts, and
+  adapters so copied workflows include the TDD rule.
+- Kept experiment code exempt from strict production TDD while still requiring
+  experiment proof and production-boundary review.
+
+## Review Loop 15
+
+Findings:
+
+- A full-document review after adding the TDD rule found lifecycle summaries
+  that still described plain build work instead of build-under-TDD work.
+- The Verifier Agent recorded TDD evidence but did not list `rules/tdd-rules.md`
+  as an input.
+- The Historian Agent recorded proof gaps but did not explicitly preserve TDD
+  evidence or exceptions in trace.
+
+Actions:
+
+- Updated README and lifecycle summaries to say build work runs under TDD.
+- Added `rules/tdd-rules.md` to Verifier and Historian inputs.
+- Updated Historian procedure to record TDD evidence or exceptions for
+  production implementation.

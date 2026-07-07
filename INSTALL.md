@@ -72,6 +72,7 @@ This repository uses an agentic delivery workflow. Before changing code, read:
 - `docs/workflow/rules/orchestration-rules.md`
 - `docs/workflow/rules/risk-lanes.md`
 - `docs/workflow/rules/proof-gates.md`
+- `docs/workflow/rules/tdd-rules.md`
 - `docs/workflow/rules/artifact-analysis.md`
 - `docs/workflow/rules/handoff-rules.md`
 
@@ -151,6 +152,7 @@ Before changing code, read:
 - `docs/workflow/rules/orchestration-rules.md`
 - `docs/workflow/rules/risk-lanes.md`
 - `docs/workflow/rules/proof-gates.md`
+- `docs/workflow/rules/tdd-rules.md`
 - `docs/workflow/rules/artifact-analysis.md`
 - `docs/workflow/rules/handoff-rules.md`
 
@@ -199,13 +201,14 @@ pause, escalate, or ask the human one concrete question.
 5. Choose agent roles from `docs/workflow/agents/`.
 6. Run the matching skills from `docs/workflow/skills/`.
 7. Enforce rules from `docs/workflow/rules/`.
-8. If the next step is unclear, use the Orchestrator Agent and next-step skill.
-9. For proof-of-concept work, write the experiment artifact under
+8. For production implementation, follow `docs/workflow/rules/tdd-rules.md`.
+9. If the next step is unclear, use the Orchestrator Agent and next-step skill.
+10. For proof-of-concept work, write the experiment artifact under
    `docs/delivery/experiments/`.
-10. Store experiment code in `experiments/` unless the user, brief, or task
+11. Store experiment code in `experiments/` unless the user, brief, or task
    names another location.
-11. Review and verify before completion.
-12. Write a trace.
+12. Review and verify before completion.
+13. Write a trace.
 
 ## Suggested First Commit
 

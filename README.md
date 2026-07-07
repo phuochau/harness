@@ -69,6 +69,7 @@ rules/
   orchestration-rules.md
   risk-lanes.md
   proof-gates.md
+  tdd-rules.md
   artifact-analysis.md
   review-rules.md
   handoff-rules.md
@@ -107,7 +108,7 @@ Request
   -> Artifact analysis
   -> Orchestrator routing when needed
   -> Agent assignment
-  -> Build, investigate, or experiment
+  -> Build under TDD, investigate, or experiment
   -> Review
   -> Verify
   -> Trace and learn
@@ -124,8 +125,9 @@ This workflow package intentionally adopts a few proven patterns:
 - From Spec Kit: keep intent and specifications ahead of implementation, mark
   ambiguity instead of guessing, use project principles as gates, split work by
   independently testable scenarios, and analyze artifacts before execution.
-- From Superpowers: require the right workflow before action, make planning and
-  debugging explicit, review before integration, and verify before completion.
+- From Superpowers: require the right workflow before action, make planning,
+  test-first implementation, and debugging explicit, review before integration,
+  and verify before completion.
 - From repository-harness: use repo-local instructions, classify risk, require
   validation proof, preserve decisions, and leave traces that help the next
   agent.

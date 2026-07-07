@@ -44,6 +44,9 @@ Choose one:
 
 Summarize relevant output or link to artifacts.
 
+For production implementation, include TDD evidence or the recorded exception
+when it affects the completion claim.
+
 For experiments, state whether the evidence supports `proven`, `disproven`,
 `inconclusive`, or `blocked`.
 

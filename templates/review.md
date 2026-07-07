@@ -48,6 +48,9 @@ Does the work match the delivery brief and task?
 
 Was required proof provided?
 
+For production implementation, was TDD evidence provided or was an exception
+recorded?
+
 ## Risk Check
 
 - Correct lane:

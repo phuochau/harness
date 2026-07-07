@@ -10,6 +10,7 @@ Adapters may:
 - Point the agent to the workflow files.
 - Wrap a role as a command, skill, or prompt.
 - Enforce proof gates.
+- Enforce the TDD rule.
 - Render task summaries.
 
 Adapters must not:
@@ -60,6 +61,7 @@ Possible files:
 .cursor/rules/delivery.mdc      mirrors docs/workflow/HOW_TO_USE.md
 .cursor/rules/agents.mdc        mirrors docs/workflow/agents/
 .cursor/rules/proof-gates.mdc   mirrors docs/workflow/rules/proof-gates.md
+.cursor/rules/tdd.mdc           mirrors docs/workflow/rules/tdd-rules.md
 ```
 
 Cursor rules should keep the same lifecycle and role names.
@@ -83,4 +85,5 @@ Any agent can use this prompt:
 Read AGENTS.md, then read the workflow files it names and the assigned artifact
 path. Identify your assigned role. Do only the work allowed by that role.
 Before completion, write or update the required proof and trace files.
+For production implementation, follow the TDD pairs or record the exception.
 ```

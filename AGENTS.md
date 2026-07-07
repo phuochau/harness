@@ -14,6 +14,7 @@ Before changing code, read:
 - `rules/orchestration-rules.md`
 - `rules/risk-lanes.md`
 - `rules/proof-gates.md`
+- `rules/tdd-rules.md`
 - `rules/artifact-analysis.md`
 - `rules/handoff-rules.md`
 
@@ -37,9 +38,11 @@ If you do not know what should happen next, use
 4. Use local files as the source of truth.
 5. Keep task files small enough for one agent to complete and verify.
 6. Record proof before saying work is complete.
-7. If a decision changes future work, write a decision record.
-8. If the workflow was confusing or insufficient, record that in the trace.
-9. If the next step is unclear, ask the Orchestrator Agent instead of guessing.
+7. Follow test-first implementation for production code unless an exception is
+   recorded.
+8. If a decision changes future work, write a decision record.
+9. If the workflow was confusing or insufficient, record that in the trace.
+10. If the next step is unclear, ask the Orchestrator Agent instead of guessing.
 
 ## Agent Handoff
 
@@ -50,6 +53,7 @@ When handing work to another agent, provide:
 - The expected role.
 - The risk lane.
 - The proof required.
+- The TDD pairs or recorded TDD exception for production implementation.
 - Any blockers or assumptions.
 - The experiment artifact and storage path when the task type is `experiment`.
 

@@ -136,6 +136,12 @@ Experiment code is not production code. Production code must not import from
 `experiments/`. If experiment code should become part of the product, create
 normal implementation tasks and pass it through review, verification, and trace.
 
+## TDD Pair Convention
+
+Production implementation tasks must record TDD pairs using the structure in
+`templates/task.md`. If TDD does not apply, record the exception and replacement
+proof according to `rules/tdd-rules.md`.
+
 ## Agent-Neutral Rule
 
 Do not make a task depend on a specific agent runtime unless the task is about

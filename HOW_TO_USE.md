@@ -22,9 +22,10 @@ Use this order for any flow:
 2. Choose the smallest fitting flow.
 3. Classify the risk lane.
 4. Create only the artifacts the lane needs.
-5. Assign a role and skill for the next step.
-6. Verify proof before completion.
-7. Trace what happened and what should be learned.
+5. Apply `rules/tdd-rules.md` for production implementation.
+6. Assign a role and skill for the next step.
+7. Verify proof before completion.
+8. Trace what happened and what should be learned.
 
 Do not create a new named flow when a standard flow plus a small variation is
 enough. Do create a new named flow when the same pattern repeats and has its own
@@ -40,7 +41,7 @@ Request
   -> Artifact analysis when tasks exist
   -> Orchestrator routing when needed
   -> Agent assignment
-  -> Build / investigate / experiment / review / verify
+  -> Build under TDD / investigate / experiment / review / verify
   -> Trace
 ```
 
@@ -155,7 +156,7 @@ Preserve current behavior first.
 5. Run `skills/task-planning.md`.
 6. Run artifact analysis from `rules/artifact-analysis.md`.
 7. Assign Builder, Reviewer, Verifier, and Historian agents.
-8. Build, review, verify, and trace.
+8. Build under `rules/tdd-rules.md`, then review, verify, and trace.
 
 Do not expand feature scope during implementation.
 
@@ -165,7 +166,7 @@ Do not expand feature scope during implementation.
 2. Capture expected behavior, actual behavior, and reproduction steps.
 3. Reproduce the bug or document why reproduction is blocked.
 4. Identify root cause before editing.
-5. Add failing proof where practical.
+5. Add failing proof before the production fix where practical.
 6. Apply the smallest safe fix.
 7. Add regression proof.
 8. Review, verify, and trace.

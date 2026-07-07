@@ -10,7 +10,7 @@ Request
   -> Artifact analysis
   -> Orchestrator routing when needed
   -> Agent assignment
-  -> Build, investigate, or experiment
+  -> Build under TDD, investigate, or experiment
   -> Review
   -> Verify
   -> Trace and learn
@@ -75,6 +75,7 @@ Before implementation, review the request, brief, and task files for:
 
 - Unresolved clarification markers.
 - Acceptance criteria without proof.
+- Production implementation tasks without TDD pairs or a recorded exception.
 - Tasks that do not trace to the brief.
 - Brief requirements with no task or explicit non-goal.
 - High-risk work hidden inside normal or tiny tasks.
@@ -113,6 +114,7 @@ The assigned agent works inside the task boundary.
 The agent should:
 
 - Read the brief and task.
+- Follow `rules/tdd-rules.md` for production implementation.
 - Read only the relevant code and docs.
 - Avoid unrelated refactors.
 - Preserve user changes.

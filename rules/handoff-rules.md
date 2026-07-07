@@ -8,6 +8,7 @@ Every handoff must include:
 - Risk lane.
 - Current status.
 - Required proof.
+- TDD evidence or exception for production implementation.
 - Blockers or assumptions.
 - Files or surfaces already touched.
 - Experiment artifact and storage path when the task type is `experiment`.

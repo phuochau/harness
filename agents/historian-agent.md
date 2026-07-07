@@ -14,6 +14,7 @@ Preserve what future humans and agents need to know.
 - Final diff summary.
 - `templates/trace.md`
 - `templates/decision.md`
+- `rules/tdd-rules.md`
 
 ## Procedure
 
@@ -21,7 +22,8 @@ Preserve what future humans and agents need to know.
 2. Record files or surfaces read.
 3. Record files or surfaces changed.
 4. Link source artifacts: request, brief, tasks, review, verification.
-5. Record proof collected and proof gaps.
+5. Record proof collected and proof gaps, including TDD evidence or exception
+   for production implementation.
 6. Record remaining risk and follow-up work.
 7. For experiments, record the result and whether the experiment is discarded,
    revised, repeated, or promoted into normal implementation tasks.

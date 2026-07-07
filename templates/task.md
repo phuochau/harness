@@ -48,6 +48,13 @@ What the assigned agent must not change.
 2. Step two.
 3. Step three.
 
+For production implementation tasks, list TDD pairs or record the exception:
+
+- Failing proof:
+- Production behavior:
+- Red command or check:
+- Green command or check:
+
 ## Proof Required
 
 - Proof item.
@@ -63,6 +70,8 @@ files or surfaces it owns.
 ## Handoff Notes
 
 Notes for reviewer, verifier, or next task.
+
+For production implementation, include TDD evidence or the recorded exception.
 
 ## Blockers
 
