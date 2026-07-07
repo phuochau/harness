@@ -6,6 +6,13 @@ Use red-green-refactor for production code that adds behavior, changes
 behavior, fixes a bug, refactors behavior-preserving code, changes data or API
 contracts, or changes configuration that affects runtime behavior.
 
+This file intentionally reads differently from short gate-only rule files. TDD
+is both a rule and an execution cycle: it decides when test-first work is
+required, how the cycle runs, when exceptions are allowed, and what reviewers
+and verifiers must check. It is still a rule file, not a flow recipe. Choose the
+flow in `HOW_TO_USE.md`; use this file when that flow touches production
+implementation.
+
 ## Required Cycle
 
 1. Write the smallest automated proof for the next behavior.

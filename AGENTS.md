@@ -23,11 +23,24 @@ The examples are not exhaustive. If the work does not fit cleanly, use the
 next-step skill and Orchestrator Agent.
 
 Then choose the assigned role from `agents/` and the matching skill
-from `skills/`.
+from `skills/`. Use the role, skill, and rule map in `HOW_TO_USE.md` when the
+artifact does not already name the owner.
 
 If you do not know what should happen next, use
 `skills/next-step.md` and route through
 `agents/orchestrator-agent.md`.
+
+## Folder Responsibilities
+
+- `workflow/` explains the model: lifecycle, principles, file contracts, and
+  influence map.
+- `HOW_TO_USE.md` chooses the flow, role, skill, and rule set.
+- `agents/` defines role ownership and stop conditions.
+- `skills/` defines procedures a role runs.
+- `rules/` defines gates and constraints that apply across roles and flows.
+- `templates/` defines artifacts that carry state between agents.
+- `adapters/` contains optional runtime wrappers only; adapters are never the
+  source of truth.
 
 ## Operating Rules
 
@@ -43,6 +56,9 @@ If you do not know what should happen next, use
 8. If a decision changes future work, write a decision record.
 9. If the workflow was confusing or insufficient, record that in the trace.
 10. If the next step is unclear, ask the Orchestrator Agent instead of guessing.
+11. For docs-only, research, experiment, generated, pure markup, or non-runtime
+    configuration work, record the TDD exception and replacement proof described
+    in `rules/tdd-rules.md`.
 
 ## Agent Handoff
 

@@ -29,12 +29,15 @@ Use when an agent or human does not know what should happen next.
    - Historian Agent
    - Orchestrator Agent
 6. Choose the next skill.
-7. If a human decision is needed, ask one concrete question.
-8. Record the routing note.
+7. Choose the rule files the next role must apply, using the role/skill/rule
+   map in `HOW_TO_USE.md`.
+8. If a human decision is needed, ask one concrete question.
+9. Record the routing note.
 
 ## Output
 
 - Next role.
 - Next skill.
+- Rule files to apply.
 - Next artifact.
 - Continue, pause, escalate, or ask-human decision.

@@ -3,16 +3,57 @@
 This guide explains how to choose and compose flows. The reusable building
 blocks live in:
 
-- `agents/`: role prompts for agents.
-- `skills/`: repeatable workflow skills.
-- `rules/`: enforceable operating rules.
+- `workflow/`: the shared model, lifecycle, principles, and file contracts.
+- `agents/`: role prompts that define ownership and stop conditions.
+- `skills/`: repeatable procedures used by roles.
+- `rules/`: enforceable gates and constraints that apply across flows.
 - `templates/`: artifact templates.
+- `adapters/`: optional wrappers for specific agent runtimes.
 
 The examples below are not the only possible flows. They are common operating
 patterns built from the same agents, skills, rules, and templates.
 
 When the next step is unclear, use `skills/next-step.md` and ask the
 Orchestrator Agent.
+
+## Building Block Boundaries
+
+Use each folder for its own purpose:
+
+| Folder | Owns | Does Not Own |
+| --- | --- | --- |
+| `workflow/` | Canonical lifecycle, principles, file contracts, and influence map | Runtime-specific instructions |
+| `HOW_TO_USE.md` | Flow selection and composition guidance | Role-specific stop conditions |
+| `agents/` | Role ownership, inputs, outputs, and stop conditions | Full flow recipes |
+| `skills/` | Step-by-step procedures for common workflow actions | Risk acceptance or completion claims |
+| `rules/` | Cross-cutting gates such as risk lanes, proof, TDD, review, and handoff | A standalone delivery lifecycle |
+| `templates/` | Request, brief, task, review, verification, trace, decision, and experiment file shapes | Runtime behavior |
+| `adapters/` | Optional Codex, Claude, Cursor, Copilot, or generic wrappers | Source-of-truth workflow rules |
+
+Rules can contain procedures when the gate itself requires a cycle. For example,
+`rules/tdd-rules.md` includes red-green-refactor steps because TDD is both a
+constraint and the required way to prove production behavior changes.
+
+## Role, Skill, And Rule Map
+
+Choose the role that owns the next decision, then run the matching skill.
+`rules/core-rules.md` and the chosen risk lane apply to every role; the table
+lists the role-specific additions.
+
+| Situation | Role | Skill | Role-Specific Rules |
+| --- | --- | --- | --- |
+| Raw request or unclear outcome | Intake Agent | `skills/intake.md` | `rules/risk-lanes.md` |
+| Next step, owner, lane, proof, or escalation unclear | Orchestrator Agent | `skills/next-step.md` | `rules/orchestration-rules.md`, `rules/handoff-rules.md` |
+| Brief or task graph needed | Delivery Planner Agent | `skills/delivery-brief.md`, then `skills/task-planning.md` | `rules/artifact-analysis.md`, `rules/tdd-rules.md`, `rules/proof-gates.md` |
+| Code, docs, investigation, or experiment task ready | Builder Agent | Task-specific skill or task instructions | `rules/proof-gates.md`, `rules/tdd-rules.md` |
+| Change needs independent review | Reviewer Agent | `skills/review.md` | `rules/review-rules.md`, `rules/tdd-rules.md`, `rules/proof-gates.md` |
+| Completion proof needed | Verifier Agent | `skills/verification.md` | `rules/proof-gates.md`, `rules/tdd-rules.md` |
+| Security-sensitive audit or task | Security Agent | `skills/security-audit.md` | `rules/risk-lanes.md`, `rules/proof-gates.md` |
+| Acceptance or release quality check | QA Agent | `skills/qa.md` | `rules/proof-gates.md`, `rules/risk-lanes.md` |
+| Work needs trace, decision, or learning record | Historian Agent | `skills/trace.md` | `rules/tdd-rules.md`, `rules/handoff-rules.md` |
+
+If the table does not fit the situation, run `skills/next-step.md` and route
+through the Orchestrator Agent instead of guessing.
 
 ## Clean Approach
 
@@ -23,13 +64,17 @@ Use this order for any flow:
 3. Classify the risk lane.
 4. Create only the artifacts the lane needs.
 5. Apply `rules/tdd-rules.md` for production implementation.
-6. Assign a role and skill for the next step.
+6. Assign a role and skill using the map above.
 7. Verify proof before completion.
 8. Trace what happened and what should be learned.
 
 Do not create a new named flow when a standard flow plus a small variation is
 enough. Do create a new named flow when the same pattern repeats and has its own
 entry conditions, roles, proof, or risks.
+
+Flow recipes name the common path. Risk lanes decide how much artifact,
+review, and proof weight that path needs. If they seem to conflict, follow the
+higher process weight and ask the Orchestrator Agent to record the routing note.
 
 ## Standard Loop
 

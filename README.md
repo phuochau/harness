@@ -32,6 +32,30 @@ Any agent can participate if it can:
 
 Agent-specific tools are adapters, not the source of truth.
 
+## How The Pieces Fit Together
+
+The folders have different jobs:
+
+- `HOW_TO_USE.md` is the dispatcher. It helps an agent choose the flow family,
+  risk lane, role, skill, and proof path for the current request.
+- `workflow/` defines the shared model: lifecycle, principles, file contracts,
+  and influence map. These files explain how the system works.
+- `agents/` defines role contracts. A role says who owns the next decision or
+  task, what inputs it must read, and when it must stop.
+- `skills/` defines repeatable procedures. A skill says how a role performs a
+  specific workflow action.
+- `rules/` defines gates and constraints that apply across flows. Rules do not
+  replace workflows; they decide whether a flow step is ready, safe, reviewed,
+  or complete.
+- `templates/` defines the artifacts agents write so work can move between
+  roles.
+- `adapters/` explains optional runtime wrappers for Codex, Claude, Cursor,
+  Copilot, or another agent. Adapters point back to the repository files; they
+  must not become a second workflow.
+- `REVIEW.md` records alignment reviews of this workflow package.
+- `experiments/` is only for bounded proof-of-concept code, never production
+  dependencies.
+
 ## Folder Shape
 
 ```text
@@ -147,5 +171,5 @@ Then use the concrete building blocks:
 - Ask `agents/orchestrator-agent.md` when the next step is unclear.
 - Pick an agent role from `agents/`.
 - Run the matching skill from `skills/`.
-- Enforce the rules in `rules/`.
+- Enforce the role's required rules from `rules/`.
 - Write artifacts from `templates/`.

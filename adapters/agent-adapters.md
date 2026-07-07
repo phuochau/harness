@@ -3,6 +3,12 @@
 The workflow source of truth is the repository files. Agent-specific adapters
 should only help an agent follow those files.
 
+An adapter is optional glue for one runtime. It can turn a generic role or skill
+into a Codex skill, Claude command, Cursor rule, Copilot instruction, or another
+agent-specific prompt. The adapter may improve ergonomics, but the lifecycle,
+roles, rules, artifacts, and completion criteria still come from the local
+workflow files.
+
 ## Adapter Rule
 
 Adapters may:
@@ -19,6 +25,9 @@ Adapters must not:
 - Hide state outside the repository.
 - Make completion claims without writing proof.
 - Replace the local workflow files as the source of truth.
+
+When an adapter and a repository workflow file disagree, follow the repository
+workflow file and record the adapter mismatch in the trace or review note.
 
 ## Codex Adapter
 

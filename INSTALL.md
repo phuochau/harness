@@ -77,7 +77,9 @@ This repository uses an agentic delivery workflow. Before changing code, read:
 - `docs/workflow/rules/handoff-rules.md`
 
 Choose a role from `docs/workflow/agents/`, run the matching skill from
-`docs/workflow/skills/`, and write artifacts from `docs/delivery/templates/`.
+`docs/workflow/skills/`, and use the role/skill/rule map in
+`docs/workflow/HOW_TO_USE.md` when the artifact does not already name the
+owner. Write artifacts from `docs/delivery/templates/`.
 If the next step is unclear, use `docs/workflow/skills/next-step.md` and route
 through `docs/workflow/agents/orchestrator-agent.md`.
 ```
@@ -158,7 +160,9 @@ Before changing code, read:
 
 Use roles from `docs/workflow/agents/`, skills from `docs/workflow/skills/`,
 rules from `docs/workflow/rules/`, and templates from
-`docs/delivery/templates/`.
+`docs/delivery/templates/`. Use the role/skill/rule map in
+`docs/workflow/HOW_TO_USE.md` when the artifact does not already name the
+owner.
 
 If the next step is unclear, use `docs/workflow/skills/next-step.md` and ask
 the Orchestrator Agent in `docs/workflow/agents/orchestrator-agent.md`.
@@ -200,15 +204,16 @@ pause, escalate, or ask the human one concrete question.
 4. For normal or high-risk work, create a delivery brief.
 5. Choose agent roles from `docs/workflow/agents/`.
 6. Run the matching skills from `docs/workflow/skills/`.
-7. Enforce rules from `docs/workflow/rules/`.
-8. For production implementation, follow `docs/workflow/rules/tdd-rules.md`.
-9. If the next step is unclear, use the Orchestrator Agent and next-step skill.
-10. For proof-of-concept work, write the experiment artifact under
+7. Use the role/skill/rule map in `docs/workflow/HOW_TO_USE.md`.
+8. Enforce rules from `docs/workflow/rules/`.
+9. For production implementation, follow `docs/workflow/rules/tdd-rules.md`.
+10. If the next step is unclear, use the Orchestrator Agent and next-step skill.
+11. For proof-of-concept work, write the experiment artifact under
    `docs/delivery/experiments/`.
-11. Store experiment code in `experiments/` unless the user, brief, or task
+12. Store experiment code in `experiments/` unless the user, brief, or task
    names another location.
-12. Review and verify before completion.
-13. Write a trace.
+13. Review and verify before completion.
+14. Write a trace.
 
 ## Suggested First Commit
 

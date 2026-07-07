@@ -297,3 +297,47 @@ Actions:
 - Added `rules/tdd-rules.md` to Verifier and Historian inputs.
 - Updated Historian procedure to record TDD evidence or exceptions for
   production implementation.
+
+## Review Loop 16
+
+Findings:
+
+- User feedback showed agents could still miss the relationship between roles,
+  skills, and rules.
+- `workflow/`, `rules/`, and `adapters/` were defined in separate places, but
+  the entrypoints did not provide one concise ownership map.
+- The flow recipes in `HOW_TO_USE.md` named primary skills, while risk-lane
+  rules defined required artifact weight; without a bridge, rules could look
+  like competing workflows.
+- `rules/tdd-rules.md` intentionally included a cycle, but did not explain why
+  it was more procedural than the shorter rule files.
+
+Actions:
+
+- Added building-block boundaries and a role/skill/rule map to
+  `HOW_TO_USE.md`.
+- Added folder responsibility guidance to `README.md` and `AGENTS.md`.
+- Updated `INSTALL.md` sample agent instructions and first-use checklist to
+  point target projects at the same role/skill/rule map.
+- Updated the Orchestrator Agent and next-step skill so routing returns the
+  rule files to apply, not only the role and skill.
+- Clarified that flow recipes name common paths while risk lanes decide the
+  required process weight.
+- Clarified that adapters are optional runtime glue and cannot override local
+  workflow files.
+- Clarified that `rules/tdd-rules.md` is both a gate and execution cycle, not a
+  competing flow recipe.
+- Recorded the docs-only TDD exception here; replacement proof is Markdown
+  consistency checks and targeted searches for stale or contradictory wording.
+
+Proof:
+
+- `git diff --check` passed with no whitespace errors.
+- `rg -n 'TO[D]O|TB[D]|FIX[M]E' .` found no active placeholder markers.
+- Top-level-heading check over root, agent, skill, rule, workflow, adapter,
+  template, and experiment Markdown files found no missing `#` heading.
+- Targeted searches confirmed new guidance exists for folder responsibilities,
+  building-block boundaries, the role/skill/rule map, adapter ownership, and
+  the TDD rule's procedural shape.
+- Targeted searches confirmed Orchestrator and next-step routing now include
+  rule files to apply.

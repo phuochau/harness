@@ -33,16 +33,18 @@ role assignment, escalation, and pause decisions.
 2. Identify the current artifact and status.
 3. Identify the missing decision.
 4. Choose the next skill, role, or stop condition.
-5. If risk is uncertain, choose the higher lane until clarified.
-6. If multiple tasks can run safely in parallel, identify owners and disjoint
+5. Choose the rule files the next role must apply.
+6. If risk is uncertain, choose the higher lane until clarified.
+7. If multiple tasks can run safely in parallel, identify owners and disjoint
    surfaces.
-7. If human input is required, ask one concrete question.
-8. Write a short routing note in the current artifact or trace.
+8. If human input is required, ask one concrete question.
+9. Write a short routing note in the current artifact or trace.
 
 ## Output
 
 - Next role.
 - Next skill.
+- Rule files to apply.
 - Required artifact.
 - Whether work should continue, pause, escalate, or ask the human.
 - Parallelization recommendation when relevant.
@@ -52,4 +54,3 @@ role assignment, escalation, and pause decisions.
 - The next step is clear enough for a role agent to act.
 - A specific human question is required.
 - Work should pause because risk, scope, or proof is not acceptable.
-
