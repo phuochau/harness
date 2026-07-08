@@ -40,6 +40,8 @@ Possible files in a target project:
 .agents/skills/build/SKILL.md           wraps harness/agents/builder-agent.md
 .agents/skills/review/SKILL.md          wraps harness/skills/review.md
 .agents/skills/verify/SKILL.md          wraps harness/skills/verification.md
+.agents/skills/qa/SKILL.md              wraps harness/skills/qa.md
+.agents/skills/security/SKILL.md        wraps harness/skills/security-audit.md
 .agents/skills/trace/SKILL.md           wraps harness/skills/trace.md
 ```
 
@@ -63,6 +65,8 @@ CLAUDE.md
 .claude/commands/build.md           wraps harness/agents/builder-agent.md
 .claude/commands/review.md          wraps harness/skills/review.md
 .claude/commands/verify.md          wraps harness/skills/verification.md
+.claude/commands/qa.md              wraps harness/skills/qa.md
+.claude/commands/security.md        wraps harness/skills/security-audit.md
 .claude/commands/trace.md           wraps harness/skills/trace.md
 ```
 

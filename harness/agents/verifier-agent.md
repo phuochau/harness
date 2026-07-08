@@ -10,7 +10,10 @@ Collect proof that the work satisfies the delivery brief.
 - Task.
 - Review artifact.
 - Required proof.
+- `harness/skills/verification.md`
 - `docs/delivery/templates/verification.md`
+- `harness/rules/core-rules.md`
+- `harness/rules/risk-lanes.md`
 - `harness/rules/proof-gates.md`
 - `harness/rules/tdd-rules.md`
 

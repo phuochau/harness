@@ -167,7 +167,7 @@ install_harness_tree() {
 # only difference is how it is wrapped: a Claude slash command or a Codex skill.
 # ---------------------------------------------------------------------------
 
-ADAPTER_SLUGS='intake next-step plan-delivery build review verify trace'
+ADAPTER_SLUGS='intake next-step plan-delivery build review verify qa security trace'
 
 adapter_desc() {
   case "$1" in
@@ -177,6 +177,8 @@ adapter_desc() {
     build)         echo 'Use when assigned a ready build, docs, investigation, or experiment task.' ;;
     review)        echo 'Use before integration or completion to review scope, proof, risk, and contracts.' ;;
     verify)        echo 'Use before claiming completion to run proof and record verification status.' ;;
+    qa)            echo 'Use to validate a feature, release, or bug fix against acceptance criteria.' ;;
+    security)      echo 'Use for a security audit or a security-sensitive change.' ;;
     trace)         echo 'Use at the end of work to write trace notes, decisions, and proof gaps.' ;;
   esac
 }
@@ -189,6 +191,8 @@ adapter_title() {
     build)         echo 'Build' ;;
     review)        echo 'Review' ;;
     verify)        echo 'Verify' ;;
+    qa)            echo 'QA' ;;
+    security)      echo 'Security Audit' ;;
     trace)         echo 'Trace' ;;
   esac
 }
@@ -297,6 +301,39 @@ Read:
 
 Run the relevant proof and record `passed`, `failed`, `blocked`,
 `not_applicable`, or `risk_accepted`.
+EOF
+    ;;
+    qa) cat <<'EOF'
+Use to validate a feature, release, or bug fix against acceptance criteria.
+
+Read:
+
+- `AGENTS.md`
+- `harness/HOW_TO_USE.md`
+- `harness/agents/qa-agent.md`
+- `harness/skills/qa.md`
+- `harness/rules/proof-gates.md`
+- `harness/rules/risk-lanes.md`
+- `docs/delivery/templates/verification.md`
+
+Start from the delivery brief, turn acceptance criteria into checks, run them,
+and record `passed`, `failed`, `blocked`, `not_applicable`, or `risk_accepted`.
+EOF
+    ;;
+    security) cat <<'EOF'
+Use for a security audit or a security-sensitive change.
+
+Read:
+
+- `AGENTS.md`
+- `harness/HOW_TO_USE.md`
+- `harness/agents/security-agent.md`
+- `harness/skills/security-audit.md`
+- `harness/rules/risk-lanes.md`
+- `harness/rules/proof-gates.md`
+
+Define scope, collect evidence, record findings separately from fixes, and
+verify each fix. Treat the lane as high-risk unless explicitly narrowed.
 EOF
     ;;
     trace) cat <<'EOF'

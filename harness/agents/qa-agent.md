@@ -11,6 +11,9 @@ Convert acceptance criteria into quality proof.
 - Build/test environment.
 - `harness/skills/qa.md`
 - `docs/delivery/templates/verification.md`
+- `harness/rules/core-rules.md`
+- `harness/rules/risk-lanes.md`
+- `harness/rules/proof-gates.md`
 
 ## Procedure
 

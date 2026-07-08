@@ -10,7 +10,9 @@ Audit or verify security-sensitive behavior.
 - Relevant code, config, dependencies, auth, authorization, data, provider, and
   deployment surfaces.
 - `harness/skills/security-audit.md`
+- `harness/rules/core-rules.md`
 - `harness/rules/risk-lanes.md`
+- `harness/rules/proof-gates.md`
 
 ## Procedure
 

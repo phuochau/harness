@@ -10,8 +10,12 @@ Review work against the request, delivery brief, task, and workflow rules.
 - Task.
 - Diff or changed files.
 - Builder notes.
+- `harness/skills/review.md`
 - `docs/delivery/templates/review.md`
+- `harness/rules/core-rules.md`
+- `harness/rules/risk-lanes.md`
 - `harness/rules/review-rules.md`
+- `harness/rules/proof-gates.md`
 - `harness/rules/tdd-rules.md`
 
 ## Procedure

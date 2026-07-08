@@ -448,3 +448,44 @@ Proof:
   `tests/install_codex_workflow_test.sh`, and `tests/link_check_test.sh` pass.
 - `shellcheck -S warning scripts/*.sh tests/*.sh` is clean.
 - `git diff --check` reports no whitespace errors.
+
+## Review Loop 20
+
+Findings:
+
+- Alignment review across agents, skills, rules, and adapters found the layers
+  wired inconsistently even though vocabulary (enums, markers, roles) matched.
+- Only 2 of 9 agents referenced their matching skill.
+- 5 of 9 agent rule lists disagreed with the HOW_TO_USE role/skill/rule map
+  (e.g. the QA agent listed no rules; reviewer/planner/security omitted
+  proof-gates; historian omitted handoff-rules).
+- Universal rules (core-rules, risk lane) were listed on some agents and not
+  others.
+- `security` and `qa` were first-class roles with agents, skills, and map rows
+  but had no runtime adapter.
+- `skills/artifact-analysis.md` restated `rules/artifact-analysis.md` verbatim.
+- The `research` task type had no matching skill, unlike `experiment`.
+
+Actions:
+
+- Rewrote all 9 agent Inputs so each lists its matching skill and exactly the
+  canonical rules: a uniform `core-rules` + `risk-lanes` prefix plus the map's
+  role-specific rules.
+- Added `security` and `qa` to the canonical adapter set (now 9 roles for both
+  Claude and Codex), generated from the single `ADAPTER_SLUGS` definition.
+- Made `skills/artifact-analysis.md` defer to `rules/artifact-analysis.md` as
+  the canonical checklist.
+- Added `harness/skills/research.md` and wired it into the Spike/research flow
+  and the Builder Agent.
+- Added `tests/alignment_check_test.sh`, which encodes the canonical
+  role -> skill -> rules -> adapter mapping and fails on any drift; added it to
+  CI.
+
+Proof:
+
+- Red: the alignment check fails when a canonical rule reference is removed from
+  an agent (verified).
+- Green: `install_claude_workflow_test`, `install_codex_workflow_test`,
+  `link_check_test`, and `alignment_check_test` all pass.
+- `shellcheck -S warning scripts/*.sh tests/*.sh` is clean; `git diff --check`
+  reports no whitespace errors.

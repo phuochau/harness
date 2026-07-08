@@ -1,19 +1,17 @@
 # Skill: Artifact Analysis
 
-Use before implementation begins.
+Use before implementation begins, after a task graph exists.
 
 ## Steps
 
-1. Check that no ready brief has unresolved clarification markers.
-2. Check every acceptance criterion has proof.
-3. Check every task traces to the brief.
-4. Check production implementation tasks for TDD pairs or a recorded exception.
-5. Check every brief requirement has a task or explicit non-goal.
-6. Check high-risk work is not hidden in tiny or normal lanes.
-7. Check scope and non-goals do not contradict task instructions.
-8. Check parallel tasks have disjoint files, surfaces, or state.
-9. Check experiment tasks define a hypothesis, success criteria, storage
-   location, proof, and production-boundary rule.
+1. Run every check in `harness/rules/artifact-analysis.md` against the request,
+   delivery brief, and task files. That rule file is the canonical checklist
+   (clarification markers, acceptance-criteria proof, task-to-brief tracing, TDD
+   pairs or exceptions, requirement coverage, hidden high-risk work, scope
+   contradictions, parallel-task isolation, and experiment readiness).
+2. Record the result as `passed`, `failed`, or `blocked`.
+3. If any check fails, list the required corrections and fix the artifacts
+   before build work starts.
 
 ## Output
 

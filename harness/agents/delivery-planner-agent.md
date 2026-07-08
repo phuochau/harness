@@ -11,7 +11,12 @@ Convert a request into a delivery brief and task graph.
 - `docs/delivery/templates/delivery-brief.md`
 - `docs/delivery/templates/task.md`
 - `docs/delivery/templates/experiment.md` when planning an experiment task.
+- `harness/skills/delivery-brief.md`
+- `harness/skills/task-planning.md`
+- `harness/rules/core-rules.md`
+- `harness/rules/risk-lanes.md`
 - `harness/rules/artifact-analysis.md`
+- `harness/rules/proof-gates.md`
 - `harness/rules/tdd-rules.md`
 
 ## Procedure

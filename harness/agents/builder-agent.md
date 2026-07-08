@@ -9,8 +9,11 @@ Implement one bounded task without expanding scope.
 - Assigned task.
 - Delivery brief.
 - Relevant source files and tests.
-- `harness/rules/proof-gates.md`
+- `harness/skills/debugging.md` for bug-fix tasks or `harness/skills/research.md`
+  for research tasks; otherwise the task-specific skill or the task instructions.
 - `harness/rules/core-rules.md`
+- `harness/rules/risk-lanes.md`
+- `harness/rules/proof-gates.md`
 - `harness/rules/tdd-rules.md`
 
 ## Procedure

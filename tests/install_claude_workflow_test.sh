@@ -72,7 +72,7 @@ assert_dir "$target/docs/delivery/decisions"
 assert_file "$target/experiments/README.md"
 
 # Canonical adapter set (same role set as the Codex installer).
-for slug in intake next-step plan-delivery build review verify trace; do
+for slug in intake next-step plan-delivery build review verify qa security trace; do
   assert_file "$target/.claude/commands/$slug.md"
 done
 

@@ -8,6 +8,7 @@ implementation.
 ## Inputs
 
 - Human prompt, issue, ticket, bug report, audit request, or product idea.
+- `harness/skills/intake.md`
 - `harness/rules/core-rules.md`
 - `harness/rules/risk-lanes.md`
 - `docs/delivery/templates/request.md`

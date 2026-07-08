@@ -22,6 +22,7 @@ role assignment, escalation, and pause decisions.
 - Current request, brief, task, review, verification, or trace.
 - Current status and blocker.
 - `harness/HOW_TO_USE.md`
+- `harness/skills/next-step.md`
 - `harness/rules/core-rules.md`
 - `harness/rules/risk-lanes.md`
 - `harness/rules/orchestration-rules.md`

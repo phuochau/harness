@@ -25,3 +25,6 @@ jobs:
 
       - name: Installed-tree link check
         run: sh tests/link_check_test.sh
+
+      - name: Agent/skill/rule/adapter alignment check
+        run: sh tests/alignment_check_test.sh

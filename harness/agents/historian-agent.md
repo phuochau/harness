@@ -12,8 +12,12 @@ Preserve what future humans and agents need to know.
 - Review artifact.
 - Verification artifact.
 - Final diff summary.
+- `harness/skills/trace.md`
 - `docs/delivery/templates/trace.md`
 - `docs/delivery/templates/decision.md`
+- `harness/rules/core-rules.md`
+- `harness/rules/risk-lanes.md`
+- `harness/rules/handoff-rules.md`
 - `harness/rules/tdd-rules.md`
 
 ## Procedure

@@ -72,7 +72,7 @@ assert_absent "$target/.claude"
 assert_absent "$target/.codex/skills"
 
 # Canonical adapter set (same role set as the Claude installer).
-for slug in intake next-step plan-delivery build review verify trace; do
+for slug in intake next-step plan-delivery build review verify qa security trace; do
   assert_file "$target/.agents/skills/$slug/SKILL.md"
 done
 

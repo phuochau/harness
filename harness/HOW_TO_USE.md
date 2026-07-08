@@ -125,7 +125,7 @@ Use these to change product or technical behavior.
 | Change behavior | Refining accepted behavior | intake, delivery-brief, task-planning, review | old and new behavior are explicit |
 | Bug fix | Actual behavior differs from expected behavior | debugging, verification, trace | reproduction or regression proof |
 | Refactor | Internal change without intended behavior change | delivery-brief, task-planning, review | behavior-preserving tests pass |
-| Spike/research | Learning what options, constraints, or unknowns exist | intake, next-step, trace | finding, recommendation, or blocker |
+| Spike/research | Learning what options, constraints, or unknowns exist | intake, research, next-step, trace | finding, recommendation, or blocker |
 | Experiment / proof of concept | Proving a specific proposed solution can work before production implementation | intake, delivery-brief, task-planning, verification | experiment proof, result, and promotion or cleanup decision |
 | Documentation update | Updating product or technical truth | intake, review, trace | docs match current behavior |
 

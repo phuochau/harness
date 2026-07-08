@@ -173,6 +173,8 @@ Optional Codex skill adapters (same canonical role set as the Claude commands):
 .agents/skills/build/SKILL.md
 .agents/skills/review/SKILL.md
 .agents/skills/verify/SKILL.md
+.agents/skills/qa/SKILL.md
+.agents/skills/security/SKILL.md
 .agents/skills/trace/SKILL.md
 ```
 
@@ -261,6 +263,8 @@ Optional Claude command adapters (same canonical role set as the Codex skills):
 .claude/commands/build.md
 .claude/commands/review.md
 .claude/commands/verify.md
+.claude/commands/qa.md
+.claude/commands/security.md
 .claude/commands/trace.md
 ```
 
