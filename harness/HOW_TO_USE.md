@@ -37,8 +37,9 @@ constraint and the required way to prove production behavior changes.
 ## Role, Skill, And Rule Map
 
 Choose the role that owns the next decision, then run the matching skill.
-`harness/rules/core-rules.md` and the chosen risk lane apply to every role; the table
-lists the role-specific additions.
+Every role applies `harness/rules/core-rules.md` and the risk lane
+(`harness/rules/risk-lanes.md`); the table adds the role-specific rules. Each
+agent file also lists this full set so the role contract is self-contained.
 
 | Situation | Role | Skill | Role-Specific Rules |
 | --- | --- | --- | --- |
