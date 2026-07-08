@@ -12,9 +12,9 @@ Preserve what future humans and agents need to know.
 - Review artifact.
 - Verification artifact.
 - Final diff summary.
-- `templates/trace.md`
-- `templates/decision.md`
-- `rules/tdd-rules.md`
+- `docs/delivery/templates/trace.md`
+- `docs/delivery/templates/decision.md`
+- `harness/rules/tdd-rules.md`
 
 ## Procedure
 

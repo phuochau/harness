@@ -10,7 +10,7 @@ This file intentionally reads differently from short gate-only rule files. TDD
 is both a rule and an execution cycle: it decides when test-first work is
 required, how the cycle runs, when exceptions are allowed, and what reviewers
 and verifiers must check. It is still a rule file, not a flow recipe. Choose the
-flow in `HOW_TO_USE.md`; use this file when that flow touches production
+flow in `harness/HOW_TO_USE.md`; use this file when that flow touches production
 implementation.
 
 ## Required Cycle

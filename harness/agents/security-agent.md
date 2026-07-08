@@ -9,8 +9,8 @@ Audit or verify security-sensitive behavior.
 - Security audit request or high-risk task.
 - Relevant code, config, dependencies, auth, authorization, data, provider, and
   deployment surfaces.
-- `skills/security-audit.md`
-- `rules/risk-lanes.md`
+- `harness/skills/security-audit.md`
+- `harness/rules/risk-lanes.md`
 
 ## Procedure
 

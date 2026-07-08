@@ -6,40 +6,40 @@ can participate by following the local files.
 
 Before changing code, read:
 
-- `README.md`
-- `HOW_TO_USE.md`
-- `workflow/influence-map.md`
-- `workflow/file-contracts.md`
-- `rules/core-rules.md`
-- `rules/orchestration-rules.md`
-- `rules/risk-lanes.md`
-- `rules/proof-gates.md`
-- `rules/tdd-rules.md`
-- `rules/artifact-analysis.md`
-- `rules/handoff-rules.md`
+- `harness/README.md`
+- `harness/HOW_TO_USE.md`
+- `harness/influence-map.md`
+- `harness/file-contracts.md`
+- `harness/rules/core-rules.md`
+- `harness/rules/orchestration-rules.md`
+- `harness/rules/risk-lanes.md`
+- `harness/rules/proof-gates.md`
+- `harness/rules/tdd-rules.md`
+- `harness/rules/artifact-analysis.md`
+- `harness/rules/handoff-rules.md`
 
-Then choose the relevant flow family or recipe from `HOW_TO_USE.md`.
+Then choose the relevant flow family or recipe from `harness/HOW_TO_USE.md`.
 The examples are not exhaustive. If the work does not fit cleanly, use the
 next-step skill and Orchestrator Agent.
 
-Then choose the assigned role from `agents/` and the matching skill
-from `skills/`. Use the role, skill, and rule map in `HOW_TO_USE.md` when the
+Then choose the assigned role from `harness/agents/` and the matching skill
+from `harness/skills/`. Use the role, skill, and rule map in `harness/HOW_TO_USE.md` when the
 artifact does not already name the owner.
 
 If you do not know what should happen next, use
-`skills/next-step.md` and route through
-`agents/orchestrator-agent.md`.
+`harness/skills/next-step.md` and route through
+`harness/agents/orchestrator-agent.md`.
 
 ## Folder Responsibilities
 
-- `workflow/` explains the model: lifecycle, principles, file contracts, and
+- `harness/` explains the model: lifecycle, principles, file contracts, and
   influence map.
-- `HOW_TO_USE.md` chooses the flow, role, skill, and rule set.
-- `agents/` defines role ownership and stop conditions.
-- `skills/` defines procedures a role runs.
-- `rules/` defines gates and constraints that apply across roles and flows.
-- `templates/` defines artifacts that carry state between agents.
-- `adapters/` contains optional runtime wrappers only; adapters are never the
+- `harness/HOW_TO_USE.md` chooses the flow, role, skill, and rule set.
+- `harness/agents/` defines role ownership and stop conditions.
+- `harness/skills/` defines procedures a role runs.
+- `harness/rules/` defines gates and constraints that apply across roles and flows.
+- `docs/delivery/templates/` defines artifacts that carry state between agents.
+- `harness/adapters/` contains optional runtime wrappers only; adapters are never the
   source of truth.
 
 ## Operating Rules
@@ -58,7 +58,7 @@ If you do not know what should happen next, use
 10. If the next step is unclear, ask the Orchestrator Agent instead of guessing.
 11. For docs-only, research, experiment, generated, pure markup, or non-runtime
     configuration work, record the TDD exception and replacement proof described
-    in `rules/tdd-rules.md`.
+    in `harness/rules/tdd-rules.md`.
 
 ## Agent Handoff
 

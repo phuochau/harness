@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Shellcheck scripts and tests
+        run: shellcheck -S warning scripts/*.sh tests/*.sh
+
+      - name: Claude installer test
+        run: sh tests/install_claude_workflow_test.sh
+
+      - name: Codex installer test
+        run: sh tests/install_codex_workflow_test.sh
+
+      - name: Installed-tree link check
+        run: sh tests/link_check_test.sh

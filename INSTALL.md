@@ -16,28 +16,22 @@ docs/delivery/experiments/
 experiments/
 ```
 
-Recommended mapping from this repository:
+Mapping from this repository (the source already uses the installed layout, so
+this is mostly a direct copy):
 
 ```text
-AGENTS.md              -> AGENTS.md
-README.md              -> harness/README.md
-HOW_TO_USE.md          -> harness/HOW_TO_USE.md
-agents/*               -> harness/agents/*
-skills/*               -> harness/skills/*
-rules/*                -> harness/rules/*
-workflow/*             -> harness/*
-templates/*            -> docs/delivery/templates/*
-adapters/*             -> harness/adapters/*
+harness/*              -> harness/*            (except harness/REVIEW.md)
+docs/delivery/templates/*  -> docs/delivery/templates/*
 experiments/README.md  -> experiments/README.md
 ```
 
-Then update `AGENTS.md` paths to match the target project layout. If the
-workflow files live under `harness/`, use the sample `AGENTS.md` section
+Then create an `AGENTS.md` (and, for Claude, a `CLAUDE.md`) at the target root
+that points every agent at the files under `harness/`. Use the sample sections
 below.
 
-Also keep `REVIEW.md` in this source repository or copy it to
-`harness/REVIEW.md` if the target project wants an audit trail for why the
-workflow exists.
+`harness/REVIEW.md` is an internal changelog of alignment reviews. The
+installers do not copy it into target projects; leave it in this source
+repository.
 
 ## Keep It Agent-Neutral
 
@@ -55,9 +49,10 @@ From this workflow repository, run:
 The installer creates:
 
 - `AGENTS.md`
-- `harness/`
+- `harness/` (workflow package, excluding the internal `harness/REVIEW.md` changelog)
 - `docs/delivery/templates/`
-- `docs/delivery/experiments/`
+- `docs/delivery/` output directories (`requests/`, `briefs/`, `tasks/`,
+  `experiments/`, `reviews/`, `verification/`, `traces/`, `decisions/`)
 - `experiments/README.md`
 - `.agents/skills/` Codex skill adapters
 
@@ -96,9 +91,10 @@ The installer creates:
 
 - `CLAUDE.md`
 - `AGENTS.md`
-- `harness/`
+- `harness/` (workflow package, excluding the internal `harness/REVIEW.md` changelog)
 - `docs/delivery/templates/`
-- `docs/delivery/experiments/`
+- `docs/delivery/` output directories (`requests/`, `briefs/`, `tasks/`,
+  `experiments/`, `reviews/`, `verification/`, `traces/`, `decisions/`)
 - `experiments/README.md`
 - `.claude/commands/` command adapters
 
@@ -168,16 +164,16 @@ If the next step is unclear, use `harness/skills/next-step.md` and route
 through `harness/agents/orchestrator-agent.md`.
 ```
 
-Optional Codex skill adapters:
+Optional Codex skill adapters (same canonical role set as the Claude commands):
 
 ```text
 .agents/skills/intake/SKILL.md
 .agents/skills/next-step/SKILL.md
-.agents/skills/delivery-planner/SKILL.md
-.agents/skills/builder/SKILL.md
-.agents/skills/reviewer/SKILL.md
-.agents/skills/verifier/SKILL.md
-.agents/skills/historian/SKILL.md
+.agents/skills/plan-delivery/SKILL.md
+.agents/skills/build/SKILL.md
+.agents/skills/review/SKILL.md
+.agents/skills/verify/SKILL.md
+.agents/skills/trace/SKILL.md
 ```
 
 Each adapter should be small. It should point Codex back to the generic files
@@ -256,14 +252,16 @@ If the next step is unclear, use `harness/skills/next-step.md` and ask
 the Orchestrator Agent in `harness/agents/orchestrator-agent.md`.
 ```
 
-Optional Claude command adapters:
+Optional Claude command adapters (same canonical role set as the Codex skills):
 
 ```text
 .claude/commands/intake.md
 .claude/commands/next-step.md
 .claude/commands/plan-delivery.md
-.claude/commands/review-task.md
-.claude/commands/verify-task.md
+.claude/commands/build.md
+.claude/commands/review.md
+.claude/commands/verify.md
+.claude/commands/trace.md
 ```
 
 Example Claude command body:

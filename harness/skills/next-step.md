@@ -30,7 +30,7 @@ Use when an agent or human does not know what should happen next.
    - Orchestrator Agent
 6. Choose the next skill.
 7. Choose the rule files the next role must apply, using the role/skill/rule
-   map in `HOW_TO_USE.md`.
+   map in `harness/HOW_TO_USE.md`.
 8. If a human decision is needed, ask one concrete question.
 9. Record the routing note.
 

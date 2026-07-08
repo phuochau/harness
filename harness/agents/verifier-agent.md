@@ -10,9 +10,9 @@ Collect proof that the work satisfies the delivery brief.
 - Task.
 - Review artifact.
 - Required proof.
-- `templates/verification.md`
-- `rules/proof-gates.md`
-- `rules/tdd-rules.md`
+- `docs/delivery/templates/verification.md`
+- `harness/rules/proof-gates.md`
+- `harness/rules/tdd-rules.md`
 
 ## Procedure
 

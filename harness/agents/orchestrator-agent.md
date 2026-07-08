@@ -21,11 +21,11 @@ role assignment, escalation, and pause decisions.
 
 - Current request, brief, task, review, verification, or trace.
 - Current status and blocker.
-- `HOW_TO_USE.md`
-- `rules/core-rules.md`
-- `rules/risk-lanes.md`
-- `rules/orchestration-rules.md`
-- `rules/handoff-rules.md`
+- `harness/HOW_TO_USE.md`
+- `harness/rules/core-rules.md`
+- `harness/rules/risk-lanes.md`
+- `harness/rules/orchestration-rules.md`
+- `harness/rules/handoff-rules.md`
 
 ## Procedure
 

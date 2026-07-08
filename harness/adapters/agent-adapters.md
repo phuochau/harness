@@ -34,13 +34,13 @@ workflow file and record the adapter mismatch in the trace or review note.
 Possible files in a target project:
 
 ```text
-.agents/skills/intake/SKILL.md              wraps harness/skills/intake.md
-.agents/skills/next-step/SKILL.md           wraps harness/skills/next-step.md
-.agents/skills/delivery-planner/SKILL.md    wraps harness/skills/delivery-brief.md and task-planning.md
-.agents/skills/builder/SKILL.md             wraps harness/agents/builder-agent.md
-.agents/skills/reviewer/SKILL.md            wraps harness/skills/review.md
-.agents/skills/verifier/SKILL.md            wraps harness/skills/verification.md
-.agents/skills/historian/SKILL.md           wraps harness/skills/trace.md
+.agents/skills/intake/SKILL.md          wraps harness/skills/intake.md
+.agents/skills/next-step/SKILL.md       wraps harness/skills/next-step.md
+.agents/skills/plan-delivery/SKILL.md   wraps harness/skills/delivery-brief.md and task-planning.md
+.agents/skills/build/SKILL.md           wraps harness/agents/builder-agent.md
+.agents/skills/review/SKILL.md          wraps harness/skills/review.md
+.agents/skills/verify/SKILL.md          wraps harness/skills/verification.md
+.agents/skills/trace/SKILL.md           wraps harness/skills/trace.md
 ```
 
 Each Codex skill should read `AGENTS.md`, `harness/HOW_TO_USE.md`, the
@@ -60,8 +60,10 @@ CLAUDE.md
 .claude/commands/intake.md          wraps harness/skills/intake.md
 .claude/commands/next-step.md       wraps harness/skills/next-step.md
 .claude/commands/plan-delivery.md   wraps harness/skills/delivery-brief.md and task-planning.md
-.claude/commands/review-task.md     wraps harness/skills/review.md
-.claude/commands/verify-task.md     wraps harness/skills/verification.md
+.claude/commands/build.md           wraps harness/agents/builder-agent.md
+.claude/commands/review.md          wraps harness/skills/review.md
+.claude/commands/verify.md          wraps harness/skills/verification.md
+.claude/commands/trace.md           wraps harness/skills/trace.md
 ```
 
 `CLAUDE.md` should import or reference `AGENTS.md` and the workflow files.

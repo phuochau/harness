@@ -10,9 +10,9 @@ Review work against the request, delivery brief, task, and workflow rules.
 - Task.
 - Diff or changed files.
 - Builder notes.
-- `templates/review.md`
-- `rules/review-rules.md`
-- `rules/tdd-rules.md`
+- `docs/delivery/templates/review.md`
+- `harness/rules/review-rules.md`
+- `harness/rules/tdd-rules.md`
 
 ## Procedure
 

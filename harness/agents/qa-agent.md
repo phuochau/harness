@@ -9,8 +9,8 @@ Convert acceptance criteria into quality proof.
 - Delivery brief.
 - Acceptance criteria.
 - Build/test environment.
-- `skills/qa.md`
-- `templates/verification.md`
+- `harness/skills/qa.md`
+- `docs/delivery/templates/verification.md`
 
 ## Procedure
 

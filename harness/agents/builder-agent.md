@@ -9,9 +9,9 @@ Implement one bounded task without expanding scope.
 - Assigned task.
 - Delivery brief.
 - Relevant source files and tests.
-- `rules/proof-gates.md`
-- `rules/core-rules.md`
-- `rules/tdd-rules.md`
+- `harness/rules/proof-gates.md`
+- `harness/rules/core-rules.md`
+- `harness/rules/tdd-rules.md`
 
 ## Procedure
 

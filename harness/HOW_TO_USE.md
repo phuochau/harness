@@ -3,17 +3,17 @@
 This guide explains how to choose and compose flows. The reusable building
 blocks live in:
 
-- `workflow/`: the shared model, lifecycle, principles, and file contracts.
-- `agents/`: role prompts that define ownership and stop conditions.
-- `skills/`: repeatable procedures used by roles.
-- `rules/`: enforceable gates and constraints that apply across flows.
-- `templates/`: artifact templates.
-- `adapters/`: optional wrappers for specific agent runtimes.
+- `harness/`: the shared model, lifecycle, principles, and file contracts.
+- `harness/agents/`: role prompts that define ownership and stop conditions.
+- `harness/skills/`: repeatable procedures used by roles.
+- `harness/rules/`: enforceable gates and constraints that apply across flows.
+- `docs/delivery/templates/`: artifact templates.
+- `harness/adapters/`: optional wrappers for specific agent runtimes.
 
 The examples below are not the only possible flows. They are common operating
 patterns built from the same agents, skills, rules, and templates.
 
-When the next step is unclear, use `skills/next-step.md` and ask the
+When the next step is unclear, use `harness/skills/next-step.md` and ask the
 Orchestrator Agent.
 
 ## Building Block Boundaries
@@ -22,37 +22,37 @@ Use each folder for its own purpose:
 
 | Folder | Owns | Does Not Own |
 | --- | --- | --- |
-| `workflow/` | Canonical lifecycle, principles, file contracts, and influence map | Runtime-specific instructions |
-| `HOW_TO_USE.md` | Flow selection and composition guidance | Role-specific stop conditions |
-| `agents/` | Role ownership, inputs, outputs, and stop conditions | Full flow recipes |
-| `skills/` | Step-by-step procedures for common workflow actions | Risk acceptance or completion claims |
-| `rules/` | Cross-cutting gates such as risk lanes, proof, TDD, review, and handoff | A standalone delivery lifecycle |
-| `templates/` | Request, brief, task, review, verification, trace, decision, and experiment file shapes | Runtime behavior |
-| `adapters/` | Optional Codex, Claude, Cursor, Copilot, or generic wrappers | Source-of-truth workflow rules |
+| `harness/` | Canonical lifecycle, principles, file contracts, and influence map | Runtime-specific instructions |
+| `harness/HOW_TO_USE.md` | Flow selection and composition guidance | Role-specific stop conditions |
+| `harness/agents/` | Role ownership, inputs, outputs, and stop conditions | Full flow recipes |
+| `harness/skills/` | Step-by-step procedures for common workflow actions | Risk acceptance or completion claims |
+| `harness/rules/` | Cross-cutting gates such as risk lanes, proof, TDD, review, and handoff | A standalone delivery lifecycle |
+| `docs/delivery/templates/` | Request, brief, task, review, verification, trace, decision, and experiment file shapes | Runtime behavior |
+| `harness/adapters/` | Optional Codex, Claude, Cursor, Copilot, or generic wrappers | Source-of-truth workflow rules |
 
 Rules can contain procedures when the gate itself requires a cycle. For example,
-`rules/tdd-rules.md` includes red-green-refactor steps because TDD is both a
+`harness/rules/tdd-rules.md` includes red-green-refactor steps because TDD is both a
 constraint and the required way to prove production behavior changes.
 
 ## Role, Skill, And Rule Map
 
 Choose the role that owns the next decision, then run the matching skill.
-`rules/core-rules.md` and the chosen risk lane apply to every role; the table
+`harness/rules/core-rules.md` and the chosen risk lane apply to every role; the table
 lists the role-specific additions.
 
 | Situation | Role | Skill | Role-Specific Rules |
 | --- | --- | --- | --- |
-| Raw request or unclear outcome | Intake Agent | `skills/intake.md` | `rules/risk-lanes.md` |
-| Next step, owner, lane, proof, or escalation unclear | Orchestrator Agent | `skills/next-step.md` | `rules/orchestration-rules.md`, `rules/handoff-rules.md` |
-| Brief or task graph needed | Delivery Planner Agent | `skills/delivery-brief.md`, then `skills/task-planning.md` | `rules/artifact-analysis.md`, `rules/tdd-rules.md`, `rules/proof-gates.md` |
-| Code, docs, investigation, or experiment task ready | Builder Agent | Task-specific skill or task instructions | `rules/proof-gates.md`, `rules/tdd-rules.md` |
-| Change needs independent review | Reviewer Agent | `skills/review.md` | `rules/review-rules.md`, `rules/tdd-rules.md`, `rules/proof-gates.md` |
-| Completion proof needed | Verifier Agent | `skills/verification.md` | `rules/proof-gates.md`, `rules/tdd-rules.md` |
-| Security-sensitive audit or task | Security Agent | `skills/security-audit.md` | `rules/risk-lanes.md`, `rules/proof-gates.md` |
-| Acceptance or release quality check | QA Agent | `skills/qa.md` | `rules/proof-gates.md`, `rules/risk-lanes.md` |
-| Work needs trace, decision, or learning record | Historian Agent | `skills/trace.md` | `rules/tdd-rules.md`, `rules/handoff-rules.md` |
+| Raw request or unclear outcome | Intake Agent | `harness/skills/intake.md` | `harness/rules/risk-lanes.md` |
+| Next step, owner, lane, proof, or escalation unclear | Orchestrator Agent | `harness/skills/next-step.md` | `harness/rules/orchestration-rules.md`, `harness/rules/handoff-rules.md` |
+| Brief or task graph needed | Delivery Planner Agent | `harness/skills/delivery-brief.md`, then `harness/skills/task-planning.md` | `harness/rules/artifact-analysis.md`, `harness/rules/tdd-rules.md`, `harness/rules/proof-gates.md` |
+| Code, docs, investigation, or experiment task ready | Builder Agent | Task-specific skill or task instructions | `harness/rules/proof-gates.md`, `harness/rules/tdd-rules.md` |
+| Change needs independent review | Reviewer Agent | `harness/skills/review.md` | `harness/rules/review-rules.md`, `harness/rules/tdd-rules.md`, `harness/rules/proof-gates.md` |
+| Completion proof needed | Verifier Agent | `harness/skills/verification.md` | `harness/rules/proof-gates.md`, `harness/rules/tdd-rules.md` |
+| Security-sensitive audit or task | Security Agent | `harness/skills/security-audit.md` | `harness/rules/risk-lanes.md`, `harness/rules/proof-gates.md` |
+| Acceptance or release quality check | QA Agent | `harness/skills/qa.md` | `harness/rules/proof-gates.md`, `harness/rules/risk-lanes.md` |
+| Work needs trace, decision, or learning record | Historian Agent | `harness/skills/trace.md` | `harness/rules/tdd-rules.md`, `harness/rules/handoff-rules.md` |
 
-If the table does not fit the situation, run `skills/next-step.md` and route
+If the table does not fit the situation, run `harness/skills/next-step.md` and route
 through the Orchestrator Agent instead of guessing.
 
 ## Clean Approach
@@ -63,7 +63,7 @@ Use this order for any flow:
 2. Choose the smallest fitting flow.
 3. Classify the risk lane.
 4. Create only the artifacts the lane needs.
-5. Apply `rules/tdd-rules.md` for production implementation.
+5. Apply `harness/rules/tdd-rules.md` for production implementation.
 6. Assign a role and skill using the map above.
 7. Verify proof before completion.
 8. Trace what happened and what should be learned.
@@ -96,9 +96,9 @@ Tiny work can skip brief and task overhead, but it cannot skip proof.
 
 Use this escape hatch before guessing:
 
-1. Run `skills/next-step.md`.
-2. Ask `agents/orchestrator-agent.md`.
-3. Read `rules/orchestration-rules.md`.
+1. Run `harness/skills/next-step.md`.
+2. Ask `harness/agents/orchestrator-agent.md`.
+3. Read `harness/rules/orchestration-rules.md`.
 4. Decide whether to continue, pause, escalate, split work, or ask the human.
 5. Record the routing note in the current artifact or trace.
 
@@ -169,20 +169,20 @@ Use these to improve the system itself.
 
 ### Greenfield Project
 
-1. Run `skills/intake.md` to capture the product idea as a request.
-2. Run `skills/principles.md` to define project principles.
-3. Run `skills/delivery-brief.md` for the first vertical slice.
-4. Run `skills/task-planning.md` to create the first task graph.
+1. Run `harness/skills/intake.md` to capture the product idea as a request.
+2. Run `harness/skills/principles.md` to define project principles.
+3. Run `harness/skills/delivery-brief.md` for the first vertical slice.
+4. Run `harness/skills/task-planning.md` to create the first task graph.
 5. Assign Builder, Reviewer, Verifier, and Historian agents.
 6. Build the smallest useful vertical slice.
 7. Verify baseline proof: build, test, smoke check, and run instructions.
-8. Run `skills/trace.md` to record decisions, risks, and next work.
+8. Run `harness/skills/trace.md` to record decisions, risks, and next work.
 
 Keep architecture only as detailed as the first slice needs.
 
 ### Brownfield Project
 
-1. Run `skills/brownfield-discovery.md`.
+1. Run `harness/skills/brownfield-discovery.md`.
 2. Map existing entrypoints, docs, scripts, tests, CI, and app surfaces.
 3. Identify current validation commands.
 4. Record risky areas: missing tests, auth, data, providers, fragile modules.
@@ -194,20 +194,20 @@ Preserve current behavior first.
 
 ### Add New Feature
 
-1. Run `skills/intake.md`.
-2. Classify the lane with `rules/risk-lanes.md`.
+1. Run `harness/skills/intake.md`.
+2. Classify the lane with `harness/rules/risk-lanes.md`.
 3. Mark unclear requirements with `NEEDS CLARIFICATION: specific question`.
-4. Run `skills/delivery-brief.md`.
-5. Run `skills/task-planning.md`.
-6. Run artifact analysis from `rules/artifact-analysis.md`.
+4. Run `harness/skills/delivery-brief.md`.
+5. Run `harness/skills/task-planning.md`.
+6. Run artifact analysis from `harness/rules/artifact-analysis.md`.
 7. Assign Builder, Reviewer, Verifier, and Historian agents.
-8. Build under `rules/tdd-rules.md`, then review, verify, and trace.
+8. Build under `harness/rules/tdd-rules.md`, then review, verify, and trace.
 
 Do not expand feature scope during implementation.
 
 ### Fix A Bug
 
-1. Run `skills/debugging.md`.
+1. Run `harness/skills/debugging.md`.
 2. Capture expected behavior, actual behavior, and reproduction steps.
 3. Reproduce the bug or document why reproduction is blocked.
 4. Identify root cause before editing.
@@ -224,11 +224,11 @@ Use an experiment when research or prior knowledge has produced a specific
 candidate solution, but the team needs evidence that it can work before real
 implementation.
 
-1. Run `skills/intake.md` to capture the uncertainty and proposed approach.
-2. Classify the lane with `rules/risk-lanes.md`.
+1. Run `harness/skills/intake.md` to capture the uncertainty and proposed approach.
+2. Classify the lane with `harness/rules/risk-lanes.md`.
 3. Write a short delivery brief with explicit non-goals.
 4. Create an `experiment` task and an experiment artifact from
-   `templates/experiment.md`.
+   `docs/delivery/templates/experiment.md`.
 5. Store experiment code under `experiments/` unless the user, brief, or task
    names another location.
 6. Define the hypothesis, success criteria, and required proof before coding.
@@ -245,7 +245,7 @@ and pass through review, verification, and trace.
 
 ### Security Audit
 
-1. Run `skills/security-audit.md`.
+1. Run `harness/skills/security-audit.md`.
 2. Define scope: auth, authorization, sessions, secrets, dependencies, data,
    APIs, providers, deployment, or audit logs.
 3. Treat the lane as high-risk by default.
@@ -259,7 +259,7 @@ Do not claim the system is secure. State what was checked.
 
 ### QA
 
-1. Run `skills/qa.md`.
+1. Run `harness/skills/qa.md`.
 2. Start from the delivery brief and acceptance criteria.
 3. Convert criteria into test cases.
 4. Run automated proof.

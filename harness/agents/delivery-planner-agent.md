@@ -8,11 +8,11 @@ Convert a request into a delivery brief and task graph.
 
 - Request artifact.
 - Relevant product, architecture, and workflow docs.
-- `templates/delivery-brief.md`
-- `templates/task.md`
-- `templates/experiment.md` when planning an experiment task.
-- `rules/artifact-analysis.md`
-- `rules/tdd-rules.md`
+- `docs/delivery/templates/delivery-brief.md`
+- `docs/delivery/templates/task.md`
+- `docs/delivery/templates/experiment.md` when planning an experiment task.
+- `harness/rules/artifact-analysis.md`
+- `harness/rules/tdd-rules.md`
 
 ## Procedure
 

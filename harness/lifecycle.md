@@ -21,7 +21,7 @@ Request
 A request is the raw input: issue, product request, bug report, audit request,
 QA request, or human prompt.
 
-Use `templates/request.md`.
+Use `docs/delivery/templates/request.md`.
 
 ## 2. Intake
 
@@ -46,7 +46,7 @@ guessed.
 A delivery brief is the execution contract. It should be short, concrete, and
 reviewable.
 
-Use `templates/delivery-brief.md`.
+Use `docs/delivery/templates/delivery-brief.md`.
 
 Do not write a delivery brief for tiny work unless the tiny change is unclear.
 
@@ -54,7 +54,7 @@ Do not write a delivery brief for tiny work unless the tiny change is unclear.
 
 Split the brief into task files. Tasks may depend on each other.
 
-Use `templates/task.md`.
+Use `docs/delivery/templates/task.md`.
 
 Task types:
 
@@ -114,13 +114,13 @@ The assigned agent works inside the task boundary.
 The agent should:
 
 - Read the brief and task.
-- Follow `rules/tdd-rules.md` for production implementation.
+- Follow `harness/rules/tdd-rules.md` for production implementation.
 - Read only the relevant code and docs.
 - Avoid unrelated refactors.
 - Preserve user changes.
 - Update the task with blockers or important decisions.
 
-For `experiment` tasks, use `templates/experiment.md` and default experiment
+For `experiment` tasks, use `docs/delivery/templates/experiment.md` and default experiment
 work to `experiments/` unless the user, delivery brief, or task names another
 location. Experiment code is not production code, and production code must not
 import from `experiments/`.
@@ -139,7 +139,7 @@ An experiment must record:
 Review checks whether the work matches the brief, not whether it merely looks
 reasonable.
 
-Use `templates/review.md`.
+Use `docs/delivery/templates/review.md`.
 
 Review should prioritize:
 
@@ -153,7 +153,7 @@ Review should prioritize:
 
 Verification collects evidence that the change works.
 
-Use `templates/verification.md`.
+Use `docs/delivery/templates/verification.md`.
 
 Verification can include:
 
@@ -171,8 +171,8 @@ Verification can include:
 
 Trace records what happened and what future agents should know.
 
-Use `templates/trace.md`.
+Use `docs/delivery/templates/trace.md`.
 
 If the work changed architecture, product behavior, security posture, public
 contracts, data ownership, or validation standards, also write a decision record
-using `templates/decision.md`.
+using `docs/delivery/templates/decision.md`.

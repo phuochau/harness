@@ -139,8 +139,8 @@ normal implementation tasks and pass it through review, verification, and trace.
 ## TDD Pair Convention
 
 Production implementation tasks must record TDD pairs using the structure in
-`templates/task.md`. If TDD does not apply, record the exception and replacement
-proof according to `rules/tdd-rules.md`.
+`docs/delivery/templates/task.md`. If TDD does not apply, record the exception and replacement
+proof according to `harness/rules/tdd-rules.md`.
 
 ## Agent-Neutral Rule
 

@@ -1,0 +1,11 @@
+# macOS
+.DS_Store
+
+# Editors
+*.swp
+*~
+.idea/
+.vscode/
+
+# Installer temp artifacts (should never be committed)
+*.harness-tmp.*
