@@ -77,19 +77,11 @@ Flow recipes name the common path. Risk lanes decide how much artifact,
 review, and proof weight that path needs. If they seem to conflict, follow the
 higher process weight and ask the Orchestrator Agent to record the routing note.
 
-## Standard Loop
+## How Much Lifecycle To Run
 
-```text
-Request
-  -> Intake skill
-  -> Delivery brief skill when needed
-  -> Task planning skill when needed
-  -> Artifact analysis when tasks exist
-  -> Orchestrator routing when needed
-  -> Agent assignment
-  -> Build under TDD / investigate / experiment / review / verify
-  -> Trace
-```
+The full lifecycle — Request through Trace, with diagrams — lives in
+`harness/lifecycle.md`. This guide decides which parts of it a given request
+needs.
 
 Tiny work can skip brief and task overhead, but it cannot skip proof.
 

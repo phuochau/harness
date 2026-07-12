@@ -1,81 +1,80 @@
 # Influence Map
 
 This workflow learns from Spec Kit, Superpowers, repository-harness, and common
-software delivery team practice.
+software delivery practice. The point is not to copy any one system, but to
+translate their useful ideas into a portable, file-based operating model.
 
-The point is not to copy any one system. The point is to translate their useful
-ideas into a portable, file-based operating model.
+This file is the single source for what the workflow borrows; other docs link
+here instead of restating it.
 
-## Spec Kit Lessons
+## Spec Kit
 
-Adopt:
-
-- Specifications lead implementation.
-- Project principles act as governance.
-- Agents should clarify ambiguity instead of guessing.
-- Feature work should be expressed as user scenarios with independent tests.
-- Plans should connect requirements to technical choices.
-- Tasks should be derived from specs and plans.
-- Independent tasks should be marked so they can run in parallel.
-- Consistency and coverage analysis should happen before implementation.
-
-Adaptation:
-
-- This workflow uses delivery briefs instead of full Spec Kit feature folders
-  for normal delivery work.
-- A brief can grow into a deeper spec when the work is high-risk or ambiguous.
-- The task graph keeps Spec Kit's independent story and task idea but remains
-  plain Markdown.
-
-## Superpowers Lessons
+Specifications lead implementation.
 
 Adopt:
 
-- Use the right workflow before acting.
-- Brainstorm or clarify before building.
+- Specifications lead implementation, and project principles act as governance.
+- Clarify ambiguity instead of guessing.
+- Express feature work as user scenarios with independent tests.
+- Connect requirements to technical choices, then derive tasks from them.
+- Mark independent tasks so they can run in parallel.
+- Analyze consistency and coverage before implementation.
+
+Adapt:
+
+- Use delivery briefs instead of full feature folders for normal work; a brief
+  can grow into a deeper spec when work is high-risk or ambiguous.
+- Keep the independent-task idea, but as plain Markdown in the task graph.
+
+## Superpowers
+
+Disciplined agent behavior.
+
+Adopt:
+
+- Use the right workflow before acting; clarify or brainstorm before building.
 - Write plans for multi-step work.
 - Use test-first implementation for production behavior changes.
 - Debug systematically: reproduce, identify cause, fix, verify.
-- Review before integration.
-- Verify before completion.
+- Review before integration and verify before completion.
 - Treat missing verification as an honest blocker, not a success.
 
-Adaptation:
+Adapt:
 
-- This workflow encodes those behaviors as role contracts and proof gates that
-  any agent can follow.
-- Agent-specific skills may enforce the rules, but the repo files remain the
-  source of truth.
+- Encode these behaviors as role contracts and proof gates any agent can follow.
+- Agent-specific skills may enforce the rules, but the repo files stay the source
+  of truth.
 
-## repository-harness Lessons
+## repository-harness
+
+A repo-local operating model.
 
 Adopt:
 
-- The repository should teach agents how to work on it.
-- Classify work by risk lane.
-- Use story-sized or task-sized packets for execution.
+- The repository teaches agents how to work on it.
+- Classify work by risk lane and execute in task-sized packets.
 - Define validation proof before claiming completion.
-- Preserve decisions and traces for future agents.
-- Record workflow friction so the system improves.
+- Preserve decisions and traces for future agents, and record workflow friction.
 
-Adaptation:
+Adapt:
 
-- This workflow keeps the same operating model but removes the requirement for a
-  CLI or SQLite durable layer in version 1.
-- State lives in Markdown front matter and reviewable files.
+- Keep the operating model, but drop the required CLI or SQLite layer in
+  version 1. State lives in Markdown front matter and reviewable files.
 
-## Product Delivery Lessons
+## Product Delivery Practice
+
+Delivery is a team activity, not just code production.
 
 Adopt:
 
 - Work should be transparent, inspectable, and bounded.
-- Delivery teams need clear ownership, review, and definition of done.
+- Ownership, review, and a definition of done should be explicit.
 - QA and security are part of delivery, not afterthoughts.
-- Hard decisions often need experiments that prove a candidate solution before
+- Hard decisions often need an experiment that proves a candidate solution before
   production implementation.
 - Retrospective learning should change future rules.
 
-Adaptation:
+Adapt:
 
 - Roles make responsibilities explicit.
 - Flows describe standard work patterns: greenfield, brownfield, feature, bug,

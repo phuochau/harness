@@ -16,6 +16,62 @@ Request
   -> Trace and learn
 ```
 
+As a diagram, including the loops back when proof or clarity is missing:
+
+```mermaid
+%%{init: {'flowchart': {'curve': 'step'}}}%%
+flowchart TD
+    R[Request<br/>raw input: issue, bug, audit, prompt] --> I[Intake<br/>classify type, scope, risk lane]
+    I --> Q{Ambiguous?}
+    Q -- yes --> NC[Mark NEEDS CLARIFICATION] --> I
+    Q -- no --> B[Delivery Brief<br/>execution contract + named proof]
+    B --> TG[Task Graph<br/>build / research / experiment /<br/>review / verify / docs / audit]
+    TG --> AA[Artifact Analysis<br/>find gaps, untraced tasks, hidden risk]
+    AA --> OR{Next step clear?}
+    OR -- no --> ORCH[Orchestrator Routing] --> AS
+    OR -- yes --> AS[Agent Assignment<br/>assign a role, not a vendor]
+    AS --> WORK[Build under TDD /<br/>Investigate / Experiment]
+    WORK --> REV[Review<br/>matches brief, not just looks-ok]
+    REV --> VER[Verify<br/>collect evidence]
+    VER --> PASS{Proof passed?}
+    PASS -- no --> WORK
+    PASS -- yes --> TR[Trace and Learn]
+    TR --> DEC{Changed arch, contracts,<br/>security, or data?}
+    DEC -- yes --> DR[Decision Record] --> DONE([Complete])
+    DEC -- no --> DONE
+
+    style R fill:#e8f0fe,stroke:#4285f4
+    style DONE fill:#e6f4ea,stroke:#34a853
+    style NC fill:#fce8e6,stroke:#ea4335
+```
+
+Risk lane decides how much of this lifecycle a change actually needs
+(`harness/rules/risk-lanes.md`):
+
+```mermaid
+%%{init: {'flowchart': {'curve': 'step'}}}%%
+flowchart TD
+    START[Classified work item] --> LANE{Risk lane?}
+    LANE -- "docs, copy, config,<br/>test-only, visual polish" --> TINY[Tiny]
+    LANE -- "bounded feature, bug,<br/>refactor, workflow change" --> NORMAL[Normal]
+    LANE -- "auth, data, migration, security,<br/>payment, public API" --> HIGH[High-risk]
+
+    TINY --> T1[Patch directly +<br/>cheapest relevant proof]
+    NORMAL --> N1[Request to Brief to Tasks to<br/>Review to Verify to Trace]
+    HIGH --> H1[Brief + explicit non-goals +<br/>decision record + task graph +<br/>strong verify + human confirm]
+
+    T1 --> ESC{Work reveals<br/>higher risk?}
+    N1 --> ESC
+    H1 --> GO([Proceed])
+    ESC -- yes --> STOP[Stop and upgrade the lane] --> LANE
+    ESC -- no --> GO
+
+    style TINY fill:#e6f4ea,stroke:#34a853
+    style NORMAL fill:#fef7e0,stroke:#fbbc04
+    style HIGH fill:#fce8e6,stroke:#ea4335
+    style STOP fill:#fce8e6,stroke:#ea4335
+```
+
 ## 1. Request
 
 A request is the raw input: issue, product request, bug report, audit request,
