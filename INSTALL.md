@@ -160,22 +160,22 @@ Choose a role from `harness/agents/`, run the matching skill from
 `harness/skills/`, and use the role/skill/rule map in
 `harness/HOW_TO_USE.md` when the artifact does not already name the
 owner. Write artifacts from `docs/delivery/templates/`.
-If the next step is unclear, use `harness/skills/next-step.md` and route
+If the next step is unclear, use `harness/skills/route.md` and route
 through `harness/agents/orchestrator-agent.md`.
 ```
 
 Optional Codex skill adapters (same canonical role set as the Claude commands):
 
 ```text
-.agents/skills/intake/SKILL.md
-.agents/skills/next-step/SKILL.md
-.agents/skills/plan-delivery/SKILL.md
-.agents/skills/build/SKILL.md
+.agents/skills/scope/SKILL.md
+.agents/skills/route/SKILL.md
+.agents/skills/plan/SKILL.md
+.agents/skills/implement/SKILL.md
 .agents/skills/review/SKILL.md
 .agents/skills/verify/SKILL.md
 .agents/skills/qa/SKILL.md
-.agents/skills/security/SKILL.md
-.agents/skills/trace/SKILL.md
+.agents/skills/audit/SKILL.md
+.agents/skills/record/SKILL.md
 ```
 
 Each adapter should be small. It should point Codex back to the generic files
@@ -189,7 +189,7 @@ across a team. They are not required for a single target repository install.
 Example Codex adapter body:
 
 ```markdown
-# Intake
+# Scope
 
 Use this skill when a request first enters the workflow.
 
@@ -197,8 +197,8 @@ Read:
 
 - `AGENTS.md`
 - `harness/HOW_TO_USE.md`
-- `harness/agents/intake-agent.md`
-- `harness/skills/intake.md`
+- `harness/agents/scope-agent.md`
+- `harness/skills/scope.md`
 - `harness/rules/core-rules.md`
 - `harness/rules/risk-lanes.md`
 
@@ -250,34 +250,34 @@ rules from `harness/rules/`, and templates from
 `harness/HOW_TO_USE.md` when the artifact does not already name the
 owner.
 
-If the next step is unclear, use `harness/skills/next-step.md` and ask
+If the next step is unclear, use `harness/skills/route.md` and ask
 the Orchestrator Agent in `harness/agents/orchestrator-agent.md`.
 ```
 
 Optional Claude command adapters (same canonical role set as the Codex skills):
 
 ```text
-.claude/commands/intake.md
-.claude/commands/next-step.md
-.claude/commands/plan-delivery.md
-.claude/commands/build.md
+.claude/commands/scope.md
+.claude/commands/route.md
+.claude/commands/plan.md
+.claude/commands/implement.md
 .claude/commands/review.md
 .claude/commands/verify.md
 .claude/commands/qa.md
-.claude/commands/security.md
-.claude/commands/trace.md
+.claude/commands/audit.md
+.claude/commands/record.md
 ```
 
 Example Claude command body:
 
 ```markdown
-# /next-step
+# /route
 
 Use when the next action, role, lane, owner, or proof is unclear.
 
 Read:
 
-- `harness/skills/next-step.md`
+- `harness/skills/route.md`
 - `harness/agents/orchestrator-agent.md`
 - `harness/rules/orchestration-rules.md`
 
@@ -297,7 +297,7 @@ pause, escalate, or ask the human one concrete question.
 7. Use the role/skill/rule map in `harness/HOW_TO_USE.md`.
 8. Enforce rules from `harness/rules/`.
 9. For production implementation, follow `harness/rules/tdd-rules.md`.
-10. If the next step is unclear, use the Orchestrator Agent and next-step skill.
+10. If the next step is unclear, use the Orchestrator Agent and route skill.
 11. For proof-of-concept work, write the experiment artifact under
    `docs/delivery/experiments/`.
 12. Store experiment code in `experiments/` unless the user, brief, or task

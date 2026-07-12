@@ -5,7 +5,7 @@
 id: TRACE-000
 status: done
 lane: normal
-owner: historian
+owner: recorder
 request: REQ-000
 brief: BRIEF-000
 created: YYYY-MM-DD

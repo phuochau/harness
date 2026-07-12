@@ -20,14 +20,14 @@ Before changing code, read:
 
 Then choose the relevant flow family or recipe from `harness/HOW_TO_USE.md`.
 The examples are not exhaustive. If the work does not fit cleanly, use the
-next-step skill and Orchestrator Agent.
+route skill and Orchestrator Agent.
 
 Then choose the assigned role from `harness/agents/` and the matching skill
 from `harness/skills/`. Use the role, skill, and rule map in `harness/HOW_TO_USE.md` when the
 artifact does not already name the owner.
 
 If you do not know what should happen next, use
-`harness/skills/next-step.md` and route through
+`harness/skills/route.md` and route through
 `harness/agents/orchestrator-agent.md`.
 
 ## Folder Responsibilities

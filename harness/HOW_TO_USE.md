@@ -13,7 +13,7 @@ blocks live in:
 The examples below are not the only possible flows. They are common operating
 patterns built from the same agents, skills, rules, and templates.
 
-When the next step is unclear, use `harness/skills/next-step.md` and ask the
+When the next step is unclear, use `harness/skills/route.md` and ask the
 Orchestrator Agent.
 
 ## Building Block Boundaries
@@ -43,17 +43,17 @@ agent file also lists this full set so the role contract is self-contained.
 
 | Situation | Role | Skill | Role-Specific Rules |
 | --- | --- | --- | --- |
-| Raw request or unclear outcome | Intake Agent | `harness/skills/intake.md` | `harness/rules/risk-lanes.md` |
-| Next step, owner, lane, proof, or escalation unclear | Orchestrator Agent | `harness/skills/next-step.md` | `harness/rules/orchestration-rules.md`, `harness/rules/handoff-rules.md` |
-| Brief or task graph needed | Delivery Planner Agent | `harness/skills/delivery-brief.md`, then `harness/skills/task-planning.md` | `harness/rules/artifact-analysis.md`, `harness/rules/tdd-rules.md`, `harness/rules/proof-gates.md` |
+| Raw request or unclear outcome | Scope Agent | `harness/skills/scope.md` | `harness/rules/risk-lanes.md` |
+| Next step, owner, lane, proof, or escalation unclear | Orchestrator Agent | `harness/skills/route.md` | `harness/rules/orchestration-rules.md`, `harness/rules/handoff-rules.md` |
+| Brief or task graph needed | Planner Agent | `harness/skills/delivery-brief.md`, then `harness/skills/task-planning.md` | `harness/rules/artifact-analysis.md`, `harness/rules/tdd-rules.md`, `harness/rules/proof-gates.md` |
 | Code, docs, investigation, or experiment task ready | Builder Agent | Task-specific skill or task instructions | `harness/rules/proof-gates.md`, `harness/rules/tdd-rules.md` |
 | Change needs independent review | Reviewer Agent | `harness/skills/review.md` | `harness/rules/review-rules.md`, `harness/rules/tdd-rules.md`, `harness/rules/proof-gates.md` |
 | Completion proof needed | Verifier Agent | `harness/skills/verification.md` | `harness/rules/proof-gates.md`, `harness/rules/tdd-rules.md` |
 | Security-sensitive audit or task | Security Agent | `harness/skills/security-audit.md` | `harness/rules/risk-lanes.md`, `harness/rules/proof-gates.md` |
 | Acceptance or release quality check | QA Agent | `harness/skills/qa.md` | `harness/rules/proof-gates.md`, `harness/rules/risk-lanes.md` |
-| Work needs trace, decision, or learning record | Historian Agent | `harness/skills/trace.md` | `harness/rules/tdd-rules.md`, `harness/rules/handoff-rules.md` |
+| Work needs trace, decision, or learning record | Recorder Agent | `harness/skills/record.md` | `harness/rules/tdd-rules.md`, `harness/rules/handoff-rules.md` |
 
-If the table does not fit the situation, run `harness/skills/next-step.md` and route
+If the table does not fit the situation, run `harness/skills/route.md` and route
 through the Orchestrator Agent instead of guessing.
 
 ## Clean Approach
@@ -89,7 +89,7 @@ Tiny work can skip brief and task overhead, but it cannot skip proof.
 
 Use this escape hatch before guessing:
 
-1. Run `harness/skills/next-step.md`.
+1. Run `harness/skills/route.md`.
 2. Ask `harness/agents/orchestrator-agent.md`.
 3. Read `harness/rules/orchestration-rules.md`.
 4. Decide whether to continue, pause, escalate, split work, or ask the human.
@@ -103,9 +103,9 @@ Use these to establish or understand the project.
 
 | Flow | Use When | Primary Skills | Main Proof |
 | --- | --- | --- | --- |
-| Greenfield start | Starting a new product or codebase | intake, principles, delivery-brief, task-planning | first vertical slice runs |
-| Brownfield adoption | Entering an existing codebase | brownfield-discovery, intake, next-step | current behavior and validation map |
-| Workflow adoption | Installing this operating model | intake, next-step, trace | workflow files are installed and referenced |
+| Greenfield start | Starting a new product or codebase | scope, principles, delivery-brief, task-planning | first vertical slice runs |
+| Brownfield adoption | Entering an existing codebase | brownfield-discovery, scope, route | current behavior and validation map |
+| Workflow adoption | Installing this operating model | scope, route, trace | workflow files are installed and referenced |
 | Architecture decision | Choosing stack, boundary, or lasting design | delivery-brief, task-planning, trace | decision record and validation path |
 
 ### Delivery Flows
@@ -114,13 +114,13 @@ Use these to change product or technical behavior.
 
 | Flow | Use When | Primary Skills | Main Proof |
 | --- | --- | --- | --- |
-| Add feature | Adding new behavior | intake, delivery-brief, task-planning, verification | acceptance criteria pass |
-| Change behavior | Refining accepted behavior | intake, delivery-brief, task-planning, review | old and new behavior are explicit |
+| Add feature | Adding new behavior | scope, delivery-brief, task-planning, verification | acceptance criteria pass |
+| Change behavior | Refining accepted behavior | scope, delivery-brief, task-planning, review | old and new behavior are explicit |
 | Bug fix | Actual behavior differs from expected behavior | debugging, verification, trace | reproduction or regression proof |
 | Refactor | Internal change without intended behavior change | delivery-brief, task-planning, review | behavior-preserving tests pass |
-| Spike/research | Learning what options, constraints, or unknowns exist | intake, research, next-step, trace | finding, recommendation, or blocker |
-| Experiment / proof of concept | Proving a specific proposed solution can work before production implementation | intake, delivery-brief, task-planning, verification | experiment proof, result, and promotion or cleanup decision |
-| Documentation update | Updating product or technical truth | intake, review, trace | docs match current behavior |
+| Spike/research | Learning what options, constraints, or unknowns exist | scope, research, route, trace | finding, recommendation, or blocker |
+| Experiment / proof of concept | Proving a specific proposed solution can work before production implementation | scope, delivery-brief, task-planning, verification | experiment proof, result, and promotion or cleanup decision |
+| Documentation update | Updating product or technical truth | scope, review, trace | docs match current behavior |
 
 ### Quality And Risk Flows
 
@@ -130,7 +130,7 @@ Use these to prove or reduce risk.
 | --- | --- | --- | --- |
 | QA pass | Validating a feature, release, or bug fix | qa, verification, trace | QA result and evidence |
 | Security audit | Auditing security-sensitive behavior | security-audit, verification, trace | scoped findings and evidence |
-| Performance check | Measuring speed, load, or resource behavior | intake, delivery-brief, verification | benchmark or measurement |
+| Performance check | Measuring speed, load, or resource behavior | scope, delivery-brief, verification | benchmark or measurement |
 | Accessibility check | Validating accessibility behavior | qa, verification | accessibility evidence |
 | Release verification | Checking readiness before release | qa, verification, review | release checklist and proof |
 
@@ -140,11 +140,11 @@ Use these to keep the project healthy.
 
 | Flow | Use When | Primary Skills | Main Proof |
 | --- | --- | --- | --- |
-| Dependency update | Updating packages or tooling | intake, task-planning, verification | build/tests/security checks |
+| Dependency update | Updating packages or tooling | scope, task-planning, verification | build/tests/security checks |
 | CI or test repair | Pipeline or test suite is broken | debugging, verification, trace | failing check becomes passing |
 | Migration | Data/schema/storage behavior changes | delivery-brief, task-planning, verification | migration proof and rollback notes |
 | Incident follow-up | Production issue or severe failure occurred | debugging, trace, delivery-brief | root cause and prevention tasks |
-| Cleanup | Removing dead code or stale docs | intake, review, verification | usage check and behavior proof |
+| Cleanup | Removing dead code or stale docs | scope, review, verification | usage check and behavior proof |
 
 ### Governance And Learning Flows
 
@@ -152,24 +152,24 @@ Use these to improve the system itself.
 
 | Flow | Use When | Primary Skills | Main Proof |
 | --- | --- | --- | --- |
-| Retrospective | Work exposed repeated friction | trace, next-step | workflow improvement or accepted risk |
-| Rule change | Agent behavior should change | intake, delivery-brief, review | rule update and example |
-| Skill change | A repeated procedure needs a better prompt | intake, task-planning, review | skill update and usage note |
-| Agent role change | Ownership or handoff is unclear | next-step, review, trace | role contract update |
-| Decision review | A past decision may be stale | next-step, verification, trace | accepted or superseded decision |
+| Retrospective | Work exposed repeated friction | trace, route | workflow improvement or accepted risk |
+| Rule change | Agent behavior should change | scope, delivery-brief, review | rule update and example |
+| Skill change | A repeated procedure needs a better prompt | scope, task-planning, review | skill update and usage note |
+| Agent role change | Ownership or handoff is unclear | route, review, trace | role contract update |
+| Decision review | A past decision may be stale | route, verification, trace | accepted or superseded decision |
 
 ## Common Flow Recipes
 
 ### Greenfield Project
 
-1. Run `harness/skills/intake.md` to capture the product idea as a request.
+1. Run `harness/skills/scope.md` to capture the product idea as a request.
 2. Run `harness/skills/principles.md` to define project principles.
 3. Run `harness/skills/delivery-brief.md` for the first vertical slice.
 4. Run `harness/skills/task-planning.md` to create the first task graph.
-5. Assign Builder, Reviewer, Verifier, and Historian agents.
+5. Assign Builder, Reviewer, Verifier, and Recorder agents.
 6. Build the smallest useful vertical slice.
 7. Verify baseline proof: build, test, smoke check, and run instructions.
-8. Run `harness/skills/trace.md` to record decisions, risks, and next work.
+8. Run `harness/skills/record.md` to record decisions, risks, and next work.
 
 Keep architecture only as detailed as the first slice needs.
 
@@ -187,13 +187,13 @@ Preserve current behavior first.
 
 ### Add New Feature
 
-1. Run `harness/skills/intake.md`.
+1. Run `harness/skills/scope.md`.
 2. Classify the lane with `harness/rules/risk-lanes.md`.
 3. Mark unclear requirements with `NEEDS CLARIFICATION: specific question`.
 4. Run `harness/skills/delivery-brief.md`.
 5. Run `harness/skills/task-planning.md`.
 6. Run artifact analysis from `harness/rules/artifact-analysis.md`.
-7. Assign Builder, Reviewer, Verifier, and Historian agents.
+7. Assign Builder, Reviewer, Verifier, and Recorder agents.
 8. Build under `harness/rules/tdd-rules.md`, then review, verify, and trace.
 
 Do not expand feature scope during implementation.
@@ -217,7 +217,7 @@ Use an experiment when research or prior knowledge has produced a specific
 candidate solution, but the team needs evidence that it can work before real
 implementation.
 
-1. Run `harness/skills/intake.md` to capture the uncertainty and proposed approach.
+1. Run `harness/skills/scope.md` to capture the uncertainty and proposed approach.
 2. Classify the lane with `harness/rules/risk-lanes.md`.
 3. Write a short delivery brief with explicit non-goals.
 4. Create an `experiment` task and an experiment artifact from

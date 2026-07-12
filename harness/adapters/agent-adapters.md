@@ -34,15 +34,15 @@ workflow file and record the adapter mismatch in the trace or review note.
 Possible files in a target project:
 
 ```text
-.agents/skills/intake/SKILL.md          wraps harness/skills/intake.md
-.agents/skills/next-step/SKILL.md       wraps harness/skills/next-step.md
-.agents/skills/plan-delivery/SKILL.md   wraps harness/skills/delivery-brief.md and task-planning.md
-.agents/skills/build/SKILL.md           wraps harness/agents/builder-agent.md
+.agents/skills/scope/SKILL.md          wraps harness/skills/scope.md
+.agents/skills/route/SKILL.md       wraps harness/skills/route.md
+.agents/skills/plan/SKILL.md   wraps harness/skills/delivery-brief.md and task-planning.md
+.agents/skills/implement/SKILL.md           wraps harness/agents/builder-agent.md
 .agents/skills/review/SKILL.md          wraps harness/skills/review.md
 .agents/skills/verify/SKILL.md          wraps harness/skills/verification.md
 .agents/skills/qa/SKILL.md              wraps harness/skills/qa.md
-.agents/skills/security/SKILL.md        wraps harness/skills/security-audit.md
-.agents/skills/trace/SKILL.md           wraps harness/skills/trace.md
+.agents/skills/audit/SKILL.md        wraps harness/skills/security-audit.md
+.agents/skills/record/SKILL.md           wraps harness/skills/record.md
 ```
 
 Each Codex skill should read `AGENTS.md`, `harness/HOW_TO_USE.md`, the
@@ -59,15 +59,15 @@ Possible files:
 
 ```text
 CLAUDE.md
-.claude/commands/intake.md          wraps harness/skills/intake.md
-.claude/commands/next-step.md       wraps harness/skills/next-step.md
-.claude/commands/plan-delivery.md   wraps harness/skills/delivery-brief.md and task-planning.md
-.claude/commands/build.md           wraps harness/agents/builder-agent.md
+.claude/commands/scope.md          wraps harness/skills/scope.md
+.claude/commands/route.md       wraps harness/skills/route.md
+.claude/commands/plan.md   wraps harness/skills/delivery-brief.md and task-planning.md
+.claude/commands/implement.md           wraps harness/agents/builder-agent.md
 .claude/commands/review.md          wraps harness/skills/review.md
 .claude/commands/verify.md          wraps harness/skills/verification.md
 .claude/commands/qa.md              wraps harness/skills/qa.md
-.claude/commands/security.md        wraps harness/skills/security-audit.md
-.claude/commands/trace.md           wraps harness/skills/trace.md
+.claude/commands/audit.md        wraps harness/skills/security-audit.md
+.claude/commands/record.md           wraps harness/skills/record.md
 ```
 
 `CLAUDE.md` should import or reference `AGENTS.md` and the workflow files.

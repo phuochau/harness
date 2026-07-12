@@ -56,7 +56,7 @@ assert_file "$target/harness/HOW_TO_USE.md"
 assert_file "$target/harness/influence-map.md"
 assert_file "$target/harness/file-contracts.md"
 assert_file "$target/harness/agents/builder-agent.md"
-assert_file "$target/harness/skills/next-step.md"
+assert_file "$target/harness/skills/route.md"
 assert_file "$target/harness/rules/tdd-rules.md"
 assert_file "$target/harness/adapters/agent-adapters.md"
 # The internal changelog must not ship to installed projects.
@@ -72,15 +72,15 @@ assert_dir "$target/docs/delivery/decisions"
 assert_file "$target/experiments/README.md"
 
 # Canonical adapter set (same role set as the Codex installer).
-for slug in intake next-step plan-delivery build review verify qa security trace; do
+for slug in scope route plan implement review verify qa audit record; do
   assert_file "$target/.claude/commands/$slug.md"
 done
 
 assert_contains "$target/CLAUDE.md" "harness/HOW_TO_USE.md"
 assert_contains "$target/CLAUDE.md" "role/skill/rule map"
 assert_contains "$target/AGENTS.md" "harness/HOW_TO_USE.md"
-assert_contains "$target/.claude/commands/next-step.md" "rule files to apply"
-assert_contains "$target/.claude/commands/next-step.md" "harness/skills/next-step.md"
+assert_contains "$target/.claude/commands/route.md" "rule files to apply"
+assert_contains "$target/.claude/commands/route.md" "harness/skills/route.md"
 
 if "$INSTALLER" "$target" >"$TMP_ROOT/second-run.out" 2>&1; then
   echo "Expected second install without --force to fail" >&2

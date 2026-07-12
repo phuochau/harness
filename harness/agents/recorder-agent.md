@@ -1,4 +1,4 @@
-# Historian Agent
+# Recorder Agent
 
 ## Purpose
 
@@ -12,7 +12,7 @@ Preserve what future humans and agents need to know.
 - Review artifact.
 - Verification artifact.
 - Final diff summary.
-- `harness/skills/trace.md`
+- `harness/skills/record.md`
 - `docs/delivery/templates/trace.md`
 - `docs/delivery/templates/decision.md`
 - `harness/rules/core-rules.md`

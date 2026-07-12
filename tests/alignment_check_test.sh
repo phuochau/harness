@@ -24,15 +24,15 @@ fail() {
 }
 
 # role | agent-file | skills | rules | adapter-slug
-MAP='intake|intake-agent.md|intake|core-rules,risk-lanes|intake
-orchestrator|orchestrator-agent.md|next-step|core-rules,risk-lanes,orchestration-rules,handoff-rules|next-step
-delivery-planner|delivery-planner-agent.md|delivery-brief,task-planning|core-rules,risk-lanes,artifact-analysis,proof-gates,tdd-rules|plan-delivery
-builder|builder-agent.md|debugging,research|core-rules,risk-lanes,proof-gates,tdd-rules|build
+MAP='scope|scope-agent.md|scope|core-rules,risk-lanes|scope
+orchestrator|orchestrator-agent.md|route|core-rules,risk-lanes,orchestration-rules,handoff-rules|route
+planner|planner-agent.md|delivery-brief,task-planning|core-rules,risk-lanes,artifact-analysis,proof-gates,tdd-rules|plan
+builder|builder-agent.md|debugging,research|core-rules,risk-lanes,proof-gates,tdd-rules|implement
 reviewer|reviewer-agent.md|review|core-rules,risk-lanes,review-rules,proof-gates,tdd-rules|review
 verifier|verifier-agent.md|verification|core-rules,risk-lanes,proof-gates,tdd-rules|verify
-security|security-agent.md|security-audit|core-rules,risk-lanes,proof-gates|security
+security|security-agent.md|security-audit|core-rules,risk-lanes,proof-gates|audit
 qa|qa-agent.md|qa|core-rules,risk-lanes,proof-gates|qa
-historian|historian-agent.md|trace|core-rules,risk-lanes,handoff-rules,tdd-rules|trace'
+recorder|recorder-agent.md|record|core-rules,risk-lanes,handoff-rules,tdd-rules|record'
 
 adapter_slugs=$(sed -n "s/^ADAPTER_SLUGS='\(.*\)'.*/\1/p" "$COMMON")
 [ -n "$adapter_slugs" ] || fail "could not read ADAPTER_SLUGS from $COMMON"
@@ -85,7 +85,7 @@ done < "$tmp_map"
 rm -f "$tmp_map"
 
 # Every owner role (except human) in file-contracts.md must have an agent file.
-for owner in orchestrator intake delivery-planner builder reviewer verifier security qa historian; do
+for owner in orchestrator scope planner builder reviewer verifier security qa recorder; do
   grep -Fq -- "\`$owner\`" "$H/file-contracts.md" \
     || fail "owner '$owner' not listed in file-contracts.md"
   [ -f "$H/agents/$owner-agent.md" ] \

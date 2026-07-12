@@ -2,7 +2,7 @@
 id: BRIEF-001
 status: done
 lane: normal
-owner: delivery-planner
+owner: planner
 request: REQ-001
 created: 2026-07-07
 updated: 2026-07-07

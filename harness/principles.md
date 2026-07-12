@@ -48,7 +48,7 @@ verification.
 ## 6. Agents Have Roles
 
 One agent should not silently act as product manager, engineer, reviewer,
-verifier, and historian for high-risk work. Roles make responsibilities clear
+verifier, and recorder for high-risk work. Roles make responsibilities clear
 even when the same underlying model performs multiple steps.
 
 ## 7. Done Means Verified

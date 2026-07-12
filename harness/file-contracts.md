@@ -10,7 +10,7 @@ matter makes state easy for humans and agents to scan.
 id: REQ-001
 status: proposed
 lane: normal
-owner: intake
+owner: scope
 created: YYYY-MM-DD
 updated: YYYY-MM-DD
 depends_on: []
@@ -41,14 +41,14 @@ Decision records may also use:
 Use role owners rather than tool names:
 
 - `orchestrator`
-- `intake`
-- `delivery-planner`
+- `scope`
+- `planner`
 - `builder`
 - `reviewer`
 - `verifier`
 - `security`
 - `qa`
-- `historian`
+- `recorder`
 - `human`
 
 ## Review Decision Values

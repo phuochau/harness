@@ -74,7 +74,7 @@ rules from `harness/rules/`, and templates from
 `harness/HOW_TO_USE.md` when the artifact does not already name the
 owner.
 
-If the next step is unclear, use `harness/skills/next-step.md` and ask
+If the next step is unclear, use `harness/skills/route.md` and ask
 the Orchestrator Agent in `harness/agents/orchestrator-agent.md`.'
 
 install_workflow() {

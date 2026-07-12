@@ -2,7 +2,7 @@
 id: TRACE-001
 status: done
 lane: normal
-owner: historian
+owner: recorder
 request: REQ-001
 brief: BRIEF-001
 created: 2026-07-07

@@ -3,7 +3,7 @@ id: REQ-001
 status: done
 lane: normal
 type: workflow-improvement
-owner: intake
+owner: scope
 created: 2026-07-07
 updated: 2026-07-07
 depends_on: []

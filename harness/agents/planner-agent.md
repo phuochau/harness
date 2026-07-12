@@ -1,4 +1,4 @@
-# Delivery Planner Agent
+# Planner Agent
 
 ## Purpose
 

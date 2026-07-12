@@ -1,4 +1,4 @@
-# Skill: Intake
+# Skill: Scope
 
 Use when a request first enters the workflow.
 

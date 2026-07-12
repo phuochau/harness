@@ -4,26 +4,26 @@ These rules decide who should act next.
 
 ## Routing By Status
 
-- `proposed`: Intake Agent.
-- `ready` with no brief: Delivery Planner Agent.
+- `proposed`: Scope Agent.
+- `ready` with no brief: Planner Agent.
 - `ready` with task and proof: Builder Agent.
 - `in_progress`: current owner continues or asks Orchestrator if blocked.
 - `blocked`: Orchestrator Agent decides whether to ask human, change owner, or
   split work.
 - `review`: Reviewer Agent.
 - `verify`: Verifier Agent.
-- `done`: Historian Agent checks trace and decisions.
+- `done`: Recorder Agent checks trace and decisions.
 - `rejected`: no action unless a human reopens.
-- `accepted`: Historian Agent checks whether an active decision constrains the
+- `accepted`: Recorder Agent checks whether an active decision constrains the
   current work.
 - `superseded`: use the newer decision before continuing.
 
 ## Routing By Missing Decision
 
-- Outcome unclear: Intake Agent.
-- Scope unclear: Intake Agent or Delivery Planner Agent.
+- Outcome unclear: Scope Agent.
+- Scope unclear: Scope Agent or Planner Agent.
 - Risk unclear: Orchestrator Agent, then use the higher lane until clarified.
-- Task split unclear: Delivery Planner Agent.
+- Task split unclear: Planner Agent.
 - Implementation unclear: Builder Agent may research, or Orchestrator may split
   a research task.
 - Solution feasibility unclear: Builder Agent may run a bounded experiment, or
@@ -32,7 +32,7 @@ These rules decide who should act next.
 - Proof unclear: Verifier Agent defines proof.
 - Security impact unclear: Security Agent.
 - QA coverage unclear: QA Agent.
-- History or decision unclear: Historian Agent.
+- History or decision unclear: Recorder Agent.
 
 ## Parallel Work
 

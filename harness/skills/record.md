@@ -1,4 +1,4 @@
-# Skill: Trace
+# Skill: Record
 
 Use at the end of work or when handing off.
 

@@ -1,4 +1,4 @@
-# Skill: Next Step
+# Skill: Route
 
 Use when an agent or human does not know what should happen next.
 
@@ -19,14 +19,14 @@ Use when an agent or human does not know what should happen next.
    - failed verification
    - workflow uncertainty
 5. Choose the next role:
-   - Intake Agent
-   - Delivery Planner Agent
+   - Scope Agent
+   - Planner Agent
    - Builder Agent
    - Reviewer Agent
    - Verifier Agent
    - Security Agent
    - QA Agent
-   - Historian Agent
+   - Recorder Agent
    - Orchestrator Agent
 6. Choose the next skill.
 7. Choose the rule files the next role must apply, using the role/skill/rule

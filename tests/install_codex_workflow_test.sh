@@ -59,7 +59,7 @@ assert_file "$target/harness/HOW_TO_USE.md"
 assert_file "$target/harness/influence-map.md"
 assert_file "$target/harness/file-contracts.md"
 assert_file "$target/harness/agents/builder-agent.md"
-assert_file "$target/harness/skills/next-step.md"
+assert_file "$target/harness/skills/route.md"
 assert_file "$target/harness/rules/tdd-rules.md"
 assert_file "$target/harness/adapters/agent-adapters.md"
 assert_absent "$target/harness/REVIEW.md"
@@ -72,23 +72,23 @@ assert_absent "$target/.claude"
 assert_absent "$target/.codex/skills"
 
 # Canonical adapter set (same role set as the Claude installer).
-for slug in intake next-step plan-delivery build review verify qa security trace; do
+for slug in scope route plan implement review verify qa audit record; do
   assert_file "$target/.agents/skills/$slug/SKILL.md"
 done
 
 assert_contains "$target/AGENTS.md" "harness/HOW_TO_USE.md"
 assert_contains "$target/AGENTS.md" "role/skill/rule map"
-assert_contains "$target/.agents/skills/intake/SKILL.md" "name: intake"
-assert_contains "$target/.agents/skills/intake/SKILL.md" "harness/skills/intake.md"
-assert_contains "$target/.agents/skills/next-step/SKILL.md" "name: next-step"
-assert_contains "$target/.agents/skills/next-step/SKILL.md" "harness/agents/orchestrator-agent.md"
-assert_contains "$target/.agents/skills/plan-delivery/SKILL.md" "harness/skills/delivery-brief.md"
-assert_contains "$target/.agents/skills/plan-delivery/SKILL.md" "harness/skills/task-planning.md"
-assert_contains "$target/.agents/skills/build/SKILL.md" "harness/agents/builder-agent.md"
-assert_contains "$target/.agents/skills/build/SKILL.md" "harness/rules/tdd-rules.md"
+assert_contains "$target/.agents/skills/scope/SKILL.md" "name: scope"
+assert_contains "$target/.agents/skills/scope/SKILL.md" "harness/skills/scope.md"
+assert_contains "$target/.agents/skills/route/SKILL.md" "name: route"
+assert_contains "$target/.agents/skills/route/SKILL.md" "harness/agents/orchestrator-agent.md"
+assert_contains "$target/.agents/skills/plan/SKILL.md" "harness/skills/delivery-brief.md"
+assert_contains "$target/.agents/skills/plan/SKILL.md" "harness/skills/task-planning.md"
+assert_contains "$target/.agents/skills/implement/SKILL.md" "harness/agents/builder-agent.md"
+assert_contains "$target/.agents/skills/implement/SKILL.md" "harness/rules/tdd-rules.md"
 assert_contains "$target/.agents/skills/review/SKILL.md" "harness/skills/review.md"
 assert_contains "$target/.agents/skills/verify/SKILL.md" "harness/skills/verification.md"
-assert_contains "$target/.agents/skills/trace/SKILL.md" "harness/skills/trace.md"
+assert_contains "$target/.agents/skills/record/SKILL.md" "harness/skills/record.md"
 
 if "$INSTALLER" "$target" >"$second_run_output" 2>&1; then
   echo "Expected second install without --force to fail" >&2
@@ -101,7 +101,7 @@ assert_contains "$second_run_output" "Refusing to overwrite existing path withou
 "$INSTALLER" --dry-run "$dry_target" >"$dry_run_output"
 assert_contains "$dry_run_output" "Would install Codex workflow"
 assert_contains "$dry_run_output" "Would write file: $dry_target_abs/AGENTS.md"
-assert_contains "$dry_run_output" "Would write file: $dry_target_abs/.agents/skills/next-step/SKILL.md"
+assert_contains "$dry_run_output" "Would write file: $dry_target_abs/.agents/skills/route/SKILL.md"
 assert_absent "$dry_target/AGENTS.md"
 
 "$INSTALLER" --no-skills "$no_skills_target"
@@ -112,6 +112,6 @@ assert_absent "$no_skills_target/.agents/skills"
 "$INSTALLER" "$nested_target"
 assert_file "$nested_target/AGENTS.md"
 assert_file "$nested_target/harness/README.md"
-assert_file "$nested_target/.agents/skills/next-step/SKILL.md"
+assert_file "$nested_target/.agents/skills/route/SKILL.md"
 
 echo "install_codex_workflow_test: passed"

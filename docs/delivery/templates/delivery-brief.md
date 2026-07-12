@@ -5,7 +5,7 @@
 id: BRIEF-000
 status: ready
 lane: normal
-owner: delivery-planner
+owner: planner
 request: REQ-000
 created: YYYY-MM-DD
 updated: YYYY-MM-DD

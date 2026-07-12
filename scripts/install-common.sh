@@ -132,7 +132,7 @@ Choose a role from `harness/agents/`, run the matching skill from
 `harness/skills/`, and use the role/skill/rule map in
 `harness/HOW_TO_USE.md` when the artifact does not already name the
 owner. Write artifacts from `docs/delivery/templates/`.
-If the next step is unclear, use `harness/skills/next-step.md` and route
+If the next step is unclear, use `harness/skills/route.md` and route
 through `harness/agents/orchestrator-agent.md`.'
 
 write_agents_md() {
@@ -167,47 +167,47 @@ install_harness_tree() {
 # only difference is how it is wrapped: a Claude slash command or a Codex skill.
 # ---------------------------------------------------------------------------
 
-ADAPTER_SLUGS='intake next-step plan-delivery build review verify qa security trace'
+ADAPTER_SLUGS='scope route plan implement review verify qa audit record'
 
 adapter_desc() {
   case "$1" in
-    intake)        echo 'Use when a request first enters the repository delivery workflow.' ;;
-    next-step)     echo 'Use when the next action, role, lane, owner, proof, or escalation path is unclear.' ;;
-    plan-delivery) echo 'Use after a request is clear enough for normal or high-risk delivery planning.' ;;
-    build)         echo 'Use when assigned a ready build, docs, investigation, or experiment task.' ;;
+    scope)        echo 'Use when a request first enters the repository delivery workflow.' ;;
+    route)     echo 'Use when the next action, role, lane, owner, proof, or escalation path is unclear.' ;;
+    plan) echo 'Use after a request is clear enough for normal or high-risk delivery planning.' ;;
+    implement)         echo 'Use when assigned a ready build, docs, investigation, or experiment task.' ;;
     review)        echo 'Use before integration or completion to review scope, proof, risk, and contracts.' ;;
     verify)        echo 'Use before claiming completion to run proof and record verification status.' ;;
     qa)            echo 'Use to validate a feature, release, or bug fix against acceptance criteria.' ;;
-    security)      echo 'Use for a security audit or a security-sensitive change.' ;;
-    trace)         echo 'Use at the end of work to write trace notes, decisions, and proof gaps.' ;;
+    audit)      echo 'Use for a security audit or a security-sensitive change.' ;;
+    record)         echo 'Use at the end of work to write trace notes, decisions, and proof gaps.' ;;
   esac
 }
 
 adapter_title() {
   case "$1" in
-    intake)        echo 'Intake' ;;
-    next-step)     echo 'Next Step' ;;
-    plan-delivery) echo 'Plan Delivery' ;;
-    build)         echo 'Build' ;;
+    scope)        echo 'Scope' ;;
+    route)     echo 'Route' ;;
+    plan) echo 'Plan' ;;
+    implement)         echo 'Implement' ;;
     review)        echo 'Review' ;;
     verify)        echo 'Verify' ;;
     qa)            echo 'QA' ;;
-    security)      echo 'Security Audit' ;;
-    trace)         echo 'Trace' ;;
+    audit)      echo 'Security Audit' ;;
+    record)         echo 'Record' ;;
   esac
 }
 
 adapter_body() {
   case "$1" in
-    intake) cat <<'EOF'
+    scope) cat <<'EOF'
 Use when a request first enters the workflow.
 
 Read:
 
 - `AGENTS.md`
 - `harness/HOW_TO_USE.md`
-- `harness/agents/intake-agent.md`
-- `harness/skills/intake.md`
+- `harness/agents/scope-agent.md`
+- `harness/skills/scope.md`
 - `harness/rules/core-rules.md`
 - `harness/rules/risk-lanes.md`
 
@@ -215,7 +215,7 @@ Create or update a request artifact from
 `docs/delivery/templates/request.md` under `docs/delivery/requests/`.
 EOF
     ;;
-    next-step) cat <<'EOF'
+    route) cat <<'EOF'
 Use when the next action, role, lane, owner, proof, or escalation path is
 unclear.
 
@@ -223,7 +223,7 @@ Read:
 
 - `AGENTS.md`
 - `harness/HOW_TO_USE.md`
-- `harness/skills/next-step.md`
+- `harness/skills/route.md`
 - `harness/agents/orchestrator-agent.md`
 - `harness/rules/orchestration-rules.md`
 - `harness/rules/handoff-rules.md`
@@ -232,14 +232,14 @@ Return the next role, next skill, rule files to apply, required artifact, and
 whether to continue, pause, escalate, or ask the human one concrete question.
 EOF
     ;;
-    plan-delivery) cat <<'EOF'
+    plan) cat <<'EOF'
 Use after a request is clear enough for normal or high-risk work.
 
 Read:
 
 - `AGENTS.md`
 - `harness/HOW_TO_USE.md`
-- `harness/agents/delivery-planner-agent.md`
+- `harness/agents/planner-agent.md`
 - `harness/skills/delivery-brief.md`
 - `harness/skills/task-planning.md`
 - `harness/rules/artifact-analysis.md`
@@ -251,7 +251,7 @@ Write a delivery brief and task graph, then run artifact analysis before
 implementation starts.
 EOF
     ;;
-    build) cat <<'EOF'
+    implement) cat <<'EOF'
 Use when assigned a ready build, docs, investigation, or experiment task.
 
 Read:
@@ -320,7 +320,7 @@ Start from the delivery brief, turn acceptance criteria into checks, run them,
 and record `passed`, `failed`, `blocked`, `not_applicable`, or `risk_accepted`.
 EOF
     ;;
-    security) cat <<'EOF'
+    audit) cat <<'EOF'
 Use for a security audit or a security-sensitive change.
 
 Read:
@@ -336,15 +336,15 @@ Define scope, collect evidence, record findings separately from fixes, and
 verify each fix. Treat the lane as high-risk unless explicitly narrowed.
 EOF
     ;;
-    trace) cat <<'EOF'
+    record) cat <<'EOF'
 Use at the end of work to record what happened and what future agents need.
 
 Read:
 
 - `AGENTS.md`
 - The request, brief, tasks, review, and verification artifacts.
-- `harness/agents/historian-agent.md`
-- `harness/skills/trace.md`
+- `harness/agents/recorder-agent.md`
+- `harness/skills/record.md`
 - `harness/rules/handoff-rules.md`
 - `harness/rules/tdd-rules.md`
 - `docs/delivery/templates/trace.md`

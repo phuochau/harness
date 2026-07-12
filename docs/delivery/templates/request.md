@@ -6,7 +6,7 @@ id: REQ-000
 status: proposed
 lane: normal
 type: feature
-owner: intake
+owner: scope
 created: YYYY-MM-DD
 updated: YYYY-MM-DD
 depends_on: []

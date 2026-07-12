@@ -91,7 +91,7 @@ entrypoints. For the exact file fields, status values, and ID prefixes, see
 The standard path is:
 
 ```text
-Request -> Intake -> Delivery brief -> Task graph -> Artifact analysis
+Request -> Scope -> Delivery brief -> Task graph -> Artifact analysis
   -> Orchestrator routing when needed -> Agent assignment
   -> Build under TDD, investigate, or experiment -> Review -> Verify
   -> Trace and learn

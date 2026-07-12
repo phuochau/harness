@@ -4,7 +4,7 @@ The standard lifecycle is:
 
 ```text
 Request
-  -> Intake
+  -> Scope
   -> Delivery brief
   -> Task graph
   -> Artifact analysis
@@ -21,7 +21,7 @@ As a diagram, including the loops back when proof or clarity is missing:
 ```mermaid
 %%{init: {'flowchart': {'curve': 'step'}}}%%
 flowchart TD
-    R[Request<br/>raw input: issue, bug, audit, prompt] --> I[Intake<br/>classify type, scope, risk lane]
+    R[Request<br/>raw input: issue, bug, audit, prompt] --> I[Scope<br/>classify type, scope, risk lane]
     I --> Q{Ambiguous?}
     Q -- yes --> NC[Mark NEEDS CLARIFICATION] --> I
     Q -- no --> B[Delivery Brief<br/>execution contract + named proof]
@@ -79,11 +79,11 @@ QA request, or human prompt.
 
 Use `docs/delivery/templates/request.md`.
 
-## 2. Intake
+## 2. Scope
 
-Intake turns the raw request into a classified work item.
+Scope turns the raw request into a classified work item.
 
-Intake answers:
+Scope answers:
 
 - What type of work is this?
 - Who is affected?
@@ -151,15 +151,15 @@ If the next step is already clear, continue directly to agent assignment.
 
 Assign each task to a role, not a vendor-specific agent:
 
-- Intake Agent
+- Scope Agent
 - Orchestrator Agent
-- Delivery Planner Agent
+- Planner Agent
 - Builder Agent
 - Reviewer Agent
 - Verifier Agent
 - Security Agent
 - QA Agent
-- Historian Agent
+- Recorder Agent
 
 The actual runtime can be Codex, Claude, Cursor, Copilot, a human, or a CI job.
 

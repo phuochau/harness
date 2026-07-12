@@ -5,7 +5,7 @@
 id: DEC-000
 status: accepted
 lane: normal
-owner: historian
+owner: recorder
 created: YYYY-MM-DD
 updated: YYYY-MM-DD
 related: []
