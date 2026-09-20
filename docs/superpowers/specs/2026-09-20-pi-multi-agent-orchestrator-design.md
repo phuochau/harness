@@ -408,21 +408,32 @@ Each run stores:
 - Assignment bundles, attempt records, worker/session identifiers, logs, and
   evidence.
 
-Only one controller may own a run lease. The local runtime combines an OS
-advisory lock with a durable lease record. Acquiring or recovering that lease
-atomically increments a fencing token; every state write and external-action
-observation carries the token, and append verifies the current owner while the
-lock is held, so a stale controller cannot append valid events after ownership
-changes.
+Only one controller may own a run lease. The local runtime combines an atomic
+exclusive lock-directory lease with a durable lease record. Acquiring or
+recovering that lease atomically increments a fencing token; every state write
+and external-action observation carries the token, and append verifies the
+current owner while the exclusive lease is held, so a stale controller cannot
+append valid events after ownership changes. The implementation must not claim
+OS `flock` semantics: stale-lock detection is advisory, while fencing-token
+validation is the correctness boundary.
+
+Inside the owning process, every timer, Herdr subscription, Pi lifecycle hook,
+and operator command enters one serialized controller command queue. A second
+command cannot derive decisions from the same state revision while the first is
+appending its events. Event append enforces uniqueness for `(runId, eventType,
+idempotencyKey)` and returns the existing event for an identical duplicate.
 
 Every JSONL event contains a monotonic sequence number, timestamp, run and
 entity IDs, idempotency key, fencing token, payload, `prevHash`, and
 `eventHash`. An append is flushed and `fsync`ed before the controller acts on
 it. External side effects use an intent/observation protocol: Pi first records
 an action intent with a stable idempotency key, performs or reconciles the
-operation, then records the observed result. Adapters must use that key when
-the underlying system supports idempotency and otherwise reconcile by native
-session, branch, commit, or worktree identity before retrying.
+operation, then records the observed result. Every action declares one recovery
+class: `idempotent`, `reconcilable`, or `non_retryable`. Adapters must use the
+key when the underlying system supports idempotency; reconcilable actions query
+native session, branch, commit, worktree, push, or pull-request identity before
+retrying. A `non_retryable` action whose result is unknown after a crash becomes
+`BLOCKED` with an indeterminate-effect diagnostic instead of running twice.
 
 `state.json` is written to a sibling temporary file, flushed, and atomically
 renamed. It records the last applied sequence and event hash. On recovery, an
@@ -509,11 +520,16 @@ existing approved artifacts may conditionally skip planning, but it must bind
 their paths, hashes, and containing commit before fan-out.
 
 Herdr creates or opens a worktree for each job that requests worktree
-isolation. Downstream `same-item` jobs may inherit the upstream artifact,
-branch, and worktree reference when their action contract allows it. In the
-default workflow, the implementation job creates the task branch and the
-review and verification jobs inspect that same branch. A task branch begins
-from an integration commit containing all completed dependency commits.
+isolation. Downstream `same-item` jobs may inherit the upstream artifact and
+branch when their action contract allows it. In the default workflow, the
+implementation job creates the task branch. After that agent stops and releases
+its workspace, review runs in a separate detached, read-only review worktree
+pinned to the implementation commit. The review result is rejected if that
+worktree becomes dirty or its commit changes. Verification may use a newly
+created detached worktree pinned to the reviewed commit. A remediation attempt
+receives a new writable worktree and immutable assignment; a reviewer never
+shares the implementer's working directory. A task branch begins from an
+integration commit containing all completed dependency commits.
 Independent tasks may run concurrently from their appropriate integration
 bases.
 
@@ -688,7 +704,7 @@ repository: either an already installed binary or an exact-version command
 from the harness release documentation, such as:
 
 ```text
-npm exec --yes --package @pi-harness/cli@<exact-version> -- harness bootstrap .
+npm exec --yes --package pi-multi-agent-harness@<exact-version> -- harness bootstrap .
 ```
 
 The launcher treats `.harness/*.yaml` and `harness.lock` only as declarative
@@ -700,7 +716,13 @@ command rather than executing repository-provided code.
 
 Each dependency has a typed installer recipe: exact-version `npm`, allowlisted
 package-manager formula, signed release artifact with digest, or `manual`.
-Bootstrap may automatically execute only recipes permitted by machine trust
+Bootstrap ships an immutable built-in trust baseline containing only exact
+official source identities and integrity-verification rules from the signed
+harness release manifest. A machine policy may narrow that baseline or add a
+separately approved source, and project policy may only narrow the effective
+result. Absence of an external machine policy therefore remains useful on a
+clean machine without granting arbitrary repository-controlled installation.
+Bootstrap may automatically execute only recipes permitted by that effective
 policy whose source and integrity match the lock. A manual or unverifiable
 dependency blocks completion with exact install instructions and is re-probed
 after the operator acts; the harness never substitutes a downloaded arbitrary
@@ -881,11 +903,15 @@ The first release is acceptable when all of the following are demonstrated:
     fan-in barrier, and task-state projection without hard-coded stage names.
 13. A complete sample feature reaches final full-suite verification and creates
     one pull request containing the integrated task commits.
+14. Concurrent timer, Herdr, Pi, and operator wakeups are serialized so one
+    logical effect produces one intent and one observation.
+15. Review uses a distinct worker kind and a separate clean, detached worktree
+    pinned to the implementation commit; reviewer mutation blocks acceptance.
 
 ## 22. External References
 
-- [Pi packages](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/packages.md)
-- [Pi extensions](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md)
+- [Pi packages](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/packages.md)
+- [Pi extensions](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/extensions.md)
 - [Spec Kit task generation](https://github.com/github/spec-kit/blob/main/templates/commands/tasks.md)
 - [Spec Kit task template](https://github.com/github/spec-kit/blob/main/templates/tasks-template.md)
 - [Spec Kit presets](https://github.com/github/spec-kit/blob/main/docs/reference/presets.md)
