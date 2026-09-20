@@ -4,7 +4,7 @@
 
 **Goal:** Connect deterministic orchestration to Spec Kit planning and a resident Pi extension, then generate a complete editable workflow that runs immediately.
 
-**Architecture:** Spec Kit remains the planning source of truth. Pi planning actions are accepted only when a durable custom-entry marker, the correlated agent run reaches `agent_settled`, its final `turnIndex` is recorded, and stage-specific artifact deltas agree. The extension is tested through Pi's real resource loader before resident scheduling and commands are layered on it.
+**Architecture:** Spec Kit remains the planning source of truth. Pi planning actions are accepted only when a durable custom-entry marker identifies either the correlated `agent_settled` callback or a strictly validated recovered terminal transcript, its final `turnIndex` is recorded, and stage-specific artifact deltas agree. Controller code derives the task graph and cryptographic hash from canonical `tasks.md` records. The extension is tested through Pi's real resource loader before resident scheduling and commands are layered on it.
 
 **Tech Stack:** Spec Kit presets, `@earendil-works/pi-coding-agent@0.86.1`, YAML, TypeScript, Vitest.
 
@@ -15,14 +15,13 @@
 **Files:**
 - Create: `presets/harness-task-graph/preset.yml`
 - Create: `presets/harness-task-graph/commands/speckit.tasks.md`
-- Create: `presets/harness-task-graph/templates/task-graph.json`
-- Create: `src/speckit/artifacts.ts`, `semantic-hash.ts`, `preset.ts`
+- Create: `src/speckit/artifacts.ts`, `task-records.ts`, `semantic-hash.ts`, `seal-task-graph.ts`, `preset.ts`
 - Create: `test/support/planning-fixtures.ts`
 - Test: `test/integration/speckit/preset.test.ts`, `artifacts.test.ts`
 
 **Interfaces:**
-- Produces `planningArtifactContract(stage, paths)` and `validatePlanningArtifacts(root, contract, before): AcceptedStageArtifacts`.
-- `specify` requires a changed `spec.md`; `plan` requires existing spec plus changed `plan.md`; `tasks` requires the complete set and changed `tasks.md` plus `task-graph.json`.
+- Produces `parseSpecKitTasks(text): CanonicalTaskRecord[]`, `sealTaskGraph(input): TaskGraphDocument`, `planningArtifactContract(stage, paths)`, and `validatePlanningArtifacts(root, contract, before): AcceptedStageArtifacts`.
+- `specify` requires a changed `spec.md`; `plan` requires existing spec plus changed `plan.md`; `tasks` requires the complete set and a changed `tasks.md`, then the controller atomically derives and validates `task-graph.json`.
 
 - [ ] **Step 1: Write preset composition and semantic-hash tests**
 
@@ -31,7 +30,14 @@ it("wraps speckit.tasks and emits a hash-bound graph", async () => {
   const resolved = await resolvePresetFixture("harness-task-graph");
   expect(resolved.command).toContain("{CORE_TEMPLATE}");
   const artifacts = await validatePlanningArtifacts(resolved.root, planningArtifactContract("tasks", artifactPathsFixture()), emptyArtifactBaseline());
-  expect(artifacts.graph?.tasksSemanticHash).toBe(semanticHash(artifacts.files.tasks.text));
+  expect(resolved.command).toContain("harness-task-metadata:v1");
+  expect(artifacts.graph?.schema).toBe("harness/task-graph/v1");
+  expect(artifacts.graph?.tasksSemanticHash).toBe(semanticHash(parseSpecKitTasks(artifacts.files.tasks.text)));
+});
+
+it("rejects metadata that disagrees with the visible task definition", async () => {
+  await expect(sealTaskGraph(taskArtifactFixture({ metadataOwnedPath: "src/wrong.ts" })))
+    .rejects.toThrow(/metadata does not match visible task/);
 });
 ```
 
@@ -72,33 +78,54 @@ strategy: wrap
 ---
 {CORE_TEMPLATE}
 
-After writing tasks.md, write task-graph.json using the supplied JSON template.
-Copy every task ID and dependency exactly; compute tasksSemanticHash from the
-normalized semantic task records. Do not invent dependencies during execution.
+After writing tasks.md, append exactly one `harness-task-metadata:v1` HTML
+comment containing JSON records for every visible task. Each record contains
+`id`, `dependsOn`, `acceptanceRefs`, and `ownedPaths`. Copy IDs, paths, labels,
+parallel markers, phase headings, descriptions, and explicit dependency text
+from the visible document; add missing visible dependency or acceptance text
+before recording it in metadata. Do not write `task-graph.json` and do not
+compute a hash: the harness controller derives both deterministically after the
+correlated Pi run settles.
 ```
 
 ```ts
 export function planningArtifactContract(stage: PlanningStage, paths: ArtifactPaths): PlanningArtifactContract {
   if (stage === "specify") return { paths, required: ["spec"], mustChange: ["spec"], validateGraph: false };
   if (stage === "plan") return { paths, required: ["spec", "plan"], mustChange: ["plan"], validateGraph: false };
-  return { paths, required: ["spec", "plan", "tasks", "graph"], mustChange: ["tasks", "graph"], validateGraph: true };
+  return { paths, required: ["spec", "plan", "tasks"], mustChange: ["tasks"], deriveGraph: true, validateGraph: true };
 }
 
 export async function validatePlanningArtifacts(root: string, contract: PlanningArtifactContract, before: ArtifactBaseline): Promise<AcceptedStageArtifacts> {
-  const loaded = await readRequiredFiles(root, contract.paths, contract.required);
+  const initial = await readRequiredFiles(root, contract.paths, contract.required);
+  const taskRecords = contract.deriveGraph ? parseSpecKitTasks(initial.tasks.text) : undefined;
+  if (taskRecords) await sealTaskGraph({ root, paths: contract.paths, taskRecords, tasksText: initial.tasks.text, specText: initial.spec.text });
+  const loaded = await readRequiredFiles(root, contract.paths, contract.deriveGraph ? [...contract.required, "graph"] : contract.required);
   const hashes = hashArtifacts(loaded);
   for (const name of contract.mustChange) {
     if (before.hashes[loaded[name].path] === hashes[loaded[name].path]) throw new PlanningArtifactError(`${name} did not change in the correlated turn`);
   }
   const graph = contract.validateGraph ? validateTaskGraph(JSON.parse(loaded.graph.text)) : undefined;
-  if (graph && graph.tasksSemanticHash !== semanticHash(loaded.tasks.text)) throw new PlanningArtifactError("tasks semantic hash mismatch");
+  if (graph && taskRecords) validateGraph(graph, graphContext(taskRecords, initial.spec.text, semanticHash(taskRecords)));
   return deepFreeze({ files: loaded, hashes, graph });
 }
 ```
 
+`parseSpecKitTasks` treats the visible task entries plus their phase headings,
+labels, `[P]` marker, explicit dependency text, acceptance references, and file
+paths as the source of truth. It cross-checks the embedded metadata block,
+normalizes checkbox state only, and rejects duplicates or any mismatch.
+`sealTaskGraph` writes `schema: harness/task-graph/v1`, copies the canonical
+records, computes `sha256(canonicalJson(taskRecords))` itself, validates acceptance references against
+`spec.md`, and atomically renames the generated graph. The planning model never
+computes a cryptographic hash.
+
 - [ ] **Step 4: Add immediate real Spec Kit compatibility test**
 
-When `HARNESS_COMPAT_SPECKIT=1`, run `specify preset add --dev <absolute preset path>`, resolve `speckit.tasks`, and assert the wrapped core content and graph instruction are both present. This job is non-subscription and must run in the compatibility CI lane introduced in Task 34.
+When `HARNESS_COMPAT_SPECKIT=1`, resolve the repository-local preset directory
+with `resolve("presets/harness-task-graph")`, pass that absolute value to
+`specify preset add --dev`, resolve `speckit.tasks`, and assert the wrapped core
+content and metadata instruction are both present. This job is non-subscription
+and must run in the compatibility CI lane introduced in Task 34.
 
 ```ts
 it.runIf(process.env.HARNESS_COMPAT_SPECKIT === "1")("resolves through the installed Spec Kit CLI", async () => {
@@ -107,7 +134,8 @@ it.runIf(process.env.HARNESS_COMPAT_SPECKIT === "1")("resolves through the insta
   const resolved = await run("specify", ["preset", "resolve", "speckit.tasks"], { cwd: project });
   expect(resolved.stdout).toContain("harness-task-graph");
   const materialized = await readFile(join(project, ".claude/commands/speckit.tasks.md"), "utf8");
-  expect(materialized).toContain("task-graph.json");
+  expect(materialized).toContain("harness-task-metadata:v1");
+  expect(materialized).toContain("controller derives both deterministically");
   expect(materialized).not.toContain("{CORE_TEMPLATE}");
 });
 ```
@@ -151,6 +179,15 @@ it("accepts only new hashes from the correlated turn", async () => {
   await expect(fixture.action.observe(receipt)).resolves.toMatchObject({ status: "completed", correlationId: receipt.correlationId });
 });
 
+it("recovers a settled planning turn when Pi crashed before the harness completion entry", async () => {
+  const fixture = await planningFixture();
+  const receipt = await fixture.action.execute(fixture.request());
+  await fixture.pi.writeTerminalCorrelatedTranscript(receipt, changedArtifactSet());
+  await fixture.restart();
+  await expect(fixture.action.observe(receipt)).resolves.toMatchObject({ status: "completed" });
+  expect(fixture.pi.entries("harness:planning-recovered")).toHaveLength(1);
+});
+
 it("seals the final tasks artifact set on the run branch", async () => {
   const fixture = await planningFixture({ stage: "tasks" });
   const receipt = await fixture.action.execute(fixture.request());
@@ -184,8 +221,9 @@ export type PlanningObservation =
   | { status: "blocked"; reason: string; evidence: string[] };
 
 async observe(receipt: PlanningRunReceipt): Promise<PlanningObservation> {
-  const markers = await this.pi.findRunMarkers(receipt.sessionFile, receipt.requestEntryId, receipt.correlationId);
-  if (!markers.started || !markers.settled || markers.settled.finalTurnIndex < markers.started.firstTurnIndex) return { status: "pending" };
+  const settlement = await this.pi.reconcilePlanningSettlement(receipt);
+  if (settlement.status === "active") return { status: "pending" };
+  if (settlement.status === "ambiguous") return { status: "blocked", reason: "planning transcript has no safe terminal boundary", evidence: settlement.evidence };
   const pending = await this.pendingPlanning.get(receipt.correlationId);
   if (!pending) return { status: "blocked", reason: "missing durable planning request", evidence: [receipt.correlationId] };
   try {
@@ -195,7 +233,7 @@ async observe(receipt: PlanningRunReceipt): Promise<PlanningObservation> {
       : stageArtifacts;
     return { status: "completed", correlationId: receipt.correlationId, artifacts };
   } catch (error) {
-    return { status: "blocked", reason: toMessage(error), evidence: [receipt.sessionFile, receipt.requestEntryId, String(markers.settled.finalTurnIndex)] };
+    return { status: "blocked", reason: toMessage(error), evidence: [receipt.sessionFile, receipt.requestEntryId, String(settlement.finalTurnIndex)] };
   }
 }
 ```
@@ -207,10 +245,18 @@ planning action at a time. It calls
 `pi.sendUserMessage()` with `expandPromptTemplates: true` and an embedded
 correlation marker. `before_agent_start` recognizes that marker; the first
 `turn_start` appends a durable `harness:planning-start` entry. Matching
-`turn_end` events update the last completed index, and only `agent_settled`
-appends `harness:planning-complete` with that final index. On restart, observation scans
-`ctx.sessionManager.getEntries()` after `requestEntryId`. A changed file without
-the durable completion entry remains pending and is never accepted.
+`turn_end` events update the last completed index, and `agent_settled` normally
+appends `harness:planning-complete` with that final index. On restart,
+`reconcilePlanningSettlement` scans the active branch entries after
+`requestEntryId`. A correlated user message followed by a terminal assistant
+message with an accepted stop reason, complete tool results, no later user
+message, and an idle Pi session is sufficient native evidence; the extension
+then appends exactly one `harness:planning-recovered` entry before validation.
+Aborted, errored, active, forked, or incomplete transcripts are never accepted.
+An explicit retry creates a new correlation generation and restores only the
+declared harness-owned planning paths to their captured baseline in a new
+planning worktree. Add fault tests for crashes before the native terminal
+entry, after that entry, and after the recovered marker append.
 
 Existing-approved mode is separate: it skips Pi, validates the complete paths
 and hashes, requires a clean containing commit, and binds that commit in one
@@ -313,7 +359,8 @@ it("creates the full default stage sequence and all three workers", async () => 
   await runHarness(["init", repo]);
   const workflow = await loadYaml(join(repo, ".harness/workflow.yaml"));
   expect(workflow.stages.map((stage: { id: string }) => stage.id)).toEqual([
-    "specify", "plan", "approve_plan", "tasks", "implement", "review", "verify", "integrate", "final_verify", "final_pr",
+    "specify", "plan", "approve_plan", "tasks", "implement", "review", "verify", "integrate",
+    "post_integrate_verify", "record_task_done", "final_verify", "final_review", "push", "final_pr",
   ]);
   expect(workflow.stages.find((stage: { id: string }) => stage.id === "implement").runner.prefer).toEqual(["devin", "codex", "claude"]);
   expect(workflow.stages.find((stage: { id: string }) => stage.id === "review").runner.prefer).toEqual(["codex", "claude", "devin"]);
@@ -338,7 +385,7 @@ schema: harness/v1
 name: spec-kit-multi-agent
 task_model:
   source: stages.tasks.outputs.graph
-  complete_when: { stage: integrate }
+  complete_when: { stage: record_task_done }
 stages:
   - id: specify
     uses: spec-kit.specify
@@ -378,20 +425,50 @@ stages:
     needs: [{ stage: review, scope: same-item }]
     foreach: { source: stages.tasks.outputs.graph, key: task.id }
     with: { argv: "${commands.task_verify}" }
+    on_failure: { verification_failed: { retry_stage: implement } }
   - id: integrate
     uses: git.integrate
     needs: [{ stage: verify, scope: same-item }]
     foreach: { source: stages.tasks.outputs.graph, key: task.id }
+  - id: post_integrate_verify
+    uses: command.run
+    needs: [{ stage: integrate, scope: same-item }]
+    foreach: { source: stages.tasks.outputs.graph, key: task.id }
+    with: { argv: "${commands.task_verify}" }
+    on_failure: { verification_failed: { retry_stage: implement } }
+  - id: record_task_done
+    uses: git.project-task-status
+    needs: [{ stage: post_integrate_verify, scope: same-item }]
+    foreach: { source: stages.tasks.outputs.graph, key: task.id }
   - id: final_verify
     uses: command.run
-    needs: [{ stage: integrate, scope: all }]
+    needs: [{ stage: record_task_done, scope: all }]
     with: { argv: "${commands.full_verify}" }
+  - id: final_review
+    uses: worker.review
+    runner: { prefer: [codex, claude, devin] }
+    needs: [{ stage: final_verify, scope: all }]
+    policies: { scope: final_diff }
+    on_failure: { changes_requested: { block: final_review_remediation_required } }
+  - id: push
+    uses: git.push
+    needs: [{ stage: final_review, scope: all }]
   - id: final_pr
     uses: github.pull-request
-    needs: [{ stage: final_verify, scope: all }]
+    needs: [{ stage: push, scope: all }]
 ```
 
-`environment.yaml` stores commands as argv arrays. `policy.yaml` protects planning/config paths and excludes production credentials. The lock pins `pi-multi-agent-harness`, Pi, Spec Kit, Superpowers, Herdr, integrations, and worker CLIs to exact source identities.
+`post_integrate_verify` runs in a detached read-only worktree pinned to the
+exact candidate commit while the run branch remains unchanged.
+`record_task_done` is a fenced, reconciliation-safe compare-and-swap run-branch
+mutation; it promotes the verified candidate tree together with the normalized
+checkbox change, then its observation atomically projects the task to `DONE`.
+`final_review` reviews the complete base-to-run-branch diff and blocks rather
+than silently creating an unplanned remediation task. `environment.yaml`
+stores commands as argv arrays. `policy.yaml` protects planning/config paths
+and excludes production credentials. The lock pins
+`pi-multi-agent-harness`, Pi, TypeBox, Spec Kit, Superpowers, Herdr,
+integrations, and worker CLIs to exact source identities.
 
 - [ ] **Step 4: Implement declarative detection and atomic generation**
 
@@ -476,10 +553,11 @@ export class ControllerRegistry {
 Pi events, timer callbacks, Herdr subscriptions, and commands only create queue
 commands. The planning event state machine records the correlation marker at
 `before_agent_start`, tracks the correlated run's `turnIndex` values, and
-appends a durable completion entry only at `agent_settled`; intermediate or
-arbitrary turns cannot advance
-planning. Status commands read snapshots without model calls. Mutating commands
-append operator intents.
+normally appends a durable completion entry at `agent_settled`. Recovery may
+append one `harness:planning-recovered` entry only from the terminal native
+transcript proof defined in Task 25; intermediate, ambiguous, or arbitrary turns
+cannot advance planning. Status commands read snapshots without model calls.
+Mutating commands append operator intents.
 
 - [ ] **Step 4: Enforce planning profile and run approval boundaries**
 

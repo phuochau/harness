@@ -60,7 +60,7 @@ export function effectivePolicy(baseline: TrustPolicy, machine: TrustPolicy | un
 ```
 
 `release-manifest.json` contains exact identities and integrity-verification
-rules for the harness, `@earendil-works/pi-coding-agent`, Spec Kit,
+rules for the harness, `@earendil-works/pi-coding-agent`, `typebox`, Spec Kit,
 Superpowers, Herdr, four Herdr integrations, Codex CLI, Devin CLI, Claude Code,
 Git, and GitHub CLI. The build freezes this manifest into the exact-version
 package; the release job records the npm tarball `dist.integrity` alongside its
@@ -352,8 +352,11 @@ it("takes a diamond feature to one PR", async () => {
   const result = await system.runToQuiescence();
   expect(result.taskStates).toEqual({ T001: "DONE", T002: "DONE", T003: "DONE" });
   expect(result.maxConcurrentImplementation).toBe(2);
-  expect(result.reviews.every((review) => review.worker !== review.implementationWorker)).toBe(true);
+  expect(result.taskReviews.every((review) => review.worker !== review.implementationWorker)).toBe(true);
+  expect(result.finalReviews).toMatchObject([{ reviewedCommit: result.pushedCommit, outcome: "approved" }]);
+  expect(result.runBranchWasUnchangedDuringCandidateVerification).toBe(true);
   expect(result.pullRequests).toHaveLength(1);
+  expect(result.pullRequests[0].headCommit).toBe(result.pushedCommit);
 });
 ```
 
@@ -383,7 +386,8 @@ The CLI and Pi extension both call this root. No production singleton or hidden 
 ```ts
 for (const boundary of [
   "before-intent", "after-intent", "after-effect", "before-observation", "after-observation",
-  "during-snapshot", "after-worker-result", "after-cherry-pick", "after-push", "after-pr-create",
+  "during-snapshot", "after-worker-result", "after-multi-commit-integration",
+  "after-atomic-task-finalize", "after-final-review", "after-push", "after-pr-create",
 ] as const) {
   it(`recovers ${boundary} without duplicate effects`, async () => {
     const system = await crashableHarness(boundary);
@@ -394,7 +398,12 @@ for (const boundary of [
 }
 ```
 
-Race timer + Herdr + Pi + operator wakeups in every lifecycle state. Cover Devin unavailable → Codex implementation → Claude review, no reviewer, reviewer mutation, planning blocker, auth blocker, verification remediation, integration conflict, retry exhaustion, stale controller, and unknown non-retryable command result.
+Race timer + Herdr + Pi + operator wakeups in every lifecycle state. Cover
+Devin unavailable → Codex implementation → Claude review, a two-commit worker
+result, no reviewer, reviewer mutation, planning crash before/after the native
+terminal transcript, auth blocker, verification remediation, integration
+conflict, task-status replay, final-review rejection, retry exhaustion, stale
+controller, and unknown non-retryable command result.
 
 Run: `npm test -- test/e2e/fake-feature.test.ts test/e2e/crash-matrix.test.ts test/e2e/race-matrix.test.ts`.
 
@@ -463,7 +472,8 @@ naming a disposable repository.
 
 The tag-gated release workflow reruns every gate, verifies the npm actor is an
 owner of `pi-multi-agent-harness`, publishes with `npm publish --provenance`,
-then records `npm view pi-multi-agent-harness@<version> dist.integrity` in the
+then records `npm view pi-multi-agent-harness@$RELEASE_VERSION dist.integrity`
+using the workflow's validated release-tag version in the
 GitHub release evidence. First-time namespace reservation is an explicit human
 precondition; the workflow never silently switches package names or scopes.
 

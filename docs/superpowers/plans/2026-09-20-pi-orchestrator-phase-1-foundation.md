@@ -143,7 +143,7 @@ git commit -m "chore: scaffold loadable harness package"
 
 **Interfaces:**
 - Produces `WorkflowDocument`, `TaskGraphDocument`, `HarnessEvent`, and `WorkerResult` types plus Ajv-compatible schemas.
-- Workflow YAML requires `schema: harness/v1`; JSON contracts require `schemaVersion: 1`; hashes match `^sha256:[0-9a-f]{64}$`.
+- Workflow YAML requires `schema: harness/v1`; the task graph requires `schema: harness/task-graph/v1`; other JSON contracts require `schemaVersion: 1`; hashes match `^sha256:[0-9a-f]{64}$`.
 
 - [ ] **Step 1: Write schema rejection tests**
 
@@ -152,7 +152,7 @@ import { expect, it } from "vitest";
 import { validateTaskGraph, validateWorkerResult } from "../../../src/contracts/index.js";
 
 it("rejects short semantic hashes and unknown fields", () => {
-  expect(() => validateTaskGraph({ schemaVersion: 1, tasksSemanticHash: "invalid-hash", tasks: [], extra: true })).toThrow();
+  expect(() => validateTaskGraph({ schema: "harness/task-graph/v1", tasksSemanticHash: "invalid-hash", tasks: [], extra: true })).toThrow();
 });
 
 it("requires typed blockers", () => {
@@ -195,14 +195,17 @@ import { HashSchema, VersionSchema, validator } from "./common.js";
 
 export const TaskNodeSchema = Type.Object({
   id: Type.String({ pattern: "^T[0-9]{3,}$" }),
-  title: Type.String({ minLength: 1 }),
+  description: Type.String({ minLength: 1 }),
+  phase: Type.String({ minLength: 1 }),
+  labels: Type.Array(Type.String()),
+  parallelEligible: Type.Boolean(),
   dependsOn: Type.Array(Type.String()),
   acceptanceRefs: Type.Array(Type.String()),
   ownedPaths: Type.Array(Type.String()),
 }, { additionalProperties: false });
 
 export const TaskGraphSchema = Type.Object({
-  schemaVersion: VersionSchema,
+  schema: Type.Literal("harness/task-graph/v1"),
   tasksSemanticHash: HashSchema,
   tasks: Type.Array(TaskNodeSchema),
 }, { additionalProperties: false });
@@ -239,12 +242,18 @@ const EffectIntentPayloadSchema = Type.Object({ action: Type.String(), idempoten
 const EffectObservationPayloadSchema = Type.Object({ action: Type.String(), intentKey: Type.String(), output: Type.Unknown() }, { additionalProperties: false });
 const EffectFailurePayloadSchema = Type.Object({ action: Type.String(), intentKey: Type.String(), code: Type.String(), evidence: Type.Array(Type.String()) }, { additionalProperties: false });
 const OperatorIntentPayloadSchema = Type.Object({ operation: Type.Union([Type.Literal("retry"), Type.Literal("reroute"), Type.Literal("cancel"), Type.Literal("pause"), Type.Literal("resume")]), target: Type.String(), arguments: Type.Record(Type.String(), Type.Unknown()) }, { additionalProperties: false });
-const PlanningMarkerPayloadSchema = Type.Object({ sessionFile: Type.String(), correlationId: Type.String(), requestEntryId: Type.String(), command: Type.String() }, { additionalProperties: false });
+const PlanningStageSchema = Type.Union([Type.Literal("specify"), Type.Literal("plan"), Type.Literal("tasks")]);
+const PlanningMarkerPayloadSchema = Type.Object({ stage: PlanningStageSchema, sessionFile: Type.String(), correlationId: Type.String(), requestEntryId: Type.String(), command: Type.String() }, { additionalProperties: false });
 const PlanningSettledPayloadSchema = Type.Object({ correlationId: Type.String(), finalTurnIndex: Type.Integer({ minimum: 0 }) }, { additionalProperties: false });
-const PlanningCompletedPayloadSchema = Type.Object({ correlationId: Type.String(), commit: Type.Optional(Type.String()), hashes: Type.Record(Type.String(), HashSchema) }, { additionalProperties: false });
+const PlanningRecoveredPayloadSchema = Type.Object({ correlationId: Type.String(), finalTurnIndex: Type.Integer({ minimum: 0 }), terminalEntryId: Type.String(), terminalEntryHash: HashSchema }, { additionalProperties: false });
+const PlanningCompletedPayloadSchema = Type.Union([
+  Type.Object({ stage: Type.Union([Type.Literal("specify"), Type.Literal("plan")]), correlationId: Type.String(), hashes: Type.Record(Type.String(), HashSchema) }, { additionalProperties: false }),
+  Type.Object({ stage: Type.Literal("tasks"), correlationId: Type.String(), commit: Type.String({ minLength: 1 }), hashes: Type.Record(Type.String(), HashSchema) }, { additionalProperties: false }),
+]);
 
 export const HarnessEventSchema = Type.Union([
   event("run.created", Type.Object({ workflowRevision: HashSchema }, { additionalProperties: false })),
+  event("controller.command_processed", Type.Object({ source: Type.String(), commandKey: Type.String() }, { additionalProperties: false })),
   event("job.ready", Type.Object({}, { additionalProperties: false })),
   event("attempt.started", Type.Object({ attempt: Type.Integer({ minimum: 1 }), worker: Type.String() }, { additionalProperties: false })),
   event("worker.routed", Type.Object({ worker: Type.String(), reason: Type.String() }, { additionalProperties: false })),
@@ -253,14 +262,16 @@ export const HarnessEventSchema = Type.Union([
   event("review.changes_requested", Type.Object({ commit: Type.String(), reviewer: Type.String(), findings: Type.Array(Type.String(), { minItems: 1 }) }, { additionalProperties: false })),
   event("verification.passed", Type.Object({ commit: Type.String(), evidence: Type.Array(Type.String()) }, { additionalProperties: false })),
   event("verification.failed", Type.Object({ commit: Type.String(), evidence: Type.Array(Type.String(), { minItems: 1 }) }, { additionalProperties: false })),
-  event("integration.observed", Type.Object({ commit: Type.String(), patchId: Type.String() }, { additionalProperties: false })),
-  event("integration.conflicted", Type.Object({ sourceCommit: Type.String(), evidence: Type.Array(Type.String(), { minItems: 1 }) }, { additionalProperties: false })),
+  event("integration.observed", Type.Object({ candidateCommit: Type.String(), candidateRef: Type.String(), expectedRunHead: Type.String(), patchId: Type.String() }, { additionalProperties: false })),
+  event("integration.conflicted", Type.Object({ sourceBase: Type.String(), sourceHead: Type.String(), patchId: Type.String(), evidence: Type.Array(Type.String(), { minItems: 1 }) }, { additionalProperties: false })),
+  event("task.finalized", Type.Object({ taskId: Type.String(), candidateCommit: Type.String(), targetCommit: Type.String(), tasksSemanticHash: HashSchema }, { additionalProperties: false })),
   event("effect.intent", EffectIntentPayloadSchema),
   event("effect.observed", EffectObservationPayloadSchema),
   event("effect.failed", EffectFailurePayloadSchema),
   event("operator.intent", OperatorIntentPayloadSchema),
   event("planning.queued", PlanningMarkerPayloadSchema),
   event("planning.agent_settled", PlanningSettledPayloadSchema),
+  event("planning.transcript_recovered", PlanningRecoveredPayloadSchema),
   event("planning.completed", PlanningCompletedPayloadSchema),
   event("planning.blocked", BlockerSchema),
   event("job.done", Type.Object({}, { additionalProperties: false })),
@@ -298,6 +309,7 @@ const RunnerSchema = Type.Union([
   Type.Object({ prefer: Type.Array(Type.Union([Type.Literal("codex"), Type.Literal("devin"), Type.Literal("claude")]), { minItems: 1 }) }, { additionalProperties: false }),
 ]);
 const ForeachSchema = Type.Object({ source: Type.String(), key: Type.String() }, { additionalProperties: false });
+const RetryStageSchema = Type.Object({ retry_stage: Type.String() }, { additionalProperties: false });
 const StageSchema = Type.Object({
   id: Type.String({ pattern: "^[a-z][a-z0-9_]*$" }),
   uses: Type.String({ minLength: 1 }),
@@ -310,11 +322,20 @@ const StageSchema = Type.Object({
   profile: Type.Optional(Type.String()),
   if: Type.Optional(Type.Object({ expression: Type.String({ minLength: 1 }) }, { additionalProperties: false })),
   with: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
-  policies: Type.Optional(Type.Object({ require_different_worker_kind: Type.Optional(Type.Boolean()) }, { additionalProperties: false })),
+  policies: Type.Optional(Type.Object({
+    require_different_worker_kind: Type.Optional(Type.Boolean()),
+    scope: Type.Optional(Type.Union([Type.Literal("task"), Type.Literal("final_diff")])),
+  }, { additionalProperties: false })),
   produces: Type.Optional(Type.Record(Type.String(), Type.String())),
   retry: Type.Optional(Type.Object({ max_attempts: Type.Integer({ minimum: 1 }), max_elapsed_seconds: Type.Integer({ minimum: 1 }) }, { additionalProperties: false })),
   timeout: Type.Optional(Type.Integer({ minimum: 1 })),
-  on_failure: Type.Optional(Type.Object({ changes_requested: Type.Optional(Type.Object({ retry_stage: Type.String() }, { additionalProperties: false })) }, { additionalProperties: false })),
+  on_failure: Type.Optional(Type.Object({
+    changes_requested: Type.Optional(Type.Union([
+      RetryStageSchema,
+      Type.Object({ block: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
+    ])),
+    verification_failed: Type.Optional(RetryStageSchema),
+  }, { additionalProperties: false })),
 }, { additionalProperties: false });
 const TaskModelSchema = Type.Object({
   source: Type.String(),
@@ -355,9 +376,9 @@ export function sha256(value: string | Uint8Array): `sha256:${string}` {
 - [ ] **Step 4: Add round-trip and malformed-document cases**
 
 ```ts
-expect(validateTaskGraph({ schemaVersion: 1, tasksSemanticHash: `sha256:${"a".repeat(64)}`, tasks: [] })).toBeTruthy();
-expect(() => validateTaskGraph({ schemaVersion: 2, tasksSemanticHash: `sha256:${"a".repeat(64)}`, tasks: [] })).toThrow();
-expect(() => validateTaskGraph({ schemaVersion: 1, tasksSemanticHash: `sha256:${"a".repeat(64)}`, tasks: [], extra: true })).toThrow();
+expect(validateTaskGraph({ schema: "harness/task-graph/v1", tasksSemanticHash: `sha256:${"a".repeat(64)}`, tasks: [] })).toBeTruthy();
+expect(() => validateTaskGraph({ schema: "harness/task-graph/v2", tasksSemanticHash: `sha256:${"a".repeat(64)}`, tasks: [] })).toThrow();
+expect(() => validateTaskGraph({ schema: "harness/task-graph/v1", tasksSemanticHash: `sha256:${"a".repeat(64)}`, tasks: [], extra: true })).toThrow();
 ```
 
 Use the 64-character hash as the valid fixture. Add invalid task IDs, invalid
@@ -425,19 +446,22 @@ export function fixture<T>(base: () => T): (overrides?: DeepPartial<T>) => T {
 
 export function diamondTaskGraph(overrides: DeepPartial<TaskGraphDocument> = {}): TaskGraphDocument {
   const base: TaskGraphDocument = {
-    schemaVersion: 1,
+    schema: "harness/task-graph/v1",
     tasksSemanticHash: `sha256:${"a".repeat(64)}`,
     tasks: [
-      { id: "T001", title: "one", dependsOn: [], acceptanceRefs: ["AC1"], ownedPaths: ["src/one.ts"] },
-      { id: "T002", title: "two", dependsOn: [], acceptanceRefs: ["AC2"], ownedPaths: ["src/two.ts"] },
-      { id: "T003", title: "three", dependsOn: ["T001", "T002"], acceptanceRefs: ["AC3"], ownedPaths: ["src/three.ts"] },
+      { id: "T001", description: "one", phase: "foundation", labels: ["US1"], parallelEligible: true, dependsOn: [], acceptanceRefs: ["AC1"], ownedPaths: ["src/one.ts"] },
+      { id: "T002", description: "two", phase: "foundation", labels: ["US1"], parallelEligible: true, dependsOn: [], acceptanceRefs: ["AC2"], ownedPaths: ["src/two.ts"] },
+      { id: "T003", description: "three", phase: "integration", labels: ["US1"], parallelEligible: false, dependsOn: ["T001", "T002"], acceptanceRefs: ["AC3"], ownedPaths: ["src/three.ts"] },
     ],
   };
   return fixture(() => base)(overrides);
 }
 ```
 
-`FakeClock` must expose `now()`, `setTimeout()`, and `advanceBy(ms)` without real sleeping. `FakeProcessRunner` records argv/cwd/env and returns queued results. `createTempRepo()` initializes Git with explicit user identity and one commit.
+`FakeClock` must expose `now()`, `setTimeout()`, and `advanceBy(ms)` without real
+sleeping. `FakeProcessRunner` records argv/cwd/env/stdin and implements both
+text `run()` and byte-preserving `runBytes()` queued results. `createTempRepo()`
+initializes Git with explicit user identity and one commit.
 
 - [ ] **Step 4: Typecheck and run the support test**
 
@@ -493,7 +517,10 @@ export function compileWorkflow(input: CompileInput): CompiledWorkflow {
   const document = validateWorkflow(structuredClone(input.workflow));
   const stages = topologicalStages(document.stages).map((stage) => ({
     ...stage,
-    action: validateActionInput(stage.uses, resolveReferences(stage.with ?? {}, input.environment.commands)),
+    action: {
+      kind: stage.uses,
+      input: validateActionInput(stage.uses, resolveReferences(stage.with ?? {}, input.environment.commands)),
+    },
   }));
   const normalized = { schemaVersion: 1 as const, name: document.name, taskModel: document.task_model, stages };
   const revision = sha256(canonicalJson(normalized));
@@ -518,6 +545,7 @@ export const BuiltInActionInputSchemas = {
   "worker.review": Type.Object({}, { additionalProperties: false }),
   "git.verify": Type.Object({}, { additionalProperties: false }),
   "git.integrate": Type.Object({}, { additionalProperties: false }),
+  "git.project-task-status": Type.Object({}, { additionalProperties: false }),
   "git.push": Type.Object({}, { additionalProperties: false }),
   "github.pull-request": Type.Object({}, { additionalProperties: false }),
 } as const;
@@ -549,23 +577,25 @@ git commit -m "feat: compile immutable workflow revisions"
 
 **Files:**
 - Create: `src/core/task-graph.ts`, `src/core/path-conflicts.ts`
+- Modify: `test/support/factories.ts`
 - Test: `test/unit/graph/validation.test.ts`
 
 **Interfaces:**
 - Produces `validateGraph(graph, context): ValidatedTaskGraph`.
-- `context` supplies accepted task IDs, acceptance references, and computed `tasks.md` semantic hash.
+- `context` supplies canonical task records parsed from `tasks.md`, accepted acceptance references, and the controller-computed semantic hash.
 
 - [ ] **Step 1: Write graph failure cases**
 
 ```ts
 it.each([
-  ["duplicate", fixtureTaskGraph({ duplicate: true }), /duplicate task/],
-  ["unknown dependency", fixtureTaskGraph({ unknownDependency: true }), /unknown dependency/],
-  ["cycle", fixtureTaskGraph({ cycle: true }), /cycle/],
-  ["stale hash", fixtureTaskGraph(), /semantic hash/],
-  ["parallel overlap", fixtureTaskGraph({ unorderedOverlap: true }), /owned path conflict/],
-])("rejects %s", (_name, graph, error) => {
-  expect(() => validateGraph(graph, fixtureGraphContext({ tasksSemanticHash: `sha256:${"b".repeat(64)}` }))).toThrow(error);
+  ["duplicate", fixtureTaskGraph({ duplicate: true }), fixtureGraphContext(), /duplicate task/],
+  ["unknown dependency", fixtureTaskGraph({ unknownDependency: true }), fixtureGraphContextFor(fixtureTaskGraph({ unknownDependency: true })), /unknown dependency/],
+  ["cycle", fixtureTaskGraph({ cycle: true }), fixtureGraphContextFor(fixtureTaskGraph({ cycle: true })), /cycle/],
+  ["stale hash", fixtureTaskGraph(), fixtureGraphContext({ tasksSemanticHash: `sha256:${"b".repeat(64)}` }), /semantic hash/],
+  ["projection mismatch", fixtureTaskGraph({ changedOwnedPath: true }), fixtureGraphContext(), /does not match tasks.md/],
+  ["parallel overlap", fixtureTaskGraph({ unorderedOverlap: true }), fixtureGraphContextFor(fixtureTaskGraph({ unorderedOverlap: true })), /owned path conflict/],
+])("rejects %s", (_name, graph, context, error) => {
+  expect(() => validateGraph(graph, context)).toThrow(error);
 });
 ```
 
@@ -578,20 +608,37 @@ Expected: FAIL with missing `validateGraph`.
 - [ ] **Step 3: Implement deterministic validation**
 
 ```ts
+export function fixtureGraphContextFor(graph: TaskGraphDocument): GraphContext {
+  return fixtureGraphContext({
+    tasksSemanticHash: graph.tasksSemanticHash,
+    taskRecords: new Map(graph.tasks.map((task) => [task.id, structuredClone(task)])),
+  });
+}
+
 export function validateGraph(graph: TaskGraphDocument, context: GraphContext): ValidatedTaskGraph {
   if (graph.tasksSemanticHash !== context.tasksSemanticHash) throw new GraphError("stale semantic hash");
   const byId = uniqueMap(graph.tasks, (task) => task.id, "duplicate task");
+  assertExactTaskSet(byId, context.taskRecords);
   for (const task of graph.tasks) {
+    assertCanonicalProjection(task, context.taskRecords.get(task.id));
     for (const dep of task.dependsOn) if (!byId.has(dep)) throw new GraphError(`unknown dependency ${dep}`);
     for (const ref of task.acceptanceRefs) if (!context.acceptanceRefs.has(ref)) throw new GraphError(`unknown acceptance reference ${ref}`);
   }
   const order = topologicalOrder(byId);
-  rejectUnorderedPathOverlap(byId, order);
-  return deepFreeze({ graph, byId, order });
+  const reachability = computeReachability(byId);
+  rejectUnorderedPathOverlap(byId, reachability);
+  return deepFreeze({ graph, byId, order, reachability });
 }
 ```
 
-File overlap is allowed only when reachability orders the two owners. Normalize paths relative to the repository root and reject absolute paths, `..`, empty globs, and protected planning/config paths.
+`assertCanonicalProjection` compares `description`, `phase`, normalized
+`labels`, `parallelEligible`, `dependsOn`, `acceptanceRefs`, and normalized
+`ownedPaths` with the parsed `tasks.md` record. The graph must contain exactly
+the parsed task ID set. A topological list is used only for stable scheduling;
+it is never evidence that two nodes are causally ordered. File overlap is
+allowed only when transitive DAG reachability orders the two owners. Normalize
+paths relative to the repository root and reject absolute paths, `..`, empty
+globs, and protected planning/config paths.
 
 - [ ] **Step 4: Add valid diamond and ordered-overlap cases**
 
@@ -607,7 +654,7 @@ Expected: PASS; the diamond order starts with T001/T002 and ends with T003.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/core/task-graph.ts src/core/path-conflicts.ts test/unit/graph/validation.test.ts
+git add src/core/task-graph.ts src/core/path-conflicts.ts test/support/factories.ts test/unit/graph/validation.test.ts
 git commit -m "feat: validate Spec Kit task graphs"
 ```
 
@@ -628,7 +675,8 @@ it("materializes same-item joins and an all barrier", () => {
   const result = materializeJobs(fixtureWorkflow(), validateDiamond());
   expect(result.jobs["review:T001"].dependsOn).toEqual(["implement:T001"]);
   expect(result.jobs["integrate:T003"].dependsOn).toEqual(["verify:T003"]);
-  expect(result.jobs.final_verify.dependsOn).toEqual(["integrate:T001", "integrate:T002", "integrate:T003"]);
+  expect(result.jobs["record_task_done:T003"].dependsOn).toEqual(["post_integrate_verify:T003"]);
+  expect(result.jobs.final_verify.dependsOn).toEqual(["record_task_done:T001", "record_task_done:T002", "record_task_done:T003"]);
 });
 
 it("rejects duplicate dynamic keys", () => {

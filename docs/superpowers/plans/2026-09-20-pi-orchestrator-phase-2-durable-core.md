@@ -295,12 +295,15 @@ export function reduceEvent(state: RunState, event: HarnessEvent): RunState {
     case "verification.failed": recordVerificationFailure(next, event); break;
     case "integration.observed": recordIntegration(next, event); break;
     case "integration.conflicted": recordIntegrationConflict(next, event); break;
+    case "task.finalized": finalizeTaskAndReleasePipeline(next, event); break;
+    case "controller.command_processed": recordCommandKey(next, event); break;
     case "effect.intent": reserveEffect(next, event); break;
     case "effect.observed": observeEffect(next, event); break;
     case "effect.failed": failEffect(next, event); break;
     case "operator.intent": applyOperatorIntent(next, event); break;
     case "planning.queued": queuePlanning(next, event); break;
     case "planning.agent_settled": settlePlanningRun(next, event); break;
+    case "planning.transcript_recovered": settlePlanningRun(next, event); break;
     case "planning.completed": completePlanning(next, event); break;
     case "planning.blocked": blockPlanning(next, event); break;
     case "run.created": initializeRun(next, event); break;
@@ -315,6 +318,16 @@ export function reduceEvent(state: RunState, event: HarnessEvent): RunState {
   return deepFreeze(next);
 }
 ```
+
+`completePlanning` requires the completed stage to match the outstanding
+correlation. The `tasks` variant is rejected unless it contains the non-empty
+planning seal commit; `specify` and `plan` variants cannot carry one.
+`integration.observed` records only a verified candidate identity and keeps the
+task in `VERIFYING`; `task.finalized` records the compare-and-swap run commit,
+releases the integration pipeline, and supplies the evidence required by the
+configured completion-stage `job.done` event. Invalidating or terminally
+blocking any job in that task's candidate pipeline also releases the reservation
+without moving the run branch.
 
 - [ ] **Step 4: Add property tests for illegal transitions**
 
@@ -457,10 +470,23 @@ it("serializes concurrent wakeups into one logical launch", async () => {
   expect(results).toHaveLength(3);
 });
 
-it("reserves at most one run-mutating effect until its observation", async () => {
+it("holds one integration pipeline through candidate verification and promotion", async () => {
   const fixture = await controllerQueueFixture({ readyIntegrations: ["T001", "T002"] });
   await fixture.queue.enqueue(command("timer", "tick:integration"));
-  expect(fixture.events.filter((event) => event.eventType === "effect.intent" && event.payload.laneKey === "run-mutation:F023")).toHaveLength(1);
+  expect(fixture.integrationIntents()).toHaveLength(1);
+  await fixture.observeCandidateWithoutFinalizing();
+  await fixture.queue.enqueue(command("timer", "tick:integration:again"));
+  expect(fixture.integrationIntents()).toHaveLength(1);
+  expect(fixture.state.integrationPipeline).toMatchObject({ taskId: "T001", status: "verifying_candidate" });
+});
+
+it("deduplicates a controller command after restart", async () => {
+  const fixture = await controllerQueueFixture();
+  const retry = command("operator", "retry:T001:1");
+  await fixture.queue.enqueue(retry);
+  await fixture.restart();
+  await fixture.queue.enqueue(retry);
+  expect(fixture.events.filter((event) => event.eventType === "controller.command_processed" && event.payload.commandKey === retry.idempotencyKey)).toHaveLength(1);
 });
 ```
 
@@ -488,12 +514,23 @@ export class ControllerCommandQueue {
 }
 ```
 
-`processor.process` reloads the latest state after acquiring the lease, deduplicates the command idempotency key, derives decisions once, appends events, then writes the snapshot. It never holds a transaction open while an external effect runs; effect completion re-enters the queue as a new command.
+`processor.process` reloads the latest state after acquiring the lease and checks
+the command key against reduced `controller.command_processed` events. For a
+new key it derives decisions, appends lifecycle events and reserved intents with
+stable event idempotency keys, then appends `controller.command_processed` as
+the durable boundary. A crash before that boundary replays the command; already
+appended decisions deduplicate in the journal and missing decisions are derived
+from the latest state. A duplicate completed command returns the stored state
+revision without deriving again. It never holds a transaction open while an
+external effect runs; effect completion re-enters the queue as a new command.
 
 `reserveEffectLanes` is part of the pure decision transaction. Outstanding
 `effect.intent` events occupy their durable `laneKey` until a matching
-`effect.observed` or terminal `effect.failed` event is reduced. Git integration,
-push, and PR creation use `run-mutation:<runId>`; planning uses
+`effect.observed` or terminal `effect.failed` event is reduced. In addition, one
+durable `integration-pipeline:<runId>` reservation spans candidate preparation,
+candidate verification, and atomic task finalization; it is released only when
+that task is finalized, blocked, or invalidated. Task finalization, push, and PR
+creation use `run-mutation:<runId>`; planning uses
 `planning:<runId>`; worker lanes remain per job so independent tasks can run in
 parallel. Candidate selection is stable by materialized job order.
 
@@ -646,12 +683,21 @@ git commit -m "feat: validate immutable worker evidence"
 - [ ] **Step 1: Write a full fake diamond run**
 
 ```ts
-it("runs a diamond graph through review, verification, integration, and final verification", async () => {
+it("runs a diamond graph through integration, task projection, final review, push, and PR", async () => {
   const system = await createControllerFixture({ graph: diamondTaskGraph(), actionResults: successfulFakeResults() });
   await system.runToQuiescence();
   expect(system.state.tasks).toMatchObject({ T001: { state: "DONE" }, T002: { state: "DONE" }, T003: { state: "DONE" } });
   expect(system.metrics.maxConcurrentImplementations).toBe(2);
-  expect(system.actionKinds()).toEqual(expect.arrayContaining(["worker.execute", "worker.review", "command.run", "git.integrate", "github.pull-request"]));
+  expect(system.actionKinds()).toEqual(expect.arrayContaining([
+    "worker.execute", "worker.review", "command.run", "git.integrate",
+    "git.project-task-status", "git.push", "github.pull-request",
+  ]));
+});
+
+it("never overlaps a non-parallel task with another implementation", async () => {
+  const system = await createControllerFixture({ graph: graphWithIndependentNonParallelTask(), actionResults: successfulFakeResults() });
+  await system.runToQuiescence();
+  expect(system.metrics.overlapsInvolving("T002")).toEqual([]);
 });
 ```
 
@@ -671,10 +717,12 @@ export class HarnessController {
 
   async process(command: ControllerCommand): Promise<CommandResult> {
     const state = await this.repository.load();
+    if (state.processedCommandKeys[command.idempotencyKey]) return { accepted: false, duplicate: true, stateRevision: state.lastSequence };
     const decisions = deriveDecisions(applyCommand(state, command), this.graph, this.policy);
     for (const decision of decisions.events) await this.repository.append(decision, this.lease);
     const reserved = reserveEffectLanes(this.repository.state, decisions.effects);
     for (const intent of reserved) await this.repository.append(effectIntentEvent(intent), this.lease);
+    await this.repository.append(commandProcessedEvent(command), this.lease);
     await this.repository.snapshot(this.lease);
     for (const intent of reserved) void this.dispatchFresh(intent);
     return { accepted: true, stateRevision: this.repository.lastSequence };
@@ -696,7 +744,11 @@ candidates; it does not emit `effect.intent` itself. `reserveEffectLanes`
 selects candidates and the controller appends each corresponding intent exactly
 once before dispatch. `deriveDecisions` marks jobs ready only after every
 dependency is done, observes capacity, creates immutable attempts, chooses
-workers/reviewers, and never marks `DONE` directly from a worker claim.
+workers/reviewers, and never marks `DONE` directly from a worker claim. An
+implementation whose task has `parallelEligible: false` launches only when no
+other implementation is active, and while active prevents any other
+implementation launch. This conservative scheduler rule is independent of path
+overlap checks and worker capacity.
 
 - [ ] **Step 4: Add crash-before/after-observation cases and run phase gate**
 

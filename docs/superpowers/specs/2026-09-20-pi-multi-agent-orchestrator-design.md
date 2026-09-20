@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-20
 
-**Status:** Approved conversational design, pending written-spec review
+**Status:** Approved design; implementation plan under review
 
 ## 1. Purpose
 
@@ -17,12 +17,13 @@ The default installed workflow is:
 ```text
 Human
   -> Pi using a local ChatGPT subscription profile
-  -> Spec Kit produces spec.md, plan.md, tasks.md, task-graph.json
+  -> Spec Kit produces spec.md, plan.md, tasks.md, and explicit task metadata
+  -> Harness deterministically seals task-graph.json
   -> Pi schedules the task graph
   -> Devin implements ready tasks
   -> Codex reviews task results
-  -> Pi verifies and integrates commits
-  -> Pi runs final verification and creates the final pull request
+  -> Pi verifies candidates and atomically finalizes tasks
+  -> Pi runs final verification, final review, push, and pull-request creation
 ```
 
 This is only the default. A project may freely replace the workflow DAG,
@@ -191,12 +192,12 @@ restrictions. The engine does not hard-code stage names such as `plan`,
 
 ```yaml
 schema: harness/v1
-name: spec-kit-devin
+name: spec-kit-multi-agent
 
 task_model:
   source: stages.tasks.outputs.graph
   complete_when:
-    stage: integrate
+    stage: record_task_done
 
 stages:
   - id: specify
@@ -272,7 +273,10 @@ stages:
       source: stages.tasks.outputs.graph
       key: task.id
     with:
-      command: ${commands.task_verify}
+      argv: ${commands.task_verify}
+    on_failure:
+      verification_failed:
+        retry_stage: implement
 
   - id: integrate
     uses: git.integrate
@@ -283,18 +287,60 @@ stages:
       source: stages.tasks.outputs.graph
       key: task.id
 
-  - id: final_verify
+  - id: post_integrate_verify
     uses: command.run
     needs:
       - stage: integrate
+        scope: same-item
+    foreach:
+      source: stages.tasks.outputs.graph
+      key: task.id
+    with:
+      argv: ${commands.task_verify}
+    on_failure:
+      verification_failed:
+        retry_stage: implement
+
+  - id: record_task_done
+    uses: git.project-task-status
+    needs:
+      - stage: post_integrate_verify
+        scope: same-item
+    foreach:
+      source: stages.tasks.outputs.graph
+      key: task.id
+
+  - id: final_verify
+    uses: command.run
+    needs:
+      - stage: record_task_done
         scope: all
     with:
-      command: ${commands.full_verify}
+      argv: ${commands.full_verify}
+
+  - id: final_review
+    uses: worker.review
+    runner:
+      prefer: [codex, claude, devin]
+    needs:
+      - stage: final_verify
+        scope: all
+    policies:
+      scope: final_diff
+    on_failure:
+      changes_requested:
+        block: final_review_remediation_required
+
+  - id: push
+    uses: git.push
+    needs:
+      - stage: final_review
+        scope: all
 
   - id: final_pr
     uses: github.pull-request
     needs:
-      - stage: final_verify
+      - stage: push
         scope: all
 ```
 
@@ -357,9 +403,10 @@ story labels, descriptions, and file paths, but not an explicit dependency
 list for every task. The harness therefore ships a versioned
 `harness-task-graph` Spec Kit preset. Its tasks command uses Spec Kit's `wrap`
 composition strategy around the core task command, adding the graph contract
-without copying or forking the upstream prompt. The planning model therefore
-emits both the human-readable task list and its machine-readable projection in
-one planning operation:
+without copying or forking the upstream prompt. The planning model emits the
+human-readable task list plus an explicit metadata block in one planning
+operation; after the correlated run settles, controller code derives the
+machine-readable projection:
 
 ```text
 specs/feature-name/
@@ -371,24 +418,36 @@ specs/feature-name/
 
 `task-graph.json` uses `harness/task-graph/v1` and contains:
 
-- Every task ID.
+- Every task ID, description, phase, and label set.
 - Explicit `dependsOn` task IDs.
 - Parallel eligibility.
 - Declared file scope.
 - Acceptance-criteria references.
 - A semantic hash of `tasks.md` definitions.
 
-The semantic hash normalizes checkbox state before hashing. Therefore Pi may
-change `- [ ]` to `- [x]` after a task reaches `DONE` without invalidating the
-graph, while any change to an ID, description, phase, label, or file path does
-invalidate it.
+The deterministic parser reads visible task entries, phase headings, labels,
+parallel markers, dependency text, acceptance references, and file paths, then
+cross-checks the embedded metadata block. Controller code computes the semantic
+hash as SHA-256 over canonical JSON task records; the model never computes a
+cryptographic digest. Checkbox state is excluded from those records. Therefore
+the controller may change `- [ ]` to `- [x]` as
+it records `DONE` without invalidating the graph, while any change to an ID,
+description, phase, label, dependency, acceptance reference, parallel marker,
+or file path does invalidate it.
 
 Each planning stage has its own artifact contract: specification requires a new
-`spec.md`, planning requires a new `plan.md`, and task planning requires new
-`tasks.md` plus `task-graph.json` while preserving the earlier artifacts.
+`spec.md`, planning requires a new `plan.md`, and task planning requires a new
+`tasks.md` while preserving the earlier artifacts. The controller then
+atomically generates `task-graph.json`, validates the graph against the parsed
+task records and `spec.md`, and seals the complete planning set.
 Completion is correlated to a durable Pi session entry and the settled agent
 run that handled that request; unrelated or intermediate turns cannot make old
-files acceptable. Immediately after the correlated task-planning run settles,
+files acceptable. If Pi restarts before writing the harness completion marker,
+the controller may recover only from a correlated terminal assistant entry with
+an accepted stop reason, complete tool results, no later user turn, and an idle
+session. It records a recovered marker before accepting artifacts; ambiguous or
+aborted transcripts block or start an explicit new generation. Immediately
+after the correlated task-planning run settles,
 the controller directly invokes the deterministic graph validator. The two
 task outputs are accepted as one artifact set only if their schemas, task
 identities, acceptance references, and semantic hash agree. Spec Kit extension
@@ -399,8 +458,11 @@ when a hook ran.
 Pi refuses execution when the graph has cycles, unknown task IDs, missing
 dependencies, invalid acceptance references, a stale semantic hash, or file
 ownership conflicts between tasks that the graph would otherwise permit to run
-in parallel. File overlap is valid when the graph orders the tasks. Pi never
-asks an LLM to guess missing dependencies during execution.
+in parallel. File overlap is valid when transitive DAG reachability orders the
+tasks; a total topological list is not sufficient evidence. A task without the
+parallel marker never overlaps another active implementation, even when the DAG
+and file scopes would otherwise allow it. Pi never asks an LLM to guess missing
+dependencies during execution.
 
 ## 9. Persistent State
 
@@ -438,13 +500,15 @@ result. A fresh intent executes directly; only recovery of an intent without an
 observation calls reconciliation first. Every action declares one recovery
 class: `idempotent`, `reconcilable`, or `non_retryable`. Adapters must use the
 key when the underlying system supports idempotency; reconcilable actions query
-native session, branch, commit, worktree, push, or pull-request identity before
+native session, branch, commit, worktree, task-projection commit, push, or pull-request identity before
 retrying. A `non_retryable` action whose result is unknown after a crash becomes
 `BLOCKED` with an indeterminate-effect diagnostic instead of running twice.
 Outstanding intents also reserve durable effect lanes. Run-branch mutations
 share one lane until observation, while independent worker lanes remain
 parallel, so serializing controller decisions cannot accidentally launch two
-concurrent integrations.
+concurrent mutations. A separate durable integration-pipeline reservation spans
+candidate preparation, verification, and atomic promotion; only one task per run
+may hold it.
 
 `state.json` is written to a sibling temporary file, flushed, and atomically
 renamed. It records the last applied sequence and event hash. On recovery, an
@@ -498,8 +562,9 @@ Rules:
 - A downstream retry remains bound to the exact upstream attempt generation it
   observed. Retrying an upstream job invalidates dependent results before they
   can be integrated.
-- Pi updates a `tasks.md` checkbox only after the task projection reaches
-  `DONE`.
+- A fenced `git.project-task-status` observation commits exactly one normalized
+  `tasks.md` checkbox transition and moves the task projection to `DONE` in the
+  same controller transaction. It never changes semantic task content.
 
 Herdr lifecycle is treated as observation:
 
@@ -544,14 +609,27 @@ integration commit containing all completed dependency commits.
 Independent tasks may run concurrently from their appropriate integration
 bases.
 
-After worker completion, Pi validates the worker-produced commits, performs
-review and task verification, serializes integration into the run branch, and
-runs post-integration checks. A conflict leaves the task in `VERIFYING` and
-creates a remediation attempt or blocker. `DONE` means the commit is integrated
-and post-integration checks passed for the projected task.
+After worker completion, Pi validates the complete worker change range from its
+assigned base through its reported head, performs review and task verification,
+and prepares one harness-owned candidate commit without moving the run branch.
+The candidate applies the full range diff and records the effect key, source
+base, source head, source tree, and patch identity as reconciliation trailers;
+it never assumes the worker created exactly one commit. Pi runs
+post-integration checks in a detached worktree pinned to that candidate. After
+they pass, one compare-and-swap ref update publishes a final commit containing
+both the verified candidate tree and the normalized `tasks.md` checkbox. A
+failed post-check leaves the run branch unchanged. The per-run integration
+pipeline remains reserved from candidate preparation through finalization, so
+another task cannot base work on an unverified candidate. A conflict or stale
+run head leaves the task in `VERIFYING` and creates a remediation/retry decision
+or blocker. `DONE` means the full change is integrated, post-integration checks
+passed, and its normalized task projection was durably recorded.
 
 After all tasks are done, Pi runs the full verification suite, reviews the
-final diff, pushes the integration branch, and creates the final pull request.
+frozen base-to-run-branch diff in a detached read-only worktree, pushes the
+reviewed integration commit, and creates the final pull request. Final review
+changes requested block for an explicit plan/remediation decision in the first
+release rather than silently inventing tasks.
 
 ## 12. Herdr Runtime
 
@@ -701,8 +779,8 @@ command values and writes them into `environment.yaml`; the user never has to
 author YAML merely to obtain a runnable default. Detected commands are shown
 for confirmation and are not executed during bootstrap before approval.
 
-`environment.yaml` declares required versions and capabilities for Pi, Spec
-Kit, Superpowers, Herdr, the four Herdr integrations, Codex CLI, Devin CLI,
+`environment.yaml` declares required versions and capabilities for Pi, TypeBox,
+Spec Kit, Superpowers, Herdr, the four Herdr integrations, Codex CLI, Devin CLI,
 Claude Code, Git, GitHub CLI, and an authenticated GitHub remote. GitHub is
 required in the first release because final pull-request creation is a required
 stage; provider-neutral hosting is deferred. `harness.lock` resolves every
@@ -715,7 +793,7 @@ repository: either an already installed binary or an exact-version command
 from the harness release documentation, such as:
 
 ```text
-npm exec --yes --package pi-multi-agent-harness@<exact-version> -- harness bootstrap .
+npm exec --yes --package pi-multi-agent-harness@0.1.0 -- harness bootstrap .
 ```
 
 The launcher treats `.harness/*.yaml` and `harness.lock` only as declarative
@@ -896,13 +974,14 @@ The first release is acceptable when all of the following are demonstrated:
    prerequisites are verified and integrated.
 5. Codex, Devin, and Claude each pass the shared adapter contract suite and
    complete a real gated smoke task.
-6. A worker completion claim without a valid result, commit, required
+6. A worker completion claim without a valid result, sealed base-to-head change, required
    Superpowers evidence, review, tests, and successful integration cannot
    produce task state `DONE`.
 7. The default workflow enforces a reviewer worker kind different from its
    implementation worker kind, including after fallback routing; absence of an
    eligible independent reviewer blocks the job.
-8. Pi, Herdr, and worker termination tests recover without duplicate attempts,
+8. Pi, Herdr, and worker termination tests, including a planning crash after the
+   native terminal transcript but before the harness completion marker, recover without duplicate attempts,
    duplicate commits, skipped dependencies, or lost event history. Recovery
    safely truncates only an incomplete trailing event and rejects interior
    corruption or a stale fencing token.
@@ -915,8 +994,9 @@ The first release is acceptable when all of the following are demonstrated:
     the run, reconciles intent/observation events, and resumes safely.
 12. A test workflow demonstrates keyed fan-out, `same-item` joins, an `all`
     fan-in barrier, and task-state projection without hard-coded stage names.
-13. A complete sample feature reaches final full-suite verification and creates
-    one pull request containing the integrated task commits.
+13. A complete sample feature reaches post-integration and final full-suite
+    verification, passes final-diff review, pushes the exact reviewed commit,
+    and creates one pull request containing every sealed task change.
 14. Concurrent timer, Herdr, Pi, and operator wakeups are serialized so one
     logical effect produces one intent and one observation.
 15. Review uses a distinct worker kind and a separate clean, detached worktree
