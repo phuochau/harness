@@ -4,7 +4,7 @@
 
 **Goal:** Build the fenced event store, generic effect protocol, serialized controller queue, policy engine, and fake end-to-end scheduler.
 
-**Architecture:** The journal is authoritative, snapshots are disposable materializations, and a lock-directory lease plus fencing rejects stale writers. All wakeups enter one FIFO command queue. The controller records effect intent before invoking an action handler and reconciles any intent without an observation before deciding whether execution is safe.
+**Architecture:** The journal is authoritative, snapshots are disposable materializations, and a lock-directory lease plus fencing rejects stale writers. All wakeups enter one FIFO command queue after their normalized JSON command is durably received; restart drains received commands without processed boundaries before new input. The controller records effect intent before invoking an action handler and reconciles any intent without an observation before deciding whether execution is safe.
 
 **Tech Stack:** Node filesystem APIs, `proper-lockfile`, TypeScript, Vitest, fast-check.
 
@@ -264,8 +264,14 @@ it("replay is deterministic", () => {
   expect(replay(events)).toEqual(replay(structuredClone(events)));
 });
 
+it("rejects a processed command whose sealed batch is incomplete", () => {
+  const state = replay(fixtureEventsThroughCommandDecision({ omitMember: 1 }));
+  expect(() => reduceEvent(state, fixtureCommandProcessedEvent())).toThrow(/decision batch incomplete/);
+});
+
 it("replays controller, effect, operator, and planning events", () => {
   const state = replay(fixtureEventsWithIntentObservationPauseRetryAndPlanning());
+  expect(state.pendingCommands).toEqual({});
   expect(state.outstandingEffects).toEqual({});
   expect(state.operator.paused).toBe(false);
   expect(state.planning.status).toBe("completed");
@@ -296,7 +302,9 @@ export function reduceEvent(state: RunState, event: HarnessEvent): RunState {
     case "integration.observed": recordIntegration(next, event); break;
     case "integration.conflicted": recordIntegrationConflict(next, event); break;
     case "task.finalized": finalizeTaskAndReleasePipeline(next, event); break;
-    case "controller.command_processed": recordCommandKey(next, event); break;
+    case "controller.command_received": recordPendingCommand(next, event); break;
+    case "controller.command_decided": recordPendingDecisionBatch(next, event); break;
+    case "controller.command_processed": completePendingCommand(next, event); break;
     case "effect.intent": reserveEffect(next, event); break;
     case "effect.observed": observeEffect(next, event); break;
     case "effect.failed": failEffect(next, event); break;
@@ -322,6 +330,16 @@ export function reduceEvent(state: RunState, event: HarnessEvent): RunState {
 `completePlanning` requires the completed stage to match the outstanding
 correlation. The `tasks` variant is rejected unless it contains the non-empty
 planning seal commit; `specify` and `plan` variants cannot carry one.
+`recordPendingCommand` stores the normalized command together with the received
+event's timestamp and sequence. `recordPendingDecisionBatch` verifies its hash,
+immutable state revision, and exact accepted timestamp/sequence against that
+pending record;
+each draft must materialize into a valid non-`controller.*` `HarnessEvent`, and
+each effect input must pass the registered action schema before the batch enters
+state.
+`completePendingCommand` refuses the processed boundary until every event and
+effect-intent key in that sealed batch has appeared, then removes the command
+and batch from the pending maps while retaining the processed-key index.
 `integration.observed` records only a verified candidate identity and keeps the
 task in `VERIFYING`; `task.finalized` records the compare-and-swap run commit,
 releases the integration pipeline, and supplies the evidence required by the
@@ -454,6 +472,7 @@ git commit -m "feat: define recoverable effect protocol"
 **Interfaces:**
 - Produces `ControllerCommandQueue.enqueue(command): Promise<CommandResult>` and `reserveEffectLanes(state, candidates): readonly EffectIntent[]`.
 - Queue processing is FIFO and at most one reducer/decision transaction runs at a time.
+- `enqueue` durably accepts a normalized command before it can be acknowledged; `recoverPending()` replays accepted commands that have no processed boundary.
 
 - [ ] **Step 1: Write the timer/Herdr/operator race test**
 
@@ -488,6 +507,42 @@ it("deduplicates a controller command after restart", async () => {
   await fixture.queue.enqueue(retry);
   expect(fixture.events.filter((event) => event.eventType === "controller.command_processed" && event.payload.commandKey === retry.idempotencyKey)).toHaveLength(1);
 });
+
+it("replays a durably received command without the caller resubmitting it", async () => {
+  const fixture = await controllerQueueFixture({ crashAfterEvent: "controller.command_received" });
+  const retry = command("operator", "retry:T001:accepted");
+  await expect(fixture.queue.enqueue(retry)).rejects.toThrow(/injected crash/);
+  expect(fixture.eventsFor("controller.command_received", retry.idempotencyKey)).toHaveLength(1);
+  await fixture.restartAndRecoverPending();
+  expect(fixture.operatorIntents("retry", "T001")).toHaveLength(1);
+  expect(fixture.eventsFor("controller.command_processed", retry.idempotencyKey)).toHaveLength(1);
+});
+
+it("derives an undecided received command from its recorded time, not restart time", async () => {
+  const control = await controllerQueueFixture();
+  const crashed = await controllerQueueFixture({ crashAfterEvent: "controller.command_received" });
+  const retry = command("timer", "retry-window:T001");
+  await control.queue.enqueue(retry);
+  await expect(crashed.queue.enqueue(retry)).rejects.toThrow(/injected crash/);
+  await crashed.clock.advanceBy(86_400_000);
+  await crashed.restartAndRecoverPending();
+  expect(crashed.decisionBatch(retry.idempotencyKey).decisionHash)
+    .toBe(control.decisionBatch(retry.idempotencyKey).decisionHash);
+});
+
+it("replays the sealed decision batch instead of deriving on partially applied state", async () => {
+  const fixture = await controllerQueueFixture({ crashAfterBatchMember: 1 });
+  const command = fixture.multiDecisionOperatorCommand("retry-and-reroute:T001");
+  await expect(fixture.queue.enqueue(command)).rejects.toThrow(/injected crash/);
+  expect(fixture.derivationsFor(command.idempotencyKey)).toBe(1);
+  const sealedHash = fixture.decisionBatch(command.idempotencyKey).decisionHash;
+  await fixture.restartAndRecoverPending();
+  expect(fixture.derivationsFor(command.idempotencyKey)).toBe(1);
+  expect(fixture.decisionBatch(command.idempotencyKey).decisionHash).toBe(sealedHash);
+  expect(fixture.appliedDecisionKeys(command.idempotencyKey)).toEqual(
+    fixture.sealedDecisionKeys(command.idempotencyKey),
+  );
+});
 ```
 
 - [ ] **Step 2: Run and observe missing queue**
@@ -503,7 +558,22 @@ export class ControllerCommandQueue {
   #tail: Promise<void> = Promise.resolve();
 
   enqueue(command: ControllerCommand): Promise<CommandResult> {
-    const result = this.#tail.then(() => this.processor.process(command));
+    const result = this.#tail.then(async () => {
+      const accepted = await this.processor.accept(command);
+      return this.processor.processReceived(accepted.commandKey);
+    });
+    this.#tail = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  recoverPending(): Promise<readonly CommandResult[]> {
+    const result = this.#tail.then(async () => {
+      const outputs: CommandResult[] = [];
+      for (const commandKey of await this.processor.pendingCommandKeysInSequenceOrder()) {
+        outputs.push(await this.processor.processReceived(commandKey));
+      }
+      return outputs;
+    });
     this.#tail = result.then(() => undefined, () => undefined);
     return result;
   }
@@ -514,15 +584,36 @@ export class ControllerCommandQueue {
 }
 ```
 
-`processor.process` reloads the latest state after acquiring the lease and checks
-the command key against reduced `controller.command_processed` events. For a
-new key it derives decisions, appends lifecycle events and reserved intents with
-stable event idempotency keys, then appends `controller.command_processed` as
-the durable boundary. A crash before that boundary replays the command; already
-appended decisions deduplicate in the journal and missing decisions are derived
-from the latest state. A duplicate completed command returns the stored state
-revision without deriving again. It never holds a transaction open while an
+`processor.accept` validates the closed `ControllerCommand` schema and appends
+and fsyncs `controller.command_received` with the complete normalized JSON
+command under `command-received:<commandKey>`. Only then is the command
+accepted. `processReceived` reloads the latest state after acquiring the lease,
+loads the command plus its accepted event timestamp and sequence from reduced
+`pendingCommands`, and checks the key against
+`controller.command_processed`. If the command has no decision batch, it derives
+once against that recorded logical time and state revision, reserves effect lanes, validates every
+event draft through the closed event factory, and appends one
+`controller.command_decided` containing the complete canonical event/effect
+batch plus `sha256(canonicalJson(batchWithoutHash))`. Only after that fsync does
+it append the batch's lifecycle events and effect intents, then
+`controller.command_processed`. Recovery scans received sequence order. A
+received command without a decision batch is derived once; a command with a
+batch replays that exact batch and never derives against partially applied state.
+Every member has a key derived from `(commandKey, batchIndex, semanticTarget)`,
+so already appended members deduplicate. Only an effect intent newly created by
+this invocation may use `dispatchFresh`; a replayed existing intent goes through
+Task 11 reconciliation after pending commands drain. A duplicate completed
+command returns the stored state revision without deriving again. A crash before
+the received event was fsynced never acknowledged acceptance; a caller retry
+uses the same key. The processor never holds a transaction open while an
 external effect runs; effect completion re-enters the queue as a new command.
+
+Decision derivation is a pure function of reduced state, frozen graph/policy,
+and the accepted command record. It never reads the live clock, randomness,
+filesystem, network, or process environment. Retry deadlines, attempt IDs, and
+other time-derived payloads use the command's recorded receive timestamp; stable
+IDs use canonical hashes. Event envelope timestamps may use the append clock but
+are excluded from the sealed decision hash.
 
 `reserveEffectLanes` is part of the pure decision transaction. Outstanding
 `effect.intent` events occupy their durable `laneKey` until a matching
@@ -715,16 +806,39 @@ export class HarnessController {
     return this.queue.enqueue(command);
   }
 
-  async process(command: ControllerCommand): Promise<CommandResult> {
-    const state = await this.repository.load();
-    if (state.processedCommandKeys[command.idempotencyKey]) return { accepted: false, duplicate: true, stateRevision: state.lastSequence };
-    const decisions = deriveDecisions(applyCommand(state, command), this.graph, this.policy);
-    for (const decision of decisions.events) await this.repository.append(decision, this.lease);
-    const reserved = reserveEffectLanes(this.repository.state, decisions.effects);
-    for (const intent of reserved) await this.repository.append(effectIntentEvent(intent), this.lease);
-    await this.repository.append(commandProcessedEvent(command), this.lease);
+  async accept(command: ControllerCommand): Promise<{ commandKey: string }> {
+    const normalized = validateControllerCommand(structuredClone(command));
+    await this.repository.append(commandReceivedEvent(normalized), this.lease);
+    return { commandKey: normalized.idempotencyKey };
+  }
+
+  async processReceived(commandKey: string): Promise<CommandResult> {
+    let state = await this.repository.load();
+    if (state.processedCommandKeys[commandKey]) return { accepted: false, duplicate: true, stateRevision: state.lastSequence };
+    const command = state.pendingCommands[commandKey];
+    if (!command) throw new ControllerInvariantError(`missing received command ${commandKey}`);
+    let batch = state.pendingDecisionBatches[commandKey];
+    if (!batch) {
+      const decisions = deriveDecisions(applyCommand(state, command.command, command.receivedAt), this.graph, this.policy);
+      const reserved = reserveEffectLanes(state, decisions.effects);
+      batch = sealDecisionBatch(commandKey, {
+        acceptedSequence: command.receivedSequence,
+        acceptedAt: command.receivedAt,
+        stateRevision: state.lastSequence,
+      }, decisions.events, reserved);
+      await this.repository.append(commandDecidedEvent(batch), this.lease);
+      state = this.repository.state;
+    }
+    assertDecisionHash(batch);
+    for (const draft of batch.events) await this.repository.append(materializeDecisionEvent(draft), this.lease);
+    const freshIntents: EffectIntent[] = [];
+    for (const intent of batch.effects) {
+      const appended = await this.repository.append(effectIntentEvent(intent), this.lease);
+      if (appended.inserted) freshIntents.push(intent);
+    }
+    await this.repository.append(commandProcessedEvent(command.command), this.lease);
     await this.repository.snapshot(this.lease);
-    for (const intent of reserved) void this.dispatchFresh(intent);
+    for (const intent of freshIntents) void this.dispatchFresh(intent);
     return { accepted: true, stateRevision: this.repository.lastSequence };
   }
 
@@ -738,6 +852,11 @@ export class HarnessController {
   }
 }
 ```
+
+At composition-root recovery, acquire the fenced lease, replay the journal,
+call `queue.recoverPending()`, and wait for those received commands to reach
+their processed boundaries before registering fresh timer, Pi, Herdr, or
+operator sources.
 
 `deriveDecisions` returns ordinary lifecycle events separately from effect
 candidates; it does not emit `effect.intent` itself. `reserveEffectLanes`

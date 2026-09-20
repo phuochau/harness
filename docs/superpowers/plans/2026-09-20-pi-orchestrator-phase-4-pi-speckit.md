@@ -4,7 +4,7 @@
 
 **Goal:** Connect deterministic orchestration to Spec Kit planning and a resident Pi extension, then generate a complete editable workflow that runs immediately.
 
-**Architecture:** Spec Kit remains the planning source of truth. Pi planning actions are accepted only when a durable custom-entry marker identifies either the correlated `agent_settled` callback or a strictly validated recovered terminal transcript, its final `turnIndex` is recorded, and stage-specific artifact deltas agree. Controller code derives the task graph and cryptographic hash from canonical `tasks.md` records. The extension is tested through Pi's real resource loader before resident scheduling and commands are layered on it.
+**Architecture:** Spec Kit remains the planning source of truth. Pi planning actions are accepted only when a durable custom-entry marker identifies either the correlated `agent_settled` callback or a strictly validated recovered terminal transcript, its final `turnIndex` is recorded, and stage-specific artifact deltas agree. A correlation-bound profile lease keeps the authenticated planning model selected through that terminal boundary and restores the prior interactive model idempotently. Controller code derives the task graph and cryptographic hash from exact-grammar canonical `tasks.md` records. The extension is tested through Pi's real resource loader before resident scheduling and commands are layered on it.
 
 **Tech Stack:** Spec Kit presets, `@earendil-works/pi-coding-agent@0.86.1`, YAML, TypeScript, Vitest.
 
@@ -38,6 +38,23 @@ it("wraps speckit.tasks and emits a hash-bound graph", async () => {
 it("rejects metadata that disagrees with the visible task definition", async () => {
   await expect(sealTaskGraph(taskArtifactFixture({ metadataOwnedPath: "src/wrong.ts" })))
     .rejects.toThrow(/metadata does not match visible task/);
+});
+
+it("parses the exact visible grammar and ignores only checkbox state", () => {
+  const unchecked = exactTaskDocumentFixture({ checkbox: " " });
+  const checked = exactTaskDocumentFixture({ checkbox: "x" });
+  expect(parseSpecKitTasks(unchecked)).toEqual(parseSpecKitTasks(checked));
+  expect(parseSpecKitTasks(unchecked)[0]).toMatchObject({
+    id: "T001", phase: "Setup", labels: ["US1"], parallelEligible: true,
+    dependsOn: [], acceptanceRefs: ["FR-001"], ownedPaths: ["src/parser.ts"],
+  });
+});
+
+it.each([
+  "missing_metadata_delimiter", "duplicate_json_key", "unknown_visible_syntax",
+  "metadata_task_order_mismatch", "duplicate_set_member", "non_posix_path",
+] as const)("rejects malformed task contract %s", (kind) => {
+  expect(() => parseSpecKitTasks(malformedTaskDocumentFixture(kind))).toThrow();
 });
 ```
 
@@ -78,14 +95,24 @@ strategy: wrap
 ---
 {CORE_TEMPLATE}
 
-After writing tasks.md, append exactly one `harness-task-metadata:v1` HTML
-comment containing JSON records for every visible task. Each record contains
-`id`, `dependsOn`, `acceptanceRefs`, and `ownedPaths`. Copy IDs, paths, labels,
-parallel markers, phase headings, descriptions, and explicit dependency text
-from the visible document; add missing visible dependency or acceptance text
-before recording it in metadata. Do not write `task-graph.json` and do not
-compute a hash: the harness controller derives both deterministically after the
-correlated Pi run settles.
+Render every phase heading as `## Phase N: <name>` and every task as exactly:
+
+`- [ ] T001 [P] [US1] Description | deps=[] | ac=["FR-001"] | paths=["src/file.ts"]`
+
+`[P]` and labels are optional; the three pipe fields are required JSON string
+arrays. Escape a literal description pipe as `\|`. Then append exactly one EOF
+block with no content after it:
+
+<!-- harness-task-metadata:v1
+{"schema":"harness/task-metadata/v1","tasks":[{"acceptanceRefs":["FR-001"],"dependsOn":[],"description":"Description","id":"T001","labels":["US1"],"ownedPaths":["src/file.ts"],"parallelEligible":true,"phase":"<name>"}]}
+-->
+
+Include one metadata record per visible task in visible order and copy every
+field from the visible entry after normalization. Emit the JSON line as
+canonical JSON: object keys sorted by locale-independent UTF-16 code-unit order, no insignificant
+whitespace, and already-normalized arrays. Do not write
+`task-graph.json` and do not compute a hash: the harness controller derives both
+deterministically after the correlated Pi run settles.
 ```
 
 ```ts
@@ -110,14 +137,37 @@ export async function validatePlanningArtifacts(root: string, contract: Planning
 }
 ```
 
-`parseSpecKitTasks` treats the visible task entries plus their phase headings,
-labels, `[P]` marker, explicit dependency text, acceptance references, and file
-paths as the source of truth. It cross-checks the embedded metadata block,
-normalizes checkbox state only, and rejects duplicates or any mismatch.
+`parseSpecKitTasks` accepts only phase headings matching
+`^## Phase [0-9]+: (.+)$`. A task line starts with `- [ ]`, `- [x]`, or
+`- [X]`, followed by a
+`T[0-9]{3,}` ID, optional `[P]`, zero or more labels, a non-empty description,
+and the exact separators ` | deps=`, ` | ac=`, and ` | paths=`. Each suffix is a
+JSON string array. The nearest preceding phase heading supplies `phase`; a task
+before one is invalid. A literal description pipe must be escaped as `\|`.
+
+The sole metadata envelope is the exact EOF sequence
+`<!-- harness-task-metadata:v1\n<json>\n-->`; its root is the closed object
+`{ schema: "harness/task-metadata/v1", tasks: CanonicalTaskRecord[] }`. Parse the
+line once, then require its original bytes to equal `canonicalJson(parsed)`;
+this rejects duplicate keys, noncanonical key order, and whitespace ambiguity.
+Records contain exactly `id`, `phase`, `labels`,
+`parallelEligible`, `description`, `dependsOn`, `acceptanceRefs`, and
+`ownedPaths`, in visible task order. Normalize CRLF to LF and strings to Unicode
+NFC; trim only phase/description edges; unescape `\|`; reject duplicates and
+then sort the set-valued arrays `labels`, `dependsOn`, `acceptanceRefs`, and `ownedPaths`;
+normalize paths to repository-relative POSIX form and reject absolute paths,
+`..`, empty values, or duplicate set members. Checkbox case/state is the only
+discarded visible information. The canonical visible records are the source of
+truth; the normalized metadata records must match them exactly, with no missing,
+extra, reordered, or duplicate task.
+
 `sealTaskGraph` writes `schema: harness/task-graph/v1`, copies the canonical
-records, computes `sha256(canonicalJson(taskRecords))` itself, validates acceptance references against
-`spec.md`, and atomically renames the generated graph. The planning model never
-computes a cryptographic hash.
+records, computes `sha256(canonicalJson(taskRecords))` itself, validates
+each acceptance reference against the unique `FR-NNN:` and `SC-NNN:` bullet
+tokens matching `^\s*[-*]\s+((?:FR|SC)-[0-9]{3}):` in `spec.md` (empty is
+allowed for purely infrastructural tasks), and atomically renames the generated
+graph. The metadata block itself is excluded from the semantic hash. The
+planning model never computes a cryptographic hash.
 
 - [ ] **Step 4: Add immediate real Spec Kit compatibility test**
 
@@ -339,9 +389,9 @@ git commit -m "feat: load extension through Pi runtime"
 ## Task 27: Generate a Complete Editable Default Workflow
 
 **Files:**
-- Create: `src/defaults/workflow.yaml`, `environment.yaml`, `policy.yaml`, `harness.lock`
+- Create: `src/defaults/workflow.yaml`, `environment.yaml`, `policy.yaml`, `harness.lock`, `pi-settings.json`
 - Create: `src/defaults/workflows/spec-kit-codex.yaml`, `spec-kit-devin.yaml`, `mixed-workers.yaml`
-- Create: `src/cli/init.ts`, `command-detection.ts`, `config-merge.ts`, `package-root.ts`
+- Create: `src/cli/init.ts`, `command-detection.ts`, `config-merge.ts`, `ignore-merge.ts`, `package-root.ts`
 - Modify: `src/cli/main.ts`
 - Modify: `test/support/planning-fixtures.ts`
 - Test: `test/integration/init.test.ts`
@@ -364,6 +414,27 @@ it("creates the full default stage sequence and all three workers", async () => 
   ]);
   expect(workflow.stages.find((stage: { id: string }) => stage.id === "implement").runner.prefer).toEqual(["devin", "codex", "claude"]);
   expect(workflow.stages.find((stage: { id: string }) => stage.id === "review").runner.prefer).toEqual(["codex", "claude", "devin"]);
+  const environment = await loadYaml(join(repo, ".harness/environment.yaml"));
+  expect(environment.pi_packages).toEqual([
+    {
+      id: "harness",
+      dependency: "pi-multi-agent-harness",
+      scope: "project",
+      resources: { extensions: ["dist/pi/extension.js"] },
+    },
+  ]);
+  const settings = await loadJson(join(repo, ".pi/settings.json"));
+  expect(settings.packages).toContainEqual(expect.objectContaining({
+    source: "npm:pi-multi-agent-harness@0.1.0",
+    extensions: ["+dist/pi/extension.js"],
+    skills: [],
+    prompts: [],
+    themes: [],
+  }));
+  expect(await gitCheckIgnored(repo, ".pi/npm/example/package.json")).toBe(true);
+  expect(await gitCheckIgnored(repo, ".pi/git/example/repo/package.json")).toBe(true);
+  expect(await gitCheckIgnored(repo, ".harness-output/result.json")).toBe(true);
+  expect(await gitCheckIgnored(repo, ".pi/settings.json")).toBe(false);
 });
 
 it("refuses to overwrite customized config", async () => {
@@ -371,6 +442,36 @@ it("refuses to overwrite customized config", async () => {
   await expect(runHarness(["init", repo])).rejects.toThrow(/already exists/);
 });
 ```
+
+The generated environment also contains an immediately usable, project-local
+Pi package declaration. Package identity and required resource paths are
+project-owned data; the executable source is resolved only through the lock:
+
+```yaml
+pi_packages:
+  - id: harness
+    dependency: pi-multi-agent-harness
+    scope: project
+    resources:
+      extensions: [dist/pi/extension.js]
+```
+
+Each `dependency` must name exactly one `kind: pi-package` lock entry containing
+an exact Pi source string, version/ref, and integrity evidence. Resource types
+are limited to `extensions`, `skills`, `prompts`, and `themes`; paths are
+normalized package-relative paths with no glob or traversal, and later probes
+reject symlink escape.
+`init` renders the matching `.pi/settings.json` package object using exact
+`+path` filters. It always writes all four resource keys and uses `[]` for an
+undeclared type, so omission cannot accidentally load every resource of that
+type.
+Package source, filters, and scope must agree across environment, lock, and Pi
+settings or configuration validation fails. Additional project packages use
+the same schema, so projects can declare missing Pi plugins without changing
+the harness. `init` also merges a bounded managed block into `.gitignore` for
+`.pi/npm/`, `.pi/git/`, and `.harness-output/`; it preserves all existing lines,
+never ignores `.pi/settings.json`, and makes a second init a no-op for that
+block.
 
 - [ ] **Step 2: Run and observe missing init command/defaults**
 
@@ -480,17 +581,18 @@ export async function initProject(options: InitOptions): Promise<void> {
   const files = await renderDefaults(root, commands);
   await assertNoExistingTargets(options.root, Object.keys(files));
   await validateGeneratedConfiguration(files);
-  await atomicWriteSet(options.root, files);
+  const ignore = await mergeHarnessIgnoreBlock(options.root);
+  await atomicWriteSet(options.root, { ...files, ".gitignore": ignore });
 }
 ```
 
-Read manifests only; never run npm scripts. Ambiguous/empty detection prompts interactively or fails noninteractively with exact flags. Resolve assets from `import.meta.url` and package metadata, never cwd.
+Read manifests only; never run npm scripts. Ambiguous/empty detection prompts interactively or fails noninteractively with exact flags. Resolve assets from `import.meta.url` and package metadata, never cwd. Validate the environment/lock/settings package projection before the atomic write set; never discover or load a Pi resource during `init`.
 
 - [ ] **Step 5: Commit after running init tests**
 
 Run: `npm test -- test/integration/init.test.ts && npm run typecheck`
 
-Expected: PASS for Node, Python, ambiguity, spaces, existing config, non-Git path, and packaged asset lookup.
+Expected: PASS for Node, Python, ambiguity, spaces, existing config, preserved custom `.gitignore`, repeated managed-block merge, project cache/output ignores, trackable Pi settings, non-Git path, and packaged asset lookup.
 
 ```bash
 git add src/defaults src/cli test/integration/init.test.ts test/fixtures/projects
@@ -501,7 +603,7 @@ git commit -m "feat: initialize runnable harness workflows"
 
 **Files:**
 - Create: `src/pi/controller-registry.ts`, `events.ts`, `commands.ts`, `status-view.ts`, `planning-profile.ts`
-- Modify: `src/pi/extension.ts`
+- Modify: `src/pi/extension.ts`, `planning-agent.ts`
 - Modify: `test/support/planning-fixtures.ts`
 - Test: `test/integration/pi-residency.test.ts`, `test/unit/pi-commands.test.ts`
 
@@ -525,6 +627,39 @@ it("routes all wakeups through the serialized queue", async () => {
   const fixture = await piResidencyFixture();
   await Promise.all([fixture.pi.emit("turn_end"), fixture.herdr.emitAsync(agentIdle()), fixture.commands.retry("T001")]);
   expect(fixture.queue.maxConcurrent).toBe(1);
+});
+
+it("keeps the planning profile selected through the correlated agent settlement", async () => {
+  const fixture = await piResidencyFixture({ currentModel: "interactive-model", thinkingLevel: "medium" });
+  const receipt = await fixture.startPlanning("tasks");
+  expect(fixture.pi.currentModelId()).toBe("chatgpt-planning-model");
+  expect(fixture.pi.currentThinkingLevel()).toBe("high");
+  await fixture.pi.emitCorrelatedTurnEnd(receipt);
+  expect(fixture.pi.currentModelId()).toBe("chatgpt-planning-model");
+  expect(fixture.pi.providerRequestModels(receipt)).toEqual(["chatgpt-planning-model"]);
+  await fixture.pi.emitCorrelatedAgentSettled(receipt);
+  await fixture.queue.drain();
+  expect(fixture.pi.currentModelId()).toBe("interactive-model");
+  expect(fixture.pi.currentThinkingLevel()).toBe("medium");
+});
+
+it("restores an unfinished profile lease from terminal transcript evidence", async () => {
+  const fixture = await piResidencyFixture({ crashAfter: "planning-native-terminal" });
+  const receipt = await fixture.startPlanning("plan");
+  await fixture.crashAndRestart();
+  await fixture.recoverPlanning(receipt);
+  expect(fixture.pi.entries("harness:planning-profile-restored")).toHaveLength(1);
+  expect(fixture.pi.currentModelId()).toBe(fixture.previousModelId);
+});
+
+it("blocks a planning generation if the selected model drifts", async () => {
+  const fixture = await piResidencyFixture();
+  const receipt = await fixture.startPlanning("tasks");
+  await fixture.pi.emitModelSelect("unexpected-model");
+  await fixture.pi.emitCorrelatedAgentSettled(receipt);
+  await expect(fixture.observePlanning(receipt)).resolves.toMatchObject({
+    status: "blocked", reason: expect.stringMatching(/planning model drift/),
+  });
 });
 ```
 
@@ -561,21 +696,93 @@ Mutating commands append operator intents.
 
 - [ ] **Step 4: Enforce planning profile and run approval boundaries**
 
-Resolve `chatgpt-planning` from machine-local Pi settings, verify authenticated ChatGPT subscription capability, and restore the prior interactive model after the correlated planning run settles. `/harness-run` displays workflow hash, commands, workers, credential profiles, permissions, branches, push, and PR effects before approval. Do not serialize credentials.
+Resolve `chatgpt-planning` from machine-local Pi settings, verify authenticated
+ChatGPT subscription capability, and hold a correlation-bound profile lease
+until the exact planning run settles. `/harness-run` displays workflow hash,
+commands, workers, credential profiles, permissions, branches, push, and PR
+effects before approval. Do not serialize credentials.
 
 ```ts
-export async function withPlanningProfile<T>(pi: PiModelPort, action: () => Promise<T>): Promise<T> {
-  const previous = await pi.currentModel();
-  const planning = await pi.resolveAuthenticatedProfile("chatgpt-planning");
-  if (!planning || planning.provider !== "openai-codex") throw new PolicyBlocker("CHATGPT_PLANNING_PROFILE_UNAVAILABLE");
-  try {
-    await pi.selectModel(planning);
-    return await action();
-  } finally {
-    await pi.selectModel(previous);
+export interface ModelIdentity { provider: string; modelId: string }
+export interface PlanningProfileLease {
+  correlationId: string;
+  previous: { model: ModelIdentity; thinkingLevel: ThinkingLevel };
+  planning: { model: ModelIdentity; thinkingLevel: ThinkingLevel };
+  entryId: string;
+}
+export interface PlanningSettlement {
+  correlationId: string;
+  terminal: true;
+  finalTurnIndex: number;
+}
+export interface PiModelPort {
+  currentModel(): Promise<PiModel>;
+  currentThinkingLevel(): Promise<ThinkingLevel>;
+  resolveAuthenticatedProfile(name: string): Promise<{ model: PiModel; thinkingLevel: ThinkingLevel } | undefined>;
+  resolveModelIdentity(identity: ModelIdentity): Promise<PiModel | undefined>;
+  selectModel(model: PiModel): Promise<void>;
+  selectThinkingLevel(level: ThinkingLevel): Promise<void>;
+  appendEntry(customType: string, data: unknown): void;
+  getLeafId(): string | undefined;
+}
+export interface PlanningProfileStore {
+  activeLease(): Promise<PlanningProfileLease | undefined>;
+  isRestored(selectedEntryId: string): Promise<boolean>;
+}
+
+export class PlanningProfileCoordinator {
+  constructor(private readonly pi: PiModelPort, private readonly store: PlanningProfileStore) {}
+
+  async begin(correlationId: string): Promise<PlanningProfileLease> {
+    if (await this.store.activeLease()) throw new PolicyBlocker("PLANNING_PROFILE_ALREADY_LEASED");
+    const previous = {
+      model: modelIdentity(await this.pi.currentModel()),
+      thinkingLevel: await this.pi.currentThinkingLevel(),
+    };
+    const planning = await this.pi.resolveAuthenticatedProfile("chatgpt-planning");
+    if (!planning || planning.model.provider !== "openai-codex") {
+      throw new PolicyBlocker("CHATGPT_PLANNING_PROFILE_UNAVAILABLE");
+    }
+    const lease = { correlationId, previous, planning: {
+      model: modelIdentity(planning.model), thinkingLevel: planning.thinkingLevel,
+    } };
+    this.pi.appendEntry("harness:planning-profile-selected", lease);
+    const entryId = this.pi.getLeafId();
+    if (!entryId) throw new PlanningCorrelationError("profile selection entry was not persisted");
+    await this.pi.selectModel(planning.model);
+    await this.pi.selectThinkingLevel(planning.thinkingLevel);
+    return deepFreeze({ ...lease, entryId });
+  }
+
+  async restoreAfterSettlement(lease: PlanningProfileLease, settlement: PlanningSettlement): Promise<void> {
+    if (settlement.correlationId !== lease.correlationId || !settlement.terminal) {
+      throw new PlanningCorrelationError("profile restore requires exact terminal settlement");
+    }
+    if (await this.store.isRestored(lease.entryId)) return;
+    const previousModel = await this.pi.resolveModelIdentity(lease.previous.model);
+    if (!previousModel) throw new PolicyBlocker("PREVIOUS_INTERACTIVE_MODEL_UNAVAILABLE");
+    await this.pi.selectModel(previousModel);
+    await this.pi.selectThinkingLevel(lease.previous.thinkingLevel);
+    this.pi.appendEntry("harness:planning-profile-restored", {
+      correlationId: lease.correlationId,
+      selectedEntryId: lease.entryId,
+    });
   }
 }
 ```
+
+`PlanningAgent.enqueue` calls `begin` before `sendUserMessage`; recovery finds
+the lease by the receipt correlation ID. A returned send call or `turn_end`
+never releases the lease. The correlated `agent_settled` handler durably records settlement,
+then calls `restoreAfterSettlement`; recovery may do the same only after Task
+25's terminal-transcript proof. If a crash occurred after profile selection but
+before a correlated user entry existed, recovery restores the previous model and
+invalidates that generation. Pi's `model_select` and `thinking_level_select`
+events are observational rather than cancellable, so any event that moves away
+from the leased model/thinking pair before settlement records
+`harness:planning-profile-drift`, aborts/blocks that generation, and requires an
+explicit retry; drifted artifacts are never accepted. Only provider/model
+identities and thinking levels are stored; auth material remains machine-local.
 
 Run: `npm run check:phase4`
 

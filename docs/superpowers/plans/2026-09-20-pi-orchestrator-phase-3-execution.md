@@ -187,6 +187,10 @@ returns that exact commit. `SealedImplementation` identifies the complete
 `baseCommit..headCommit` change, not merely the final commit, and is immutable
 input to verification, review, and integration. Remediation always creates a
 new writable path with a new attempt number; never reopen the reviewer path.
+Cleanup resolves and verifies the registered path/worktree identity immediately
+before removal. It never force-removes an unsealed or dirty implementation
+worktree; that path is retained/quarantined with recovery evidence for explicit
+operator action.
 
 - [ ] **Step 4: Run worktree tests**
 
@@ -288,6 +292,39 @@ git commit -m "feat: add command and approval actions"
 **Interfaces:**
 - Registers `git.verify`, `git.integrate`, `git.project-task-status`, `git.push`, and `github.pull-request` with native reconciliation identities.
 
+```ts
+export interface IntegrationIdentity {
+  effectKey: string;
+  expectedRunHead: string;
+  change: SealedImplementation;
+}
+export type GitIntegrateIntent = EffectIntent<"git.integrate", {
+  expectedRunHead: string;
+  sealedChange: SealedImplementation;
+}>;
+export interface IntegrationOutput {
+  candidateCommit: string;
+  candidateRef: string;
+  expectedRunHead: string;
+  patchId: string;
+}
+export type ProjectTaskStatusIntent = EffectIntent<"git.project-task-status", {
+  runRef: string;
+  expectedRunHead: string;
+  candidateCommit: string;
+  integrationIdentity: IntegrationIdentity;
+  verificationEventId: string;
+  taskId: string;
+  tasksPath: string;
+  tasksSemanticHash: string;
+}>;
+export interface TaskFinalizationOutput {
+  targetCommit: string;
+  candidateCommit: string;
+  taskId: string;
+}
+```
+
 - [ ] **Step 1: Write replay-safe integration/PR tests**
 
 ```ts
@@ -307,6 +344,16 @@ it("integrates every commit in the sealed source range exactly once", async () =
   expect(await fixture.runHead()).toBe(fixture.expectedRunHead);
   await expect(fixture.integrate.reconcile(actionContext(), intent))
     .resolves.toMatchObject({ status: "observed", output });
+});
+
+it("refuses a candidate whose parent is not the intended run head", async () => {
+  const fixture = await multiCommitGitFixture();
+  const intent = gitIntegrateIntent(fixture.sealedChange);
+  await fixture.installCandidateWithMatchingSourceTrailers(intent, { parent: fixture.otherRunHead });
+  await expect(fixture.integrate.reconcile(actionContext(), intent)).resolves.toMatchObject({
+    status: "indeterminate",
+    evidence: expect.arrayContaining([expect.stringMatching(/expected run head/)]),
+  });
 });
 
 it("atomically promotes the verified candidate and one checkbox transition", async () => {
@@ -342,27 +389,74 @@ Expected: FAIL.
 async reconcile(ctx: ActionContext, intent: GitIntegrateIntent): Promise<ReconcileResult<IntegrationOutput>> {
   const candidateRef = `refs/harness/candidates/${sha256(intent.idempotencyKey).slice(7)}`;
   const matching = await ctx.git.revParseOptional(candidateRef);
-  if (matching) await ctx.git.assertIntegrationMetadata(matching, intent.input.sealedChange);
-  return matching
-    ? { status: "observed", output: { candidateCommit: matching, candidateRef, expectedRunHead: intent.input.expectedRunHead, patchId: intent.input.sealedChange.patchId } }
-    : { status: "not_found" };
+  if (!matching) return { status: "not_found" };
+  try {
+    await ctx.git.assertIntegrationMetadata(matching, {
+      effectKey: intent.idempotencyKey,
+      expectedRunHead: intent.input.expectedRunHead,
+      change: intent.input.sealedChange,
+    });
+  } catch (error) {
+    return { status: "indeterminate", evidence: integrationIdentityEvidence(error, matching, candidateRef) };
+  }
+  return { status: "observed", output: {
+    candidateCommit: matching,
+    candidateRef,
+    expectedRunHead: intent.input.expectedRunHead,
+    patchId: intent.input.sealedChange.patchId,
+  } };
+}
+```
+
+```ts
+async execute(ctx: ActionContext, intent: ProjectTaskStatusIntent): Promise<TaskFinalizationOutput> {
+  await ctx.git.assertIntegrationMetadata(intent.input.candidateCommit, intent.input.integrationIdentity);
+  await assertPassedVerification(this.events, intent.input.verificationEventId, intent.input.candidateCommit);
+  const projected = await buildProjectedTaskTree(ctx.git, {
+    candidateCommit: intent.input.candidateCommit,
+    taskId: intent.input.taskId,
+    tasksPath: intent.input.tasksPath,
+    tasksSemanticHash: intent.input.tasksSemanticHash,
+  });
+  const finalCommit = await ctx.git.commitTree(projected.tree, {
+    parent: intent.input.expectedRunHead,
+    trailers: finalizationTrailers(intent, projected),
+  });
+  await ctx.git.updateRefCas(intent.input.runRef, finalCommit, intent.input.expectedRunHead);
+  return { targetCommit: finalCommit, candidateCommit: intent.input.candidateCommit, taskId: intent.input.taskId };
+}
+
+async reconcile(ctx: ActionContext, intent: ProjectTaskStatusIntent): Promise<ReconcileResult<TaskFinalizationOutput>> {
+  const commit = await ctx.git.findCommitByTrailer(intent.input.runRef, "Harness-Effect-Key", intent.idempotencyKey);
+  if (!commit) return { status: "not_found" };
+  const check = await verifyFinalizationIdentity(ctx, commit, intent);
+  if (!check.ok) return { status: "indeterminate", evidence: check.evidence };
+  return await ctx.git.revParse(intent.input.runRef) === commit
+    ? { status: "observed", output: check.output }
+    : { status: "indeterminate", evidence: [`final commit ${commit} exists but run ref does not point to it`] };
 }
 ```
 
 `git.integrate.execute` applies the complete binary diff from
 `sealedChange.baseCommit` to `sealedChange.headCommit` in a detached candidate
 worktree pinned to `expectedRunHead`. It writes a harness-owned candidate commit
-under `refs/harness/candidates/${sha256(effectKey).slice(7)}` with trailers for the effect key,
-source base/head/tree, and patch ID; it does not move the run branch. Its process
+whose sole parent is that exact head under
+`refs/harness/candidates/${sha256(effectKey).slice(7)}` with trailers for the
+effect key, expected run head, source base/head/tree, and patch ID; it does not
+move the run branch. `assertIntegrationMetadata` verifies the ref target, sole
+parent, and every trailer before reconciliation may report `observed`; a moved
+or mismatched ref is `indeterminate`, never reusable. Its process
 port obtains `git diff --binary --full-index` through `runBytes()` and passes the
 unchanged bytes to `git apply --index` through `stdin`, without invoking a shell. A conflict aborts the
 candidate index and returns typed remediation evidence.
 
 After `post_integrate_verify` proves that exact candidate commit,
-`git.project-task-status` locates exactly one task ID in the candidate tree,
-normalizes only its checkbox, proves the semantic hash is unchanged, creates a
-final harness-owned commit whose parent is `expectedRunHead`, and advances the
-run branch with argv `["update-ref", runBranch, finalCommit, expectedRunHead]`.
+`git.project-task-status` first repeats the full candidate identity check and
+binds the exact `verification.passed` observation. It locates exactly one task ID
+in the candidate tree, normalizes only its checkbox, proves the semantic hash is
+unchanged, creates a final harness-owned commit whose parent is
+`expectedRunHead`, and advances the run branch with argv
+`["update-ref", runBranch, finalCommit, expectedRunHead]`.
 Code plus
 task projection therefore become visible in one compare-and-swap mutation. Its
 trailers bind the candidate, verification observation, task ID, semantic hash,
@@ -371,7 +465,10 @@ a stale run head returns a typed retry decision before mutation. The effect
 observation and projected `DONE` transition are appended in the same controller
 transaction. A failed post-integration verification leaves the run branch
 unchanged; its candidate ref is retained as diagnostic evidence and a new
-attempt receives a new effect key. `git.verify` binds command output to commit
+attempt receives a new effect key. Its reconciliation finds the final commit by
+effect-key trailer, verifies its sole parent, candidate tree transformation,
+verification observation, task ID, and semantic hash, and reports `observed`
+only when the run ref equals that exact commit. `git.verify` binds command output to commit
 SHA. The final-review observation supplies the immutable `reviewedCommit` used
 by `git.push`; push rejects a moved local head and reconciles only when the
 remote ref equals that exact commit. `github.pull-request` uses
@@ -388,7 +485,7 @@ remediation evidence instead of partial success.
 
 Run: `npm test -- test/integration/git/actions.test.ts`
 
-Expected: PASS for a multi-commit source range, an unchanged run branch before candidate verification, atomic candidate promotion, duplicate intent, checkbox replay, semantic-hash preservation, stale-head compare-and-swap, conflict cleanup, dirty worktree, mismatched remote, and existing PR.
+Expected: PASS for a multi-commit source range, an unchanged run branch before candidate verification, wrong-parent candidate rejection, atomic candidate promotion, duplicate intent, checkbox replay, semantic-hash preservation, stale-head compare-and-swap, conflict cleanup, dirty worktree, mismatched remote, and existing PR.
 
 - [ ] **Step 5: Commit**
 
@@ -416,8 +513,8 @@ it("correlates responses and validates event payloads", async () => {
   const transport = new FakeHerdrTransport();
   const client = new HerdrClient(transport);
   const pending = client.request("workspace.list", {});
-  transport.receive({ id: "harness-1", result: { workspaces: [] } });
-  await expect(pending).resolves.toEqual({ workspaces: [] });
+  transport.receive(workspaceListResponse("harness-1", []));
+  await expect(pending).resolves.toEqual(expect.objectContaining({ workspaces: [] }));
   expect(HERDR_SCHEMA_SHA256).toMatch(/^sha256:[0-9a-f]{64}$/);
 });
 ```
@@ -475,17 +572,31 @@ git commit -m "feat: add schema-validated Herdr client"
 - Test: `test/integration/herdr/runtime.test.ts`
 
 **Interfaces:**
-- Produces `HerdrRuntime.ensureWorkspace`, `startAgent`, `observeAgent`, `stopAgent`, and event subscription.
-- Stable labels include run, job, attempt, worker kind, assignment hash, and worktree commit.
+- Produces `HerdrRuntime.ensureWorkspace`, `startAgent`, `submitAssignment`, `observeAgent`, `stopAgent`, and event subscription.
+- Stable identity is a deterministic Herdr-safe agent name plus the persisted workspace ID, pane ID, worktree provenance, assignment hash, and attempt generation. Display metadata is never used as the sole identity.
+- Agent start is reconcilable by native identity. Prompt submission is a separate non-retryable effect when its delivery result is unknown.
 
 - [ ] **Step 1: Write start/reconcile tests**
 
 ```ts
-it("reattaches by stable labels instead of launching twice", async () => {
-  const runtime = herdrRuntimeFixture({ existingAgent: agentSnapshot({ labels: attemptLabels() }) });
+it("reattaches by stable native identity instead of launching twice", async () => {
+  const runtime = herdrRuntimeFixture({ existingAgent: agentSnapshot({ identity: attemptIdentity() }) });
   const intent = workerStartIntent();
   await expect(runtime.reconcile(actionContext(), intent)).resolves.toMatchObject({ status: "observed" });
   expect(runtime.transport.calls("agent.start")).toHaveLength(0);
+});
+
+it("does not resend an assignment after an ambiguous prompt delivery", async () => {
+  const runtime = herdrRuntimeFixture({ promptSentThenConnectionLost: true, result: undefined });
+  await expect(runtime.recoverSubmit(actionContext(), submitAssignmentIntent()))
+    .resolves.toMatchObject({ status: "indeterminate" });
+  expect(runtime.transport.calls("agent.prompt")).toHaveLength(0);
+});
+
+it("reconciles ambiguous prompt delivery only from a matching structured result", async () => {
+  const runtime = herdrRuntimeFixture({ promptSentThenConnectionLost: true, result: completedResult() });
+  await expect(runtime.recoverSubmit(actionContext(), submitAssignmentIntent()))
+    .resolves.toMatchObject({ status: "observed" });
 });
 ```
 
@@ -495,24 +606,48 @@ Run: `npm test -- test/integration/herdr/runtime.test.ts`
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement exact-label reconciliation**
+- [ ] **Step 3: Implement exact native-identity reconciliation**
 
 ```ts
 async reconcile(_ctx: ActionContext, intent: WorkerStartIntent): Promise<ReconcileResult<WorkerHandle>> {
-  const agents = await this.client.request("agent.list", { workspace: intent.input.workspaceId });
-  const matches = agents.filter((agent) => labelsEqual(agent.labels, intent.input.labels));
-  if (matches.length > 1) return { status: "indeterminate", evidence: matches.map((agent) => agent.id) };
-  return matches[0] ? { status: "observed", output: toHandle(matches[0]) } : { status: "not_found" };
+  const agent = await this.client.findAgentByName(intent.input.agentName);
+  if (!agent) return { status: "not_found" };
+  const binding = await this.client.inspectBinding(agent);
+  return bindingMatches(binding, intent.input)
+    ? { status: "observed", output: toHandle(agent, binding) }
+    : { status: "indeterminate", evidence: bindingMismatchEvidence(binding, intent.input) };
 }
 ```
 
+Herdr `agent start` requires an existing available shell pane. Worktree/workspace
+creation therefore returns and persists its root pane ID; reuse verifies that
+the pane is still in the same workspace/worktree and back at its interactive
+shell before launch. Start uses the deterministic name, worker `kind`, and exact
+pane ID. The name satisfies Herdr's length/character contract and includes a
+truncated hash of run/job/attempt/assignment identity. A same-name agent in a
+different pane, changed worktree provenance, or changed assigned commit is
+`indeterminate`, never reusable. Harness-owned pane/workspace metadata may show
+the task and assignment to humans, but reconciliation trusts the durable intent
+plus native name/pane/workspace/worktree facts.
+
 Map Herdr states only to observations. `blocked`, `idle`, or `done` does not itself decide harness completion; the controller validates the result/evidence separately.
+
+Submit an assignment only to the expected idle agent/pane and record it as its
+own effect intent before calling `agent.prompt` without a combined lifecycle
+wait. A successful API acknowledgement records the observation, then lifecycle
+events drive collection. Herdr does not identify individual prompt turns, and a
+timeout or broken connection does not prove that input was not sent. Recovery
+therefore never resubmits that effect: a valid `.harness-output/result.json`
+with the exact assignment hash may reconcile it as observed; working/idle/done
+state, terminal prose, or absence of a result remains indeterminate and blocks
+for operator inspection. A retry first stops the old agent, proves it no longer
+owns the pane/worktree, and creates a new immutable attempt and prompt key.
 
 - [ ] **Step 4: Run runtime tests**
 
 Run: `npm test -- test/integration/herdr/runtime.test.ts`
 
-Expected: PASS for reconnect, duplicate labels, missing pane, stopped agent, and out-of-order events.
+Expected: PASS for reconnect, same-name identity collision, wrong-pane binding, missing pane, stopped agent, acknowledged prompt, ambiguous prompt without resend, matching-result reconciliation, and out-of-order events.
 
 - [ ] **Step 5: Commit**
 
@@ -530,7 +665,7 @@ git commit -m "feat: reconcile Herdr agent lifecycle"
 - Test: `test/contract/workers.test.ts`
 
 **Interfaces:**
-- Produces `WorkerAdapter.prepare`, `launchSpec`, `parseResult`, and reusable `workerContract(name, factory)`.
+- Produces `WorkerAdapter.probe`, `prepare`, `launchSpec`, `resumeSpec`, `cancelSpec`, `collect`, `parseResult`, and reusable `workerContract(name, factory)`. Lifecycle observation remains the shared Herdr runtime's responsibility.
 
 - [ ] **Step 1: Write the shared contract**
 
@@ -547,6 +682,17 @@ export function workerContract(name: string, factory: WorkerAdapterFactory): voi
       const adapter = factory();
       expect(adapter.parseResult("looks done")).toEqual({ status: "invalid", reason: expect.any(String) });
     });
+    it("binds resume to the exact native session reference", async () => {
+      const adapter = factory();
+      const prepared = await adapter.prepare(contractAssignment());
+      const session = nativeSessionRef(name, "session-1");
+      const capabilities = await adapter.probe(workerProbeContext());
+      const spec = adapter.resumeSpec(prepared, session);
+      expect(spec).toMatchObject(capabilities.nativeResume
+        ? { status: "supported", session, assignmentHash: prepared.assignment.assignmentHash }
+        : { status: "unsupported" });
+      expect(() => adapter.resumeSpec(prepared, nativeSessionRef("other", "session-1"))).toThrow(/session source/);
+    });
   });
 }
 ```
@@ -562,8 +708,12 @@ Expected: FAIL.
 ```ts
 export interface WorkerAdapter {
   readonly kind: "codex" | "devin" | "claude";
+  probe(context: WorkerProbeContext): Promise<WorkerCapabilities>;
   prepare(assignment: WorkerAssignment): Promise<PreparedWorker>;
   launchSpec(prepared: PreparedWorker): HerdrAgentSpec;
+  resumeSpec(prepared: PreparedWorker, session: NativeAgentSession): SupportedResumeSpec | { status: "unsupported" };
+  cancelSpec(handle: WorkerHandle): HerdrCancellationSpec;
+  collect(prepared: PreparedWorker): Promise<ParsedWorkerResult>;
   parseResult(raw: string): ParsedWorkerResult;
 }
 ```
@@ -576,6 +726,17 @@ writable paths, required tests, exact result path, assignment hash, and allowed
 Superpowers skills. Result acceptance reads only
 `.harness-output/result.json`, validates the schema, and verifies the assignment
 hash.
+
+`probe` reports launch, native resume, cancellation, sandbox, and Superpowers
+support independently. `resumeSpec` accepts only a persisted official session
+reference whose source/worker kind and assignment attempt match; it never mines
+a session ID from terminal text. When native resume is unsupported or the
+reference cannot be verified, recovery stops any surviving old process and
+creates a new attempt under retry policy instead of relaunching the old attempt.
+`collect` reads only the assignment's expected result path and delegates to the
+same schema validator. `cancelSpec` is explicit about graceful input versus
+forced pane/process termination and its observation is reconciled before the
+worktree can be reused or removed.
 
 - [ ] **Step 4: Run the contract with a minimal fake adapter**
 
@@ -608,7 +769,7 @@ workerContract("devin", () => new DevinAdapter());
 workerContract("claude", () => new ClaudeAdapter());
 
 it.each(["codex", "devin", "claude"] as const)("uses the %s Herdr integration", (kind) => {
-  expect(workerAdapters().get(kind).launchSpec(preparedWorker()).integration).toBe(kind);
+  expect(workerAdapters().get(kind).launchSpec(preparedWorker()).kind).toBe(kind);
 });
 ```
 
@@ -624,12 +785,21 @@ Expected: FAIL.
 export class CodexAdapter extends JsonResultWorkerAdapter {
   readonly kind = "codex" as const;
   launchSpec(prepared: PreparedWorker): HerdrAgentSpec {
-    return { integration: "codex", cwd: prepared.assignment.worktree.path, prompt: prepared.prompt, labels: prepared.labels };
+    return { kind: "codex", cwd: prepared.assignment.worktree.path, prompt: prepared.prompt, metadata: prepared.metadata };
   }
 }
 ```
 
-Implement Devin and Claude identically except for `kind`, integration name, and capability probe. Keep routing order in workflow data, not adapter code. Task-review prompts require review mode and reject the same worker kind as the implementation evidence. Final-diff prompts compare the frozen run head to the frozen base, run no mutation tools, and return the same typed approved/changes-requested result without inventing remediation work.
+Implement Devin and Claude identically except for `kind`, capability probe, and
+pinned native resume/cancellation descriptors. Derive those descriptors from
+the tested worker/Herdr integration contract; never guess a resume flag at
+runtime. The runtime maps `kind` to Herdr's canonical agent kind and supplies
+the already-created pane plus deterministic agent name; adapter metadata is
+display-only. Keep routing order in workflow data, not adapter code. Task-review
+prompts require review mode and reject the same worker kind as the
+implementation evidence. Final-diff prompts compare the frozen run head to the
+frozen base, run no mutation tools, and return the same typed
+approved/changes-requested result without inventing remediation work.
 
 - [ ] **Step 4: Run phase gate and optional real no-op worker smoke**
 
@@ -637,7 +807,7 @@ Run: `npm run check:phase3`
 
 Optional, subscription-consuming: `HARNESS_E2E_REAL=1 npm test -- test/integration/herdr/worker-adapters.test.ts`
 
-Expected: phase gate PASS with fakes; real smoke completes one disposable no-op assignment per authenticated worker.
+Expected: phase gate PASS with fakes; real smoke completes one disposable no-op assignment per authenticated worker and, where the probe reports native resume, detaches and resumes that exact session once.
 
 - [ ] **Step 5: Commit and stop for milestone review**
 

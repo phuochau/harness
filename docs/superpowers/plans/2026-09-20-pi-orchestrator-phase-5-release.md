@@ -4,7 +4,7 @@
 
 **Goal:** Provision a clean machine from declarative locked inputs, operate and recover runs safely, then prove and package the release.
 
-**Architecture:** A trusted exact-version external CLI reads only declarative harness files and Git metadata before approval. Effective trust is the intersection of its immutable embedded baseline, optional machine policy, project policy, and exact lock. The MVP trust root is the official package identity plus registry-verified tarball integrity; it does not claim an additional manifest-signature scheme. Operational recovery reuses the same fenced event/effect protocol as the resident controller.
+**Architecture:** A trusted exact-version external CLI reads only declarative harness files, inert Pi settings JSON, and Git metadata before approval. Effective trust is the intersection of its immutable embedded baseline, optional machine policy, project policy, and exact lock. The MVP trust root is the official package identity plus registry-verified tarball integrity; it does not claim an additional manifest-signature scheme. Pi packages are probed as data before approval and loaded only after an approved install. Operational recovery reuses the same fenced event/effect protocol as the resident controller.
 
 **Tech Stack:** Node.js 22+, npm/package-manager probes, Git/GitHub/Herdr CLIs, TypeScript, Vitest, GitHub Actions.
 
@@ -13,7 +13,7 @@
 ## Task 29: Probe Capabilities and Compute Effective Trust
 
 **Files:**
-- Create: `src/install/types.ts`, `release-manifest.ts`, `baseline-policy.ts`, `policy.ts`, `probes.ts`
+- Create: `src/install/types.ts`, `release-manifest.ts`, `baseline-policy.ts`, `policy.ts`, `probes.ts`, `pi-package-probe.ts`
 - Create: `src/defaults/release-manifest.json`
 - Create: `test/support/install-fixtures.ts`
 - Test: `test/unit/install/policy.test.ts`, `test/integration/install/probes.test.ts`
@@ -35,6 +35,19 @@ it("lets machine and project policy narrow but not silently broaden", () => {
   const policy = effectivePolicy(builtInBaseline(), denySource("herdr"), allowEverythingProjectPolicy());
   expect(policy.allows(lockedSource("herdr"))).toBe(false);
 });
+
+it("reports a declared Pi package whose required extension is absent or disabled", async () => {
+  const report = await probeEnvironment(piPackageFixture({ extension: "missing" }));
+  expect(report.byId["pi-package:harness"]).toMatchObject({
+    status: "missing",
+    missingResources: ["dist/pi/extension.js"],
+  });
+});
+
+it("blocks a repository-controlled Pi package-manager command", async () => {
+  const report = await probeEnvironment(piPackageFixture({ projectNpmCommand: ["./owned"] }));
+  expect(report.byId["pi-settings:npm-command"]).toMatchObject({ status: "policy_violation" });
+});
 ```
 
 - [ ] **Step 2: Run and observe missing install policy**
@@ -47,7 +60,7 @@ Expected: FAIL.
 
 ```ts
 export interface TrustedSource {
-  kind: "npm" | "formula" | "signed-artifact";
+  kind: "npm" | "git" | "formula" | "signed-artifact";
   identity: string;
   version: string;
   integrity: string;
@@ -68,6 +81,12 @@ provenance evidence. Generated releases replace versions/digests atomically;
 project files cannot alter the built-in manifest. A future detached signature
 requires a separate design and is not implied by this MVP.
 
+`environment.yaml.pi_packages` is the resource-level requirement. Every entry
+references one `kind: pi-package` dependency in `harness.lock`; that lock entry
+contains the exact Pi source string used for installation. The effective policy
+authorizes the locked source, never a package name or path copied from project
+settings.
+
 - [ ] **Step 4: Implement shell-free fresh probes**
 
 ```ts
@@ -79,9 +98,26 @@ export async function probeExecutable(process: ProcessRunner, capability: Capabi
 }
 ```
 
-Probe auth as status only; never return token values. Run: `npm test -- test/unit/install/policy.test.ts test/integration/install/probes.test.ts`.
+Probe auth as status only; never return token values. Before approval, probe Pi
+packages without invoking Pi: strictly parse the committed `.pi/settings.json`
+as inert JSON, compare its project-local package source and exact resource
+filters to the environment and lock, then read only expected package metadata
+beneath Pi's documented project cache directories. Do not resolve symlinks
+outside those directories, import extensions, parse skills as instructions,
+start Pi, or run `pi list`; starting Pi could install missing project packages.
+Report package installation and every declared extension/skill/prompt/theme
+separately as `present`, `missing`, `disabled`, `wrong_source`, or
+`unverifiable`; report a project settings package absent from the environment as
+`unexpected`. Bound file sizes, entry counts, and traversal depth for every
+metadata read. A project-local `npmCommand` or equivalent executable override is
+a policy violation, never an installer input. Parse the machine Pi settings as
+inert data too; a machine-level override is usable only when machine policy
+separately allows its exact argv, and the effective command is displayed in the
+plan.
 
-Expected: PASS for no machine file, machine denial, separately approved machine source, project narrowing, missing binary, wrong version, missing auth, and paths with spaces.
+Run: `npm test -- test/unit/install/policy.test.ts test/integration/install/probes.test.ts`.
+
+Expected: PASS for no machine file, machine denial, separately approved machine source, project narrowing, missing binary, wrong version, missing auth, paths with spaces, missing Pi package, disabled required resource, unexpected package, wrong package source, project package-manager override, cache symlink escape, oversized metadata, and a proof that package code was not loaded.
 
 - [ ] **Step 5: Commit**
 
@@ -93,13 +129,13 @@ git commit -m "feat: define bootstrap trust and probes"
 ## Task 30: Build Install Plans, Typed Recipes, and Receipts
 
 **Files:**
-- Create: `src/install/plan.ts`, `recipes.ts`, `executor.ts`, `receipts.ts`
+- Create: `src/install/plan.ts`, `recipes.ts`, `executor.ts`, `receipts.ts`, `pi-settings.ts`
 - Modify: `test/support/install-fixtures.ts`
 - Test: `test/integration/install/plan.test.ts`, `executor.test.ts`
 
 **Interfaces:**
 - Produces `createInstallPlan(lock, probes, policy)` and `executeInstallPlan(plan, approval)`.
-- Recipes are exact-version npm, allowlisted formula, signed artifact with digest, or manual.
+- Recipes are exact-version npm, pinned Git commit with verified identity, allowlisted formula, signed artifact with digest, or manual.
 
 - [ ] **Step 1: Write plan/recipe safety tests**
 
@@ -114,6 +150,15 @@ it("never invokes a shell or repository lifecycle script", async () => {
   await executeInstallPlan(safeNpmPlan({ ignoreScripts: true }), approved(), { process });
   expect(process.calls[0]).toMatchObject({ executable: "npm", options: { shell: false } });
   expect(process.calls[0].argv).toContain("--ignore-scripts");
+});
+
+it("uses the locked project-local Pi package recipe after approval", () => {
+  const step = createInstallPlan(lockedPiPackage(), missingPiPackageProbe(), builtInPolicy()).steps[0];
+  expect(step).toMatchObject({
+    executable: "pi",
+    argv: ["install", "-l", "npm:pi-multi-agent-harness@0.1.0"],
+    expectedMutations: [".pi/settings.json", ".pi/npm/**"],
+  });
 });
 ```
 
@@ -138,7 +183,7 @@ export function createInstallPlan(lock: HarnessLock, probes: CapabilityReport, p
 }
 ```
 
-Every automatic step records argv, cwd, source, integrity, scope, expected mutations, probe-after, and rollback guidance. `--yes` is accepted only for a plan whose automatic steps are all baseline/machine trusted and lock-matched.
+Every automatic step records argv, cwd, source, integrity, scope, expected mutations, probe-after, rollback guidance, and any effective nested package-manager argv. A `pi-package` recipe verifies locked npm registry integrity or pinned Git commit identity immediately before invoking exactly `pi install -l <locked-source>` through `ProcessRunner` with `shell: false`; a project settings executable override is forbidden, and a machine-level override must be explicitly allowed by machine policy and bound into the approved plan hash. It then atomically merges the exact locked source and all four resource filters into project settings, using `[]` for undeclared types and preserving unrelated non-package settings. Conflicting customized or unexpected package entries block; `--repair` may repair a declared entry but never deletes a package the harness did not install. Local paths and floating Git refs are manual blockers. The plan explicitly warns that an approved Pi package can execute arbitrary extension/package-install code. `--yes` is accepted only for a plan whose automatic steps are all baseline/machine trusted and lock-matched.
 
 - [ ] **Step 4: Execute step-by-step and write secret-free receipts**
 
@@ -154,6 +199,14 @@ for (const step of plan.steps) {
 }
 ```
 
+The Pi-package post-probe first repeats the inert metadata/resource check, then
+runs the installed Pi resource loader in a separate child process with a
+sanitized environment, bounded timeout, project cwd, and no model turn. This
+process boundary is for fault containment and is not a security sandbox. Success
+requires the exact locked package identity and every declared filtered resource
+to load without error. Failure leaves a partial receipt and blocks bootstrap;
+it never broadens filters or substitutes a global package.
+
 Run: `npm test -- test/integration/install/plan.test.ts test/integration/install/executor.test.ts`.
 
 Expected: PASS for idempotency, partial failure, repair, checksum mismatch, manual step, disallowed source, and receipt redaction.
@@ -161,7 +214,7 @@ Expected: PASS for idempotency, partial failure, repair, checksum mismatch, manu
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/install/plan.ts src/install/recipes.ts src/install/executor.ts src/install/receipts.ts test/integration/install/plan.test.ts test/integration/install/executor.test.ts
+git add src/install/plan.ts src/install/recipes.ts src/install/executor.ts src/install/receipts.ts src/install/pi-settings.ts test/integration/install/plan.test.ts test/integration/install/executor.test.ts
 git commit -m "feat: plan trusted dependency installation"
 ```
 
@@ -176,7 +229,7 @@ git commit -m "feat: plan trusted dependency installation"
 
 **Interfaces:**
 - Produces `harness bootstrap [--dry-run|--repair|--yes] [path]` and `harness doctor [--json] [path]`.
-- Before approval, allowed reads are `.harness/*.yaml`, `.harness/harness.lock`, `.git` metadata, and the installed release manifest.
+- Before approval, allowed repository reads are `.harness/*.yaml`, `.harness/harness.lock`, `.pi/settings.json` as inert JSON, `.git` metadata, and the installed release manifest. Expected Pi cache metadata is read through a path-confined probe; no package code is loaded.
 
 - [ ] **Step 1: Write malicious-repository trap test**
 
@@ -185,11 +238,12 @@ it("does not execute repository content before approval", async () => {
   const repo = await maliciousProjectFixture({
     packageLifecycleScript: "node -e \"require('fs').writeFileSync('owned','yes')\"",
     workflowArgv: ["node", "-e", "require('fs').writeFileSync('owned2','yes')"],
-    piExtension: "throw new Error('loaded')",
+    piExtension: "require('fs').writeFileSync('pi-loaded','yes')",
   });
   await runHarness(["bootstrap", "--dry-run", repo]);
   expect(await exists(join(repo, "owned"))).toBe(false);
   expect(await exists(join(repo, "owned2"))).toBe(false);
+  expect(await exists(join(repo, "pi-loaded"))).toBe(false);
   expect(await auditReadsOutsideAllowedSet(repo)).toEqual([]);
 });
 ```
@@ -217,11 +271,11 @@ export async function bootstrap(options: BootstrapOptions, deps: BootstrapDepend
 }
 ```
 
-Do not import repository modules, invoke package scripts, load `.pi` extensions, start Pi/Herdr, or execute workflow commands before plan-hash approval.
+Do not import repository modules, invoke package scripts, load `.pi` extensions, start Pi/Herdr, or execute workflow commands before plan-hash approval. Strictly parsing `.pi/settings.json` permits validation of desired project-local state but does not make any package trusted; only the release baseline/machine policy intersected with the lock can authorize its recipe.
 
 - [ ] **Step 4: Implement machine-readable doctor**
 
-`doctor --json` emits one schema-versioned report with capability ID, status, installed/required version, source, and redacted evidence. It freshly probes Node, Git, GitHub/auth/remote, Pi/package/planning profile, Spec Kit/preset, Superpowers, Herdr/integrations, three workers, policies, config, and runtime directories; receipts are diagnostics only.
+`doctor --json` emits one schema-versioned report with capability ID, status, installed/required version, source, and redacted evidence. It freshly probes Node, Git, GitHub/auth/remote, Pi/planning profile, each declared Pi package and resource, Spec Kit/preset, Superpowers, Herdr/integrations, three workers, policies, config, and runtime directories; receipts are diagnostics only. A package installed globally when project-local scope is required, a disabled/filtered required resource, a source mismatch, or a loader error is not `present` and includes exact repair guidance.
 
 ```ts
 export async function doctor(options: DoctorOptions, deps: DoctorDependencies): Promise<DoctorReport> {
@@ -237,7 +291,7 @@ export async function doctor(options: DoctorOptions, deps: DoctorDependencies): 
 
 Run: `npm test -- test/integration/bootstrap.test.ts test/integration/doctor.test.ts`.
 
-Expected: PASS for clean-machine baseline, dry-run, approved install, `--yes` denial, duplicate bootstrap, repair, malicious files, missing auth, and JSON redaction.
+Expected: PASS for clean-machine baseline, dry-run, approved project-local Pi package install, `--yes` denial, duplicate bootstrap, missing/disabled package resource repair, unknown package manual blocker, malicious files, missing auth, and JSON redaction.
 
 - [ ] **Step 5: Commit**
 
@@ -287,10 +341,11 @@ Expected: FAIL.
 export async function start(options: StartOptions, deps: OperationDependencies): Promise<StartResult> {
   const repo = await deps.git.inspect(options.root);
   const workspace = await deps.herdr.ensureWorkspace({ label: `harness:${repo.identity}`, cwd: repo.root });
-  const existing = await deps.herdr.findAgent({ workspaceId: workspace.id, labels: { role: "harness-controller", repository: repo.identity } });
-  const agent = existing ?? await deps.herdr.startAgent({ kind: "pi", workspaceId: workspace.id, cwd: repo.root, labels: { role: "harness-controller", repository: repo.identity } });
-  await deps.herdr.waitFor(agent.id, "idle");
-  await deps.extensionProbe.assertReady(agent.id);
+  const agentName = stableAgentName("controller", repo.identity);
+  const existing = await deps.herdr.findAgent({ name: agentName, workspaceId: workspace.id, paneId: workspace.rootPaneId });
+  const agent = existing ?? await deps.herdr.startAgent({ name: agentName, kind: "pi", paneId: workspace.rootPaneId, cwd: repo.root });
+  await deps.herdr.waitFor(agent.name, "idle");
+  await deps.extensionProbe.assertReady(agent.name);
   return { mode: existing ? "reattached" : "started", agent };
 }
 ```
@@ -320,7 +375,11 @@ export async function recoverRun(run: RunRef, deps: RecoveryDependencies): Promi
 }
 ```
 
-`status`, `graph`, and `explain` validate then read state/events only. `recover` checks Herdr agents, worktrees, branches, commits, results, push, and PR identities; an indeterminate non-retryable effect becomes a blocker.
+`status`, `graph`, and `explain` validate then read state/events only. `recover`
+first drains durable `controller.command_received` entries without a matching
+processed boundary, then checks Herdr agents, worktrees, branches, commits,
+results, push, and PR identities; an indeterminate non-retryable effect becomes
+a blocker.
 
 Run: `npm test -- test/integration/operations.test.ts`.
 
@@ -385,7 +444,9 @@ The CLI and Pi extension both call this root. No production singleton or hidden 
 
 ```ts
 for (const boundary of [
+  "after-command-received", "after-command-decided", "after-first-decision-member",
   "before-intent", "after-intent", "after-effect", "before-observation", "after-observation",
+  "after-herdr-prompt-send",
   "during-snapshot", "after-worker-result", "after-multi-commit-integration",
   "after-atomic-task-finalize", "after-final-review", "after-push", "after-pr-create",
 ] as const) {
@@ -399,11 +460,17 @@ for (const boundary of [
 ```
 
 Race timer + Herdr + Pi + operator wakeups in every lifecycle state. Cover
-Devin unavailable → Codex implementation → Claude review, a two-commit worker
+an accepted operator retry recovered without resubmission, Devin unavailable →
+Codex implementation → Claude review, a two-commit worker
 result, no reviewer, reviewer mutation, planning crash before/after the native
-terminal transcript, auth blocker, verification remediation, integration
-conflict, task-status replay, final-review rejection, retry exhaustion, stale
-controller, and unknown non-retryable command result.
+terminal transcript and profile restoration, auth blocker, verification
+remediation, wrong-parent candidate rejection, integration conflict,
+task-status replay, final-review rejection, retry exhaustion, stale controller,
+unknown non-retryable command result, clean-machine missing Pi package install,
+and installed-but-disabled required Pi resource repair. The dry-run case must
+prove no Pi package or resource code was loaded. The ambiguous Herdr prompt case
+must either reconcile a matching structured result or block with evidence; it
+must never send the assignment twice.
 
 Run: `npm test -- test/e2e/fake-feature.test.ts test/e2e/crash-matrix.test.ts test/e2e/race-matrix.test.ts`.
 
@@ -504,7 +571,7 @@ npm run verify
 npm pack --dry-run --json
 ```
 
-Expected: zero test failures; successful TypeScript build; tarball contains only `dist/`, `bin/`, `presets/`, and `src/defaults/`; CLI and extension load from the installed tarball; no credentials, run state, tests, or `.harness-output/` are present.
+Expected: zero test failures; successful TypeScript build; the application payload is limited to `dist/`, `bin/`, `presets/`, and `src/defaults/` plus npm's required package metadata and README; CLI and extension load from the installed tarball; no credentials, run state, tests, source maps with embedded source, or `.harness-output/` are present.
 
 ```bash
 git add .github/workflows/ci.yml .github/workflows/release.yml README.md SECURITY.md docs/installation.md docs/workflow-dsl.md docs/recovery.md docs/releasing.md test/e2e/real-smoke.test.ts test/integration/packed-package.test.ts package.json package-lock.json

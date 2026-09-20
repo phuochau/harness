@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-20
 
-**Status:** Approved design; implementation plan under review
+**Status:** Approved design; implementation-ready plan
 
 ## 1. Purpose
 
@@ -134,6 +134,8 @@ Committed project configuration:
 ```text
 .pi/
   settings.json
+  npm/                 # generated project package cache; gitignored
+  git/                 # generated project package cache; gitignored
 
 .harness/
   workflow.yaml
@@ -177,7 +179,9 @@ weaken the machine policy.
 `.pi/` remains Pi's native namespace. `.harness/` owns harness configuration
 only. Runtime state lives under the Git common directory so the control checkout
 and all task worktrees resolve the same run. The design does not use a generic
-`.ai/` directory.
+`.ai/` directory. `harness init` preserves the project's existing `.gitignore`
+and adds a bounded managed block for `.pi/npm/`, `.pi/git/`, and
+`.harness-output/`; `.pi/settings.json` remains trackable.
 
 At run creation, Pi resolves and records the canonical repository root and
 `git rev-parse --git-common-dir`. Only the controller writes run state. Worker
@@ -405,7 +409,13 @@ list for every task. The harness therefore ships a versioned
 composition strategy around the core task command, adding the graph contract
 without copying or forking the upstream prompt. The planning model emits the
 human-readable task list plus an explicit metadata block in one planning
-operation; after the correlated run settles, controller code derives the
+operation. Phase headings use `## Phase N: <name>`. Every task uses the exact
+visible suffix ` | deps=<json-string-array> | ac=<json-string-array> |
+paths=<json-string-array>` after its ID, optional `[P]`, labels, and description.
+Descriptions escape literal pipes as `\|`. The sole EOF metadata envelope is
+`<!-- harness-task-metadata:v1\n<canonical-json>\n-->`; its closed root object has
+schema `harness/task-metadata/v1` and one complete canonical record per visible
+task in visible order. After the correlated run settles, controller code derives the
 machine-readable projection:
 
 ```text
@@ -427,9 +437,15 @@ specs/feature-name/
 
 The deterministic parser reads visible task entries, phase headings, labels,
 parallel markers, dependency text, acceptance references, and file paths, then
-cross-checks the embedded metadata block. Controller code computes the semantic
-hash as SHA-256 over canonical JSON task records; the model never computes a
-cryptographic digest. Checkbox state is excluded from those records. Therefore
+normalizes CRLF, Unicode NFC, set order, and repository-relative POSIX paths,
+requires the metadata line to equal the canonical re-encoding of its parsed
+value (thereby rejecting duplicate keys/order/whitespace ambiguity), rejects
+duplicate set members and unsafe paths, and cross-checks the
+embedded metadata block exactly. Checkbox state is the only ignored visible
+field. Acceptance references are exact `FR-NNN` or `SC-NNN` tokens that must
+occur uniquely as requirement/success-criterion bullet prefixes in `spec.md`;
+pure infrastructure tasks may use an empty list. Controller code computes the semantic hash as SHA-256 over canonical JSON
+task records; the model never computes a cryptographic digest. Therefore
 the controller may change `- [ ]` to `- [x]` as
 it records `DONE` without invalidating the graph, while any change to an ID,
 description, phase, label, dependency, acceptance reference, parallel marker,
@@ -442,7 +458,13 @@ atomically generates `task-graph.json`, validates the graph against the parsed
 task records and `spec.md`, and seals the complete planning set.
 Completion is correlated to a durable Pi session entry and the settled agent
 run that handled that request; unrelated or intermediate turns cannot make old
-files acceptable. If Pi restarts before writing the harness completion marker,
+files acceptable. A durable correlation-bound profile lease selects the
+machine-local authenticated `chatgpt-planning` model/thinking pair before the
+user message and restores the prior interactive pair only after the exact `agent_settled`
+boundary. A returned send call or `turn_end` cannot release it. Because Pi's
+`model_select`/`thinking_level_select` events cannot veto a change, any identity drift during the lease
+blocks that planning generation and rejects its artifacts. If Pi restarts
+before writing the harness completion marker,
 the controller may recover only from a correlated terminal assistant entry with
 an accepted stop reason, complete tool results, no later user turn, and an idle
 session. It records a recovered marker before accepting artifacts; ambiguous or
@@ -486,10 +508,23 @@ OS `flock` semantics: stale-lock detection is advisory, while fencing-token
 validation is the correctness boundary.
 
 Inside the owning process, every timer, Herdr subscription, Pi lifecycle hook,
-and operator command enters one serialized controller command queue. A second
-command cannot derive decisions from the same state revision while the first is
-appending its events. Event append enforces uniqueness for `(runId, eventType,
-idempotencyKey)` and returns the existing event for an identical duplicate.
+and operator command enters one serialized controller command queue. Before a
+command is acknowledged, its closed-schema normalized JSON payload is appended
+and fsynced as `controller.command_received`. A second command cannot derive
+decisions from the same state revision while the first is appending its events.
+Event append enforces uniqueness for `(runId, eventType, idempotencyKey)` and
+returns the existing event for an identical duplicate.
+`controller.command_processed` closes the command. Recovery processes received
+keys without that boundary in original sequence order before registering fresh
+event sources, so accepted operator input does not depend on caller resubmission.
+Before any derived member is appended, the controller records one canonical,
+hash-bound `controller.command_decided` event containing the complete lifecycle
+event and reserved-effect batch plus the accepted command timestamp/sequence and
+state revision. Derivation reads only that accepted record, reduced state, and
+frozen graph/policy; restart wall time, randomness, and external I/O cannot
+change an unsealed decision. Recovery replays a sealed batch exactly; it never
+derives again from state containing only some members. Only newly appended
+effect intents execute fresh, while pre-existing intents use reconciliation.
 
 Every JSONL event contains a monotonic sequence number, timestamp, run and
 entity IDs, idempotency key, fencing token, payload, `prevHash`, and
@@ -596,7 +631,9 @@ existing approved artifacts may conditionally skip planning, but it must bind
 their paths, hashes, and containing commit before fan-out.
 
 Herdr creates or opens a worktree for each job that requests worktree
-isolation. Downstream `same-item` jobs may inherit the upstream artifact and
+isolation. The resulting workspace and root shell-pane IDs are persisted with
+the worktree binding because Herdr starts an agent only in an existing available
+pane. Downstream `same-item` jobs may inherit the upstream artifact and
 branch when their action contract allows it. In the default workflow, the
 implementation job creates the task branch. After that agent stops and releases
 its workspace, review runs in a separate detached, read-only review worktree
@@ -612,12 +649,16 @@ bases.
 After worker completion, Pi validates the complete worker change range from its
 assigned base through its reported head, performs review and task verification,
 and prepares one harness-owned candidate commit without moving the run branch.
-The candidate applies the full range diff and records the effect key, source
-base, source head, source tree, and patch identity as reconciliation trailers;
+The candidate applies the full range diff, has the exact expected run head as
+its sole parent, and records the effect key, expected run head, source base,
+source head, source tree, and patch identity as reconciliation trailers;
 it never assumes the worker created exactly one commit. Pi runs
 post-integration checks in a detached worktree pinned to that candidate. After
 they pass, one compare-and-swap ref update publishes a final commit containing
-both the verified candidate tree and the normalized `tasks.md` checkbox. A
+both the verified candidate tree and the normalized `tasks.md` checkbox.
+Reconciliation accepts an existing candidate or final commit only after
+verifying its ref target, sole parent, full trailer identity, candidate-tree
+transformation, and bound verification observation. A
 failed post-check leaves the run branch unchanged. The per-run integration
 pipeline remains reserved from candidate preparation through finalization, so
 another task cannot base work on an unverified candidate. A conflict or stale
@@ -640,6 +681,20 @@ Herdr is required in the first release and is local-only. The harness uses:
   controls.
 - Event subscriptions for lifecycle changes.
 - Native session identifiers for restart reconciliation.
+
+Each launch uses a deterministic Herdr-safe agent name and the exact persisted
+pane ID. Reconciliation binds native agent name, pane, workspace, worktree
+provenance, assigned commit, and attempt generation. Pane/workspace metadata is
+useful for display but cannot by itself prove attempt identity.
+
+Starting an agent and submitting its assignment are separate effects. Start is
+reconcilable through the native binding above. Prompt submission is not blindly
+retryable: Herdr does not identify individual prompt turns, and a timeout or
+lost response does not prove input was not sent. After such a crash, only a
+schema-valid worker result with the exact assignment hash reconciles delivery;
+agent lifecycle state and terminal prose are insufficient. Otherwise the
+effect becomes an indeterminate blocker, and an explicit retry must stop the old
+agent and create a new attempt before sending a new prompt.
 
 Bootstrap installs and verifies the Herdr integrations for Pi, Codex, Devin,
 and Claude.
@@ -672,6 +727,14 @@ item identity; optional task identity and acceptance references; planning-
 artifact paths; frozen base information; allowed file scope; required
 Superpowers disciplines; verification commands; protected paths; and the
 result schema.
+
+The adapter/runtime pair implements the lifecycle above. Herdr owns generic
+observation, while each adapter owns capability probing, launch/resume/cancel
+descriptors, assignment preparation, and structured-result collection. Resume
+requires an official native session reference bound to the same worker kind and
+attempt; terminal text is never parsed for a session ID. Unsupported or
+unverifiable resume creates a new attempt under retry policy rather than
+silently relaunching the old one.
 
 Workers write `.harness-output/result.json` inside their task worktree. The
 directory is gitignored and may not be included in a task commit. Pi copies and
@@ -781,11 +844,18 @@ for confirmation and are not executed during bootstrap before approval.
 
 `environment.yaml` declares required versions and capabilities for Pi, TypeBox,
 Spec Kit, Superpowers, Herdr, the four Herdr integrations, Codex CLI, Devin CLI,
-Claude Code, Git, GitHub CLI, and an authenticated GitHub remote. GitHub is
+Claude Code, Git, GitHub CLI, and an authenticated GitHub remote. It also has a
+`pi_packages` list whose entries name a lock dependency, require project-local
+scope, and enumerate the exact extension, skill, prompt, and theme paths the
+workflow needs. GitHub is
 required in the first release because final pull-request creation is a required
 stage; provider-neutral hosting is deferred. `harness.lock` resolves every
 installable source to an exact version or Git commit and records integrity
-information.
+information. Each Pi-package dependency records the exact Pi source string;
+`.pi/settings.json` is a generated projection of that source plus exact resource
+filters for all four resource types, with `[]` explicitly disabling an
+undeclared type; it is never an independent trust source. Projects may add Pi packages and
+required resources through this contract without changing harness code.
 
 Node.js 22 or newer is the sole bootstrap prerequisite for the first release.
 Bootstrap is launched only through a trusted harness CLI installed outside the
@@ -796,15 +866,26 @@ from the harness release documentation, such as:
 npm exec --yes --package pi-multi-agent-harness@0.1.0 -- harness bootstrap .
 ```
 
-The launcher treats `.harness/*.yaml` and `harness.lock` only as declarative
-data. It never imports project JavaScript, runs repository shell scripts, loads
-Pi extensions, or executes workflow actions before showing the install plan
-and receiving approval. It verifies that its own version matches the desired
+The launcher treats `.harness/*.yaml`, `harness.lock`, and `.pi/settings.json`
+only as declarative data. It never imports project JavaScript, runs repository
+shell scripts, loads Pi extensions, starts Pi, or executes workflow actions
+before showing the install plan and receiving approval. In particular, it does
+not rely on Pi startup to discover missing packages because trusted-project Pi
+startup may install package declarations automatically. It verifies that its
+own version matches the desired
 locked harness version; a mismatch produces an explicit trusted upgrade
 command rather than executing repository-provided code.
 
-Each dependency has a typed installer recipe: exact-version `npm`, allowlisted
-package-manager formula, signed release artifact with digest, or `manual`.
+A project-local Pi `npmCommand` or other executable installer override is
+forbidden because it would let repository data choose code run by `pi install`.
+A machine-local override is parsed as inert data and may be used only when its
+exact argv is separately allowed by machine policy and included in the approved
+install-plan hash.
+
+Each dependency has a typed installer recipe: exact-version `npm`, pinned Git
+commit with verified repository identity, allowlisted package-manager formula,
+signed release artifact with digest, or `manual`. Floating Git refs and local Pi
+package paths are manual blockers for unattended installation.
 Bootstrap ships an immutable built-in trust baseline containing only exact
 official source identities and integrity-verification rules embedded in the
 exact-version harness package. Trust in that baseline derives from the trusted
@@ -821,9 +902,14 @@ after the operator acts; the harness never substitutes a downloaded arbitrary
 install script. Authentication is an explicit interactive follow-up and is
 never copied between machines.
 
-After approval, bootstrap installs eligible missing dependencies, merges
-project-local Pi settings, installs Herdr integrations, runs capability and
-authentication probes, and writes a secret-free local receipt. A later
+After approval, bootstrap installs each eligible Pi package from its exact
+locked source with project-local scope, verifies the declared resource filters,
+loads those resources in a separate bounded child-process probe that is not a
+security sandbox, installs other eligible
+missing dependencies and Herdr integrations, runs capability and authentication
+probes, and writes a secret-free local receipt. Pi packages are executable and
+receive full host access when loaded, so their source, command, expected
+mutations, and this consequence appear in the approval plan. A later
 standalone bootstrap binary may remove the Node.js prerequisite without
 changing the project contract.
 
@@ -872,7 +958,8 @@ Repositories and executable packages are untrusted before approval. Floating
 Git branches are forbidden for unattended installs. Bootstrap previews sources,
 versions, checksums, build/install commands, Herdr integration changes, and
 global mutations. Before approval, the trusted external launcher reads only
-declarative harness files and Git metadata; no executable content from the
+declarative harness files, inert Pi settings JSON, path-confined Pi package
+metadata, and Git metadata; no executable content from the
 repository is loaded, including package lifecycle scripts, Pi extensions,
 workflow shell actions, or project hooks.
 
@@ -961,14 +1048,20 @@ The first release is acceptable when all of the following are demonstrated:
 
 1. `harness init` in a clean Git repository creates a complete workflow,
    environment contract, policy, lockfile, and Pi settings that pass schema and
-   configuration preflight without requiring the user to author YAML.
+   configuration preflight without requiring the user to author YAML. Project
+   Pi package caches and worker outputs are ignored while `.pi/settings.json`
+   remains trackable.
 2. Cloning that configured repository onto a clean test machine and running the
    trusted external bootstrap entrypoint produces an approval plan without
    executing repository code, installs only locked and trusted dependencies,
-   installs the four Herdr integrations, and passes `harness doctor` after the
-   user completes required CLI and GitHub authentication.
-3. The Spec Kit integration generates `tasks.md` and a valid, hash-bound
-   `task-graph.json`; stale or ambiguous graphs are rejected before execution.
+   installs every declared Pi package at project scope with exactly its required
+   resources plus the four Herdr integrations, and passes `harness doctor` after
+   the user completes required CLI and GitHub authentication. A dry run proves
+   no Pi package code was loaded, while a missing, disabled, wrong-source,
+   unexpected, or undeclared package resource cannot pass doctor.
+3. The Spec Kit integration generates exact-grammar `tasks.md` and a valid,
+   hash-bound `task-graph.json`; malformed metadata envelopes, visible/metadata
+   mismatches, stale hashes, and ambiguous graphs are rejected before execution.
 4. At least two independent tasks run concurrently through Herdr in distinct
    branches and worktrees, while a dependent task remains `PENDING` until its
    prerequisites are verified and integrated.
@@ -981,7 +1074,8 @@ The first release is acceptable when all of the following are demonstrated:
    implementation worker kind, including after fallback routing; absence of an
    eligible independent reviewer blocks the job.
 8. Pi, Herdr, and worker termination tests, including a planning crash after the
-   native terminal transcript but before the harness completion marker, recover without duplicate attempts,
+   native terminal transcript but before the harness completion marker, recover
+   the exact model-profile lease and prior interactive model without duplicate attempts,
    duplicate commits, skipped dependencies, or lost event history. Recovery
    safely truncates only an incomplete trailing event and rejects interior
    corruption or a stale fencing token.
@@ -994,13 +1088,18 @@ The first release is acceptable when all of the following are demonstrated:
     the run, reconciles intent/observation events, and resumes safely.
 12. A test workflow demonstrates keyed fan-out, `same-item` joins, an `all`
     fan-in barrier, and task-state projection without hard-coded stage names.
-13. A complete sample feature reaches post-integration and final full-suite
+13. A complete sample feature rejects a candidate with the wrong parent even
+    when its source trailers match, then reaches post-integration and final full-suite
     verification, passes final-diff review, pushes the exact reviewed commit,
     and creates one pull request containing every sealed task change.
 14. Concurrent timer, Herdr, Pi, and operator wakeups are serialized so one
-    logical effect produces one intent and one observation.
+    logical effect produces one intent and one observation; a crash after a
+    command-received fsync replays that accepted command without caller resubmission.
 15. Review uses a distinct worker kind and a separate clean, detached worktree
     pinned to the implementation commit; reviewer mutation blocks acceptance.
+16. A crash after Herdr accepts an assignment prompt but before acknowledgement
+    never resends that assignment automatically; a matching structured result
+    reconciles it, otherwise the non-retryable effect blocks with evidence.
 
 ## 22. External References
 

@@ -16,11 +16,12 @@
 - Pi is the only global orchestrator. Herdr is an execution plane and lifecycle authority, never a scheduler.
 - Node.js 22 or newer is the sole clean-machine prerequisite.
 - The controller is single-writer both across processes and inside one process: an exclusive lock-directory lease plus fencing prevents stale writes; a serialized command queue prevents concurrent derivation.
+- A controller command is acknowledged only after its complete normalized JSON payload is fsynced as `controller.command_received`. Its derived event/effect set is sealed once as `controller.command_decided` before any member is appended; restart replays every received key without a processed boundary and never re-derives a partially applied batch.
 - Every external action declares `idempotent`, `reconcilable`, or `non_retryable` recovery semantics and implements both `execute()` and `reconcile()`.
 - An unknown result for a `non_retryable` effect becomes `BLOCKED`; it is never replayed automatically.
 - The built-in trust baseline permits only exact official identities and integrity rules embedded in the exact-version harness package. Trust in that baseline derives from the package identity and registry-verified tarball integrity, not from an undefined second signature scheme. Machine and project policies may narrow it; a machine policy may add a separately approved source.
 - Implementers and reviewers never share a working directory. Review uses a separate detached, read-only worktree pinned to the implementation commit.
-- Planning completion is bound to a durable Pi custom-entry correlation marker, the correlated agent run's final `turnIndex`, `agent_settled`, and stage-specific pre/post artifact hashes. After a crash, a terminal correlated native transcript may create one recovered marker; an intermediate, ambiguous, aborted, or unrelated turn cannot accept stale artifacts.
+- Planning completion is bound to a durable Pi custom-entry correlation marker, the correlated agent run's final `turnIndex`, `agent_settled`, and stage-specific pre/post artifact hashes. A correlation-bound model-profile lease keeps the authenticated planning model selected until that terminal boundary. After a crash, a terminal correlated native transcript may create one recovered marker and restore the prior interactive model; an intermediate, ambiguous, aborted, or unrelated turn cannot accept stale artifacts.
 - Real compatibility checks occur at the milestone that introduces Herdr, Spec Kit, or Pi. Subscription-consuming worker checks remain gated.
 
 ## Global Constraints
@@ -39,14 +40,19 @@
 
 - Crash after intent but before observation: enter the recovery path, reconcile the existing effect, and never launch it twice; a fresh effect never reconciles before its first execution. Owned by Tasks 11, 12, 15, and 33.
 - Timer, Herdr, Pi, and operator wakeups race: serialize them and append one intent/observation pair. Owned by Tasks 12 and 33.
+- Herdr accepts a prompt and the connection fails before acknowledgement: never resend from lifecycle state or terminal prose; reconcile only a matching structured result, otherwise block the non-retryable effect. Owned by Tasks 11, 21–23, and 33.
+- Process dies after command acceptance or midway through its decision members: replay the durable received payload and exact sealed decision batch without caller resubmission or re-derivation. Owned by Tasks 2, 10, 12, 15, and 33.
+- Process dies before a received command's decision batch is sealed: derive from its recorded receive timestamp/sequence and pure frozen inputs, never restart wall time or I/O. Owned by Tasks 10, 12, 13, and 15.
 - Stale controller resumes after lease takeover: reject its fencing token. Owned by Tasks 7–9.
 - Dynamic graph has duplicate keys, a projection mismatch with parsed `tasks.md`, invalid joins, cycles, unknown IDs, or unordered file overlap: reject before materialization. Use DAG reachability rather than a total topological order. Owned by Tasks 5–6 and 24.
 - Reviewer mutates or observes a different commit: reject the review evidence. Owned by Tasks 17 and 23.
 - A correlated planning run settles without producing its required artifact delta: block it; unrelated/intermediate turns keep it pending. A crash between Pi's terminal transcript and the harness marker recovers exactly once. Owned by Task 25.
 - A worker returns multiple commits: seal the complete assigned-base-to-head range, verify a candidate while the run branch is unchanged, then promote it exactly once. Owned by Tasks 17, 19, and 33.
+- A candidate ref exists after restart: accept it only when its effect key, exact parent `expectedRunHead`, source range/tree, and patch ID all match the intent. Owned by Tasks 19 and 33.
 - A task-status commit or final push crashes before observation: reconcile its trailer or remote ref and never mutate twice. Owned by Tasks 19 and 33.
 - Clean machine has no external policy: built-in baseline can install only exact release-manifest sources. Owned by Tasks 29–31.
 - Repository supplies lifecycle scripts or executable config: pre-approval bootstrap never runs it. Owned by Tasks 30–31.
+- Project declares a missing, disabled, globally shadowed, or wrong-source Pi package resource: pre-approval probing treats settings and package metadata as inert data, the approved recipe installs the exact locked source at project scope, and doctor verifies every filtered resource. Owned by Tasks 27 and 29–31.
 
 ## Phase Plans and Milestone Gates
 
@@ -105,13 +111,13 @@ Later tasks may consume it only after that owning task passes typecheck.
 
 | Owner | File | Required exports |
 |---|---|---|
-| Tasks 3 and 5 | `test/support/factories.ts` | `fixtureWorkflow`, `fixtureEnvironment`, `fixtureCompileInput`, `fixtureTaskGraph`, `fixtureGraphContext`, `fixtureGraphContextFor`, `diamondTaskGraph`, `fixtureEvent`, `completedResult` |
-| Tasks 7–11 | `test/support/state-fixtures.ts` | `createTempRepoWithWorktree`, `journalFixture`, `fixtureEventInput`, `persistedRunFixture`, `fixtureEventsThroughWorkerCompletion`, `fixtureSuccessfulTaskEvents`, `fixtureEventsWithIntentObservationPauseRetryAndPlanning`, `replay`, `fakeHandler`, `effectExecutor`, `fixtureIntent`, `actionContext`, `recoveryContext` |
+| Tasks 3–5 | `test/support/factories.ts` | `fixtureWorkflow`, `fixtureEnvironment`, `fixtureHarnessLock`, `fixtureCompileInput`, `compileInputCase`, `fixtureTaskGraph`, `taskGraphCase`, `fixtureGraphContext`, `fixtureGraphContextFor`, `diamondTaskGraph`, `fixtureEvent`, `completedResult` |
+| Tasks 7–11 | `test/support/state-fixtures.ts` | `createTempRepoWithWorktree`, `journalFixture`, `fixtureEventInput`, `persistedRunFixture`, `fixtureEventsThroughWorkerCompletion`, `fixtureEventsThroughCommandDecision`, `fixtureCommandProcessedEvent`, `fixtureSuccessfulTaskEvents`, `fixtureEventsWithIntentObservationPauseRetryAndPlanning`, `replay`, `fakeHandler`, `effectExecutor`, `fixtureIntent`, `actionContext`, `recoveryContext` |
 | Tasks 12–15 | `test/support/controller-fixtures.ts` | `controllerQueueFixture`, `command`, `routeFixture`, `reviewFixture`, `assignmentFixture`, `reviewAssignment`, `createControllerFixture`, `successfulFakeResults`, `graphWithIndependentNonParallelTask` |
 | Tasks 16–19 | `test/support/git-fixtures.ts` | `createTempRepoWithIntegratedDependencies`, `worktreeFixture`, `taskAttempt`, `reviewAttempt`, `cleanReviewBinding`, `expectedArtifactHashes`, `fakeProcess`, `fakeCommandLedger`, `commandActionFixture`, `commandIntent`, `approvalIntent`, `fakeApprovals`, `integratedGitFixture`, `multiCommitGitFixture`, `taskProjectionFixture`, `gitIntegrateIntent`, `prIntent` |
-| Tasks 20–23 | `test/support/herdr-fixtures.ts` | `FakeHerdrTransport`, `herdrRuntimeFixture`, `agentSnapshot`, `attemptLabels`, `workerStartIntent`, `contractAssignment`, `preparedWorker`, `workerAdapters` |
-| Tasks 24–28 | `test/support/planning-fixtures.ts` | `resolvePresetFixture`, `artifactPathsFixture`, `artifactContractFixture`, `taskArtifactFixture`, `emptyArtifactBaseline`, `planningFixture`, `validArtifactSet`, `changedArtifactSet`, `copyProjectFixture`, `runHarness`, `initializedProject`, `piResidencyFixture` |
-| Tasks 29–32 | `test/support/install-fixtures.ts` | `builtInBaseline`, `projectPolicy`, `denySource`, `allowEverythingProjectPolicy`, `lockedSource`, `lockWithUnknownSource`, `missingProbes`, `safeNpmPlan`, `approved`, `maliciousProjectFixture`, `operationsFixture` |
+| Tasks 20–23 | `test/support/herdr-fixtures.ts` | `FakeHerdrTransport`, `workspaceListResponse`, `herdrRuntimeFixture`, `agentSnapshot`, `attemptIdentity`, `workerStartIntent`, `submitAssignmentIntent`, `contractAssignment`, `nativeSessionRef`, `workerProbeContext`, `preparedWorker`, `workerAdapters` |
+| Tasks 24–28 | `test/support/planning-fixtures.ts` | `resolvePresetFixture`, `artifactPathsFixture`, `artifactContractFixture`, `taskArtifactFixture`, `exactTaskDocumentFixture`, `malformedTaskDocumentFixture`, `emptyArtifactBaseline`, `planningFixture`, `validArtifactSet`, `changedArtifactSet`, `copyProjectFixture`, `runHarness`, `initializedProject`, `piResidencyFixture` |
+| Tasks 29–32 | `test/support/install-fixtures.ts` | `builtInBaseline`, `projectPolicy`, `denySource`, `allowEverythingProjectPolicy`, `lockedSource`, `lockedPiPackage`, `lockWithUnknownSource`, `missingProbes`, `missingPiPackageProbe`, `piPackageFixture`, `safeNpmPlan`, `approved`, `maliciousProjectFixture`, `operationsFixture` |
 | Task 33 | `test/support/black-box-harness.ts` | `createBlackBoxHarness`, `crashableHarness` |
 | Task 34 | `test/support/package-consumer.ts` | `packHarness`, `installPackedHarness` |
 
@@ -132,6 +138,7 @@ into unrelated tests.
 Later phase plans must consume these exact shapes; changing one requires updating every consumer before implementation continues.
 
 ```ts
+export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 export type RecoveryClass = "idempotent" | "reconcilable" | "non_retryable";
 
 export interface EffectIntent<K extends string = string, I = unknown> {
@@ -163,8 +170,10 @@ export interface SealedImplementation {
 export interface GitPort {
   patchIdForRange(base: string, head: string): Promise<string>;
   findCommitByTrailer(branch: string, key: string, value: string): Promise<string | undefined>;
-  assertIntegrationMetadata(commit: string, change: SealedImplementation): Promise<void>;
+  assertIntegrationMetadata(commit: string, identity: { effectKey: string; expectedRunHead: string; change: SealedImplementation }): Promise<void>;
   assertWorktreeCommit(path: string, expectedCommit: string): Promise<void>;
+  commitTree(tree: string, input: { parent: string; trailers: Readonly<Record<string, string>> }): Promise<string>;
+  updateRefCas(ref: string, next: string, expected: string): Promise<void>;
   revParse(ref: string): Promise<string>;
   revParseOptional(ref: string): Promise<string | undefined>;
   status(path: string): Promise<readonly string[]>;
@@ -195,10 +204,11 @@ export interface ActionHandler<K extends string = string, I = unknown, O = unkno
 }
 
 export interface ControllerCommand {
+  schemaVersion: 1;
   source: "timer" | "herdr" | "pi" | "operator" | "recovery";
   kind: "tick" | "runtime_event" | "operator_intent" | "planning_turn" | "recover";
   idempotencyKey: string;
-  payload: unknown;
+  payload: JsonValue;
 }
 
 export interface PlanningRunReceipt {

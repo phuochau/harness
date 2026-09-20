@@ -137,19 +137,20 @@ git commit -m "chore: scaffold loadable harness package"
 ## Task 2: Define Versioned External Schemas
 
 **Files:**
-- Create: `src/contracts/common.ts`, `workflow.ts`, `task-graph.ts`, `events.ts`, `worker-result.ts`, `index.ts`
+- Create: `src/contracts/common.ts`, `controller-command.ts`, `workflow.ts`, `environment.ts`, `lock.ts`, `task-graph.ts`, `events.ts`, `worker-result.ts`, `index.ts`
 - Create: `src/shared/canonical-json.ts`, `deep-freeze.ts`, `sha256.ts`
 - Test: `test/unit/contracts/schemas.test.ts`
 
 **Interfaces:**
-- Produces `WorkflowDocument`, `TaskGraphDocument`, `HarnessEvent`, and `WorkerResult` types plus Ajv-compatible schemas.
-- Workflow YAML requires `schema: harness/v1`; the task graph requires `schema: harness/task-graph/v1`; other JSON contracts require `schemaVersion: 1`; hashes match `^sha256:[0-9a-f]{64}$`.
+- Produces `ControllerCommand`, `WorkflowDocument`, `EnvironmentDocument`, `HarnessLock`, `TaskGraphDocument`, `HarnessEvent`, and `WorkerResult` types plus Ajv-compatible schemas.
+- Workflow YAML requires `schema: harness/v1`; environment YAML requires `schema: harness/environment/v1`; the lock requires `schema: harness/lock/v1`; the task graph requires `schema: harness/task-graph/v1`; other JSON contracts require `schemaVersion: 1`; hashes match `^sha256:[0-9a-f]{64}$`.
 
 - [ ] **Step 1: Write schema rejection tests**
 
 ```ts
 import { expect, it } from "vitest";
-import { validateTaskGraph, validateWorkerResult } from "../../../src/contracts/index.js";
+import { validateControllerCommand, validateEnvironmentAndLock, validateTaskGraph, validateWorkerResult } from "../../../src/contracts/index.js";
+import { canonicalJson } from "../../../src/shared/canonical-json.js";
 
 it("rejects short semantic hashes and unknown fields", () => {
   expect(() => validateTaskGraph({ schema: "harness/task-graph/v1", tasksSemanticHash: "invalid-hash", tasks: [], extra: true })).toThrow();
@@ -157,6 +158,21 @@ it("rejects short semantic hashes and unknown fields", () => {
 
 it("requires typed blockers", () => {
   expect(() => validateWorkerResult({ schemaVersion: 1, outcome: "blocked", blocker: { reason: "x" } })).toThrow();
+});
+
+it("rejects non-JSON durable command payloads", () => {
+  expect(() => validateControllerCommand({ schemaVersion: 1, source: "operator", kind: "operator_intent", idempotencyKey: "retry:T001", payload: { callback: () => undefined } })).toThrow();
+});
+
+it("canonicalizes object keys by locale-independent code-unit order", () => {
+  expect(canonicalJson({ "ä": 3, z: 2, A: 1 })).toBe('{"A":1,"z":2,"ä":3}');
+});
+
+it("rejects Pi package requirements that are not exact lock projections", () => {
+  expect(() => validateEnvironmentAndLock(
+    { schema: "harness/environment/v1", commands: {}, pi_packages: [{ id: "harness", dependency: "missing", scope: "project", resources: { extensions: ["dist/pi/extension.js"] } }] },
+    { schema: "harness/lock/v1", harnessVersion: "0.1.0", dependencies: [] },
+  )).toThrow(/lock dependency/);
 });
 ```
 
@@ -176,6 +192,11 @@ import addFormats from "ajv-formats";
 
 export const HashSchema = Type.String({ pattern: "^sha256:[0-9a-f]{64}$" });
 export const VersionSchema = Type.Literal(1);
+export const JsonValueSchema = Type.Recursive((Self) => Type.Union([
+  Type.Null(), Type.Boolean(), Type.Number(), Type.String(),
+  Type.Array(Self), Type.Record(Type.String(), Self),
+]));
+export type JsonValue = Static<typeof JsonValueSchema>;
 const ajv = new Ajv({ allErrors: true, strict: true });
 addFormats(ajv);
 
@@ -189,9 +210,87 @@ export function validator<T extends TSchema>(schema: T): (value: unknown) => Sta
 ```
 
 ```ts
+// src/contracts/controller-command.ts
+import { Type, type Static } from "typebox";
+import { JsonValueSchema, VersionSchema, validator } from "./common.js";
+
+export const ControllerCommandSchema = Type.Object({
+  schemaVersion: VersionSchema,
+  source: Type.Union([
+    Type.Literal("timer"), Type.Literal("herdr"), Type.Literal("pi"),
+    Type.Literal("operator"), Type.Literal("recovery"),
+  ]),
+  kind: Type.Union([
+    Type.Literal("tick"), Type.Literal("runtime_event"),
+    Type.Literal("operator_intent"), Type.Literal("planning_turn"),
+    Type.Literal("recover"),
+  ]),
+  idempotencyKey: Type.String({ minLength: 1 }),
+  payload: JsonValueSchema,
+}, { additionalProperties: false });
+
+export type ControllerCommand = Static<typeof ControllerCommandSchema>;
+export const validateControllerCommand = validator(ControllerCommandSchema);
+```
+
+```ts
+// src/contracts/environment.ts and lock.ts
+const PackagePathSchema = Type.String({ minLength: 1 });
+const PiResourcesSchema = Type.Object({
+  extensions: Type.Optional(Type.Array(PackagePathSchema, { minItems: 1 })),
+  skills: Type.Optional(Type.Array(PackagePathSchema, { minItems: 1 })),
+  prompts: Type.Optional(Type.Array(PackagePathSchema, { minItems: 1 })),
+  themes: Type.Optional(Type.Array(PackagePathSchema, { minItems: 1 })),
+}, { additionalProperties: false });
+const PiPackageRequirementSchema = Type.Object({
+  id: Type.String({ pattern: "^[a-z][a-z0-9-]*$" }),
+  dependency: Type.String({ pattern: "^[a-z][a-z0-9-]*$" }),
+  scope: Type.Literal("project"),
+  resources: PiResourcesSchema,
+}, { additionalProperties: false });
+export const EnvironmentSchema = Type.Object({
+  schema: Type.Literal("harness/environment/v1"),
+  commands: Type.Record(Type.String({ pattern: "^[a-z][a-z0-9_]*$" }), Type.Array(Type.String(), { minItems: 1 })),
+  pi_packages: Type.Array(PiPackageRequirementSchema, { minItems: 1 }),
+}, { additionalProperties: false });
+export type EnvironmentDocument = Static<typeof EnvironmentSchema>;
+
+const LockedSourceSchema = Type.Object({
+  kind: Type.Union([Type.Literal("npm"), Type.Literal("git"), Type.Literal("formula"), Type.Literal("signed-artifact"), Type.Literal("manual")]),
+  identity: Type.String({ minLength: 1 }),
+  version: Type.String({ minLength: 1 }),
+  integrity: Type.String({ minLength: 1 }),
+}, { additionalProperties: false });
+const LockedDependencySchema = Type.Object({
+  id: Type.String({ pattern: "^[a-z][a-z0-9-]*$" }),
+  kind: Type.Union([Type.Literal("pi-package"), Type.Literal("tool"), Type.Literal("integration"), Type.Literal("manual")]),
+  version: Type.String({ minLength: 1 }),
+  source: LockedSourceSchema,
+  piSource: Type.Optional(Type.String({ minLength: 1 })),
+  dependsOn: Type.Array(Type.String()),
+}, { additionalProperties: false });
+export const HarnessLockSchema = Type.Object({
+  schema: Type.Literal("harness/lock/v1"),
+  harnessVersion: Type.String({ minLength: 1 }),
+  dependencies: Type.Array(LockedDependencySchema),
+}, { additionalProperties: false });
+export type HarnessLock = Static<typeof HarnessLockSchema>;
+```
+
+`validateEnvironmentAndLock` adds the semantic checks that JSON Schema cannot
+express compactly: IDs and arrays are unique; each resource set is nonempty;
+package paths are normalized relative paths with no glob, traversal, or NUL;
+each `dependency` exists exactly once with `kind: pi-package`;
+and that dependency has an exact pinned npm-version or Git-commit `piSource`
+whose identity/version agree with its trusted source and integrity. Local paths
+and floating Git refs are never automatic. Filesystem probes separately reject
+resource or cache symlink escapes. The validator returns the typed pair used by
+the compiler, init, bootstrap, and doctor.
+
+```ts
 // src/contracts/task-graph.ts
 import { Type, type Static } from "typebox";
-import { HashSchema, VersionSchema, validator } from "./common.js";
+import { HashSchema, validator } from "./common.js";
 
 export const TaskNodeSchema = Type.Object({
   id: Type.String({ pattern: "^T[0-9]{3,}$" }),
@@ -200,7 +299,7 @@ export const TaskNodeSchema = Type.Object({
   labels: Type.Array(Type.String()),
   parallelEligible: Type.Boolean(),
   dependsOn: Type.Array(Type.String()),
-  acceptanceRefs: Type.Array(Type.String()),
+  acceptanceRefs: Type.Array(Type.String({ pattern: "^(FR|SC)-[0-9]{3}$" })),
   ownedPaths: Type.Array(Type.String()),
 }, { additionalProperties: false });
 
@@ -217,7 +316,8 @@ export const validateTaskGraph = validator(TaskGraphSchema);
 ```ts
 // src/contracts/events.ts
 import { Type, type Static, type TSchema } from "typebox";
-import { HashSchema, VersionSchema, validator } from "./common.js";
+import { HashSchema, JsonValueSchema, VersionSchema, validator } from "./common.js";
+import { ControllerCommandSchema } from "./controller-command.js";
 import { WorkerResultSchema } from "./worker-result.js";
 
 const EventEnvelopeProperties = {
@@ -238,10 +338,22 @@ function event<T extends string, P extends TSchema>(eventType: T, payload: P) {
 
 const RecoveryClassSchema = Type.Union([Type.Literal("idempotent"), Type.Literal("reconcilable"), Type.Literal("non_retryable")]);
 const BlockerSchema = Type.Object({ reason: Type.String(), evidence: Type.Array(Type.String()), suggestedChange: Type.String() }, { additionalProperties: false });
-const EffectIntentPayloadSchema = Type.Object({ action: Type.String(), idempotencyKey: Type.String(), recovery: RecoveryClassSchema, laneKey: Type.String(), input: Type.Unknown() }, { additionalProperties: false });
-const EffectObservationPayloadSchema = Type.Object({ action: Type.String(), intentKey: Type.String(), output: Type.Unknown() }, { additionalProperties: false });
+const EffectIntentPayloadSchema = Type.Object({ action: Type.String(), idempotencyKey: Type.String(), recovery: RecoveryClassSchema, laneKey: Type.String(), input: JsonValueSchema }, { additionalProperties: false });
+const EffectObservationPayloadSchema = Type.Object({ action: Type.String(), intentKey: Type.String(), output: JsonValueSchema }, { additionalProperties: false });
 const EffectFailurePayloadSchema = Type.Object({ action: Type.String(), intentKey: Type.String(), code: Type.String(), evidence: Type.Array(Type.String()) }, { additionalProperties: false });
-const OperatorIntentPayloadSchema = Type.Object({ operation: Type.Union([Type.Literal("retry"), Type.Literal("reroute"), Type.Literal("cancel"), Type.Literal("pause"), Type.Literal("resume")]), target: Type.String(), arguments: Type.Record(Type.String(), Type.Unknown()) }, { additionalProperties: false });
+export const DecisionEventDraftSchema = Type.Object({ eventType: Type.String({ minLength: 1 }), entityId: Type.String({ minLength: 1 }), idempotencyKey: Type.String({ minLength: 1 }), payload: JsonValueSchema }, { additionalProperties: false });
+export const CommandDecisionBatchSchema = Type.Object({
+  commandKey: Type.String({ minLength: 1 }),
+  acceptedSequence: Type.Integer({ minimum: 1 }),
+  acceptedAt: Type.String({ format: "date-time" }),
+  stateRevision: Type.Integer({ minimum: 1 }),
+  decisionHash: HashSchema,
+  events: Type.Array(DecisionEventDraftSchema),
+  effects: Type.Array(EffectIntentPayloadSchema),
+}, { additionalProperties: false });
+export type DecisionEventDraft = Static<typeof DecisionEventDraftSchema>;
+export type CommandDecisionBatch = Static<typeof CommandDecisionBatchSchema>;
+const OperatorIntentPayloadSchema = Type.Object({ operation: Type.Union([Type.Literal("retry"), Type.Literal("reroute"), Type.Literal("cancel"), Type.Literal("pause"), Type.Literal("resume")]), target: Type.String(), arguments: Type.Record(Type.String(), JsonValueSchema) }, { additionalProperties: false });
 const PlanningStageSchema = Type.Union([Type.Literal("specify"), Type.Literal("plan"), Type.Literal("tasks")]);
 const PlanningMarkerPayloadSchema = Type.Object({ stage: PlanningStageSchema, sessionFile: Type.String(), correlationId: Type.String(), requestEntryId: Type.String(), command: Type.String() }, { additionalProperties: false });
 const PlanningSettledPayloadSchema = Type.Object({ correlationId: Type.String(), finalTurnIndex: Type.Integer({ minimum: 0 }) }, { additionalProperties: false });
@@ -253,6 +365,8 @@ const PlanningCompletedPayloadSchema = Type.Union([
 
 export const HarnessEventSchema = Type.Union([
   event("run.created", Type.Object({ workflowRevision: HashSchema }, { additionalProperties: false })),
+  event("controller.command_received", Type.Object({ command: ControllerCommandSchema }, { additionalProperties: false })),
+  event("controller.command_decided", CommandDecisionBatchSchema),
   event("controller.command_processed", Type.Object({ source: Type.String(), commandKey: Type.String() }, { additionalProperties: false })),
   event("job.ready", Type.Object({}, { additionalProperties: false })),
   event("attempt.started", Type.Object({ attempt: Type.Integer({ minimum: 1 }), worker: Type.String() }, { additionalProperties: false })),
@@ -357,7 +471,7 @@ import { createHash } from "node:crypto";
 
 export function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (value && typeof value === "object") return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`;
+  if (value && typeof value === "object") return `{${Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`;
   const encoded = JSON.stringify(value);
   if (encoded === undefined) throw new TypeError("canonical JSON does not support undefined");
   return encoded;
@@ -403,8 +517,11 @@ git commit -m "feat: define versioned harness contracts"
 - Test: `test/unit/contracts/test-support.test.ts`
 
 **Interfaces:**
-- Produces `fixtureWorkflow`, `fixtureTaskGraph`, `fixtureEvent`, `fixtureState`, `diamondTaskGraph`, and `createTempRepo`.
+- Produces `fixtureWorkflow`, `fixtureEnvironment`, `fixtureHarnessLock`, `fixtureTaskGraph`, `fixtureEvent`, `fixtureState`, `diamondTaskGraph`, and `createTempRepo`.
 - Every factory returns production contract types and accepts `DeepPartial<T>` overrides.
+- Named invalid/semantic scenarios are not fake `DeepPartial<T>` keys; Tasks 4
+  and 5 add separate typed `compileInputCase(kind)` and `taskGraphCase(kind)`
+  builders.
 
 - [ ] **Step 1: Write a compile/runtime test for every factory**
 
@@ -449,9 +566,9 @@ export function diamondTaskGraph(overrides: DeepPartial<TaskGraphDocument> = {})
     schema: "harness/task-graph/v1",
     tasksSemanticHash: `sha256:${"a".repeat(64)}`,
     tasks: [
-      { id: "T001", description: "one", phase: "foundation", labels: ["US1"], parallelEligible: true, dependsOn: [], acceptanceRefs: ["AC1"], ownedPaths: ["src/one.ts"] },
-      { id: "T002", description: "two", phase: "foundation", labels: ["US1"], parallelEligible: true, dependsOn: [], acceptanceRefs: ["AC2"], ownedPaths: ["src/two.ts"] },
-      { id: "T003", description: "three", phase: "integration", labels: ["US1"], parallelEligible: false, dependsOn: ["T001", "T002"], acceptanceRefs: ["AC3"], ownedPaths: ["src/three.ts"] },
+      { id: "T001", description: "one", phase: "foundation", labels: ["US1"], parallelEligible: true, dependsOn: [], acceptanceRefs: ["FR-001"], ownedPaths: ["src/one.ts"] },
+      { id: "T002", description: "two", phase: "foundation", labels: ["US1"], parallelEligible: true, dependsOn: [], acceptanceRefs: ["FR-002"], ownedPaths: ["src/two.ts"] },
+      { id: "T003", description: "three", phase: "integration", labels: ["US1"], parallelEligible: false, dependsOn: ["T001", "T002"], acceptanceRefs: ["SC-001"], ownedPaths: ["src/three.ts"] },
     ],
   };
   return fixture(() => base)(overrides);
@@ -485,6 +602,7 @@ git commit -m "test: add typed harness factories"
 
 **Interfaces:**
 - Produces `compileWorkflow(input: CompileInput): CompiledWorkflow`.
+- Produces `compileInputCase(kind): CompileInput` for named invalid compiler scenarios without adding non-contract keys to `DeepPartial<CompileInput>`.
 - `CompiledWorkflow` is deeply frozen and includes `revision: sha256:<64 hex>`.
 - `CompileInput.actionSchemas` defaults to the closed built-in schemas and may add schemas from installed, policy-approved action plugins; the built-ins include `command.run: { argv, cwd?, env?, probe? }`.
 
@@ -499,8 +617,8 @@ it("resolves named argv commands and returns a frozen revision", () => {
 });
 
 it("rejects unknown references and stage cycles", () => {
-  expect(() => compileWorkflow(fixtureCompileInput({ command: "missing" }))).toThrow(/unknown command/);
-  expect(() => compileWorkflow(fixtureCompileInput({ cycle: true }))).toThrow(/cycle/);
+  expect(() => compileWorkflow(compileInputCase("unknown_command"))).toThrow(/unknown command/);
+  expect(() => compileWorkflow(compileInputCase("cycle"))).toThrow(/cycle/);
 });
 ```
 
@@ -513,6 +631,13 @@ Expected: FAIL with missing `compileWorkflow`.
 - [ ] **Step 3: Implement normalization, interpolation, hashing, and freeze**
 
 ```ts
+export function compileInputCase(kind: "unknown_command" | "cycle"): CompileInput {
+  const input = structuredClone(fixtureCompileInput());
+  if (kind === "unknown_command") input.workflow.stages[0].with = { argv: "${commands.missing}" };
+  else input.workflow.stages[1].needs = [{ stage: input.workflow.stages[1].id, scope: "all" }];
+  return deepFreeze(input);
+}
+
 export function compileWorkflow(input: CompileInput): CompiledWorkflow {
   const document = validateWorkflow(structuredClone(input.workflow));
   const stages = topologicalStages(document.stages).map((stage) => ({
@@ -582,18 +707,19 @@ git commit -m "feat: compile immutable workflow revisions"
 
 **Interfaces:**
 - Produces `validateGraph(graph, context): ValidatedTaskGraph`.
+- Produces `taskGraphCase(kind): TaskGraphDocument` for explicitly named semantic-invalid test cases without weakening production fixture types.
 - `context` supplies canonical task records parsed from `tasks.md`, accepted acceptance references, and the controller-computed semantic hash.
 
 - [ ] **Step 1: Write graph failure cases**
 
 ```ts
 it.each([
-  ["duplicate", fixtureTaskGraph({ duplicate: true }), fixtureGraphContext(), /duplicate task/],
-  ["unknown dependency", fixtureTaskGraph({ unknownDependency: true }), fixtureGraphContextFor(fixtureTaskGraph({ unknownDependency: true })), /unknown dependency/],
-  ["cycle", fixtureTaskGraph({ cycle: true }), fixtureGraphContextFor(fixtureTaskGraph({ cycle: true })), /cycle/],
+  ["duplicate", taskGraphCase("duplicate"), fixtureGraphContext(), /duplicate task/],
+  ["unknown dependency", taskGraphCase("unknown_dependency"), fixtureGraphContextFor(taskGraphCase("unknown_dependency")), /unknown dependency/],
+  ["cycle", taskGraphCase("cycle"), fixtureGraphContextFor(taskGraphCase("cycle")), /cycle/],
   ["stale hash", fixtureTaskGraph(), fixtureGraphContext({ tasksSemanticHash: `sha256:${"b".repeat(64)}` }), /semantic hash/],
-  ["projection mismatch", fixtureTaskGraph({ changedOwnedPath: true }), fixtureGraphContext(), /does not match tasks.md/],
-  ["parallel overlap", fixtureTaskGraph({ unorderedOverlap: true }), fixtureGraphContextFor(fixtureTaskGraph({ unorderedOverlap: true })), /owned path conflict/],
+  ["projection mismatch", taskGraphCase("changed_owned_path"), fixtureGraphContext(), /does not match tasks.md/],
+  ["parallel overlap", taskGraphCase("unordered_overlap"), fixtureGraphContextFor(taskGraphCase("unordered_overlap")), /owned path conflict/],
 ])("rejects %s", (_name, graph, context, error) => {
   expect(() => validateGraph(graph, context)).toThrow(error);
 });
@@ -608,6 +734,28 @@ Expected: FAIL with missing `validateGraph`.
 - [ ] **Step 3: Implement deterministic validation**
 
 ```ts
+export type TaskGraphCase =
+  | "duplicate"
+  | "unknown_dependency"
+  | "cycle"
+  | "changed_owned_path"
+  | "unordered_overlap"
+  | "ordered_overlap";
+
+export function taskGraphCase(kind: TaskGraphCase): TaskGraphDocument {
+  const graph = structuredClone(fixtureTaskGraph());
+  switch (kind) {
+    case "duplicate": graph.tasks.push(structuredClone(graph.tasks[0])); break;
+    case "unknown_dependency": graph.tasks[2].dependsOn = ["T999"]; break;
+    case "cycle": graph.tasks[0].dependsOn = ["T003"]; break;
+    case "changed_owned_path": graph.tasks[0].ownedPaths = ["src/not-in-tasks.ts"]; break;
+    case "unordered_overlap": graph.tasks[1].ownedPaths = [...graph.tasks[0].ownedPaths]; break;
+    case "ordered_overlap": graph.tasks[2].ownedPaths = [...graph.tasks[0].ownedPaths]; break;
+    default: assertNever(kind);
+  }
+  return deepFreeze(graph);
+}
+
 export function fixtureGraphContextFor(graph: TaskGraphDocument): GraphContext {
   return fixtureGraphContext({
     tasksSemanticHash: graph.tasksSemanticHash,
@@ -644,7 +792,8 @@ globs, and protected planning/config paths.
 
 ```ts
 expect(validateGraph(diamondTaskGraph(), fixtureGraphContext()).order.at(-1)).toBe("T003");
-expect(() => validateGraph(fixtureTaskGraph({ orderedOverlap: true }), fixtureGraphContext())).not.toThrow();
+const orderedOverlap = taskGraphCase("ordered_overlap");
+expect(() => validateGraph(orderedOverlap, fixtureGraphContextFor(orderedOverlap))).not.toThrow();
 ```
 
 Run: `npm test -- test/unit/graph/validation.test.ts`
