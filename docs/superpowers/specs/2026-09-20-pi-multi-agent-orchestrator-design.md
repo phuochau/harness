@@ -32,9 +32,10 @@ engine.
 ## 2. Goals
 
 - Install into a new repository and be usable immediately.
-- Provision missing Pi packages, Spec Kit integration, Superpowers, Herdr,
-  Herdr agent integrations, worker CLIs, and required local tools after one
-  explicit approval.
+- After one explicit install-plan approval, provision every missing Pi package,
+  Spec Kit integration, Superpowers component, Herdr integration, worker CLI,
+  and local tool that has a trusted automated recipe; give exact blocking
+  instructions for declared manual dependencies.
 - Run independent tasks concurrently without sharing working directories.
 - Persist workflow state outside LLM context so work can recover after Pi,
   Herdr, a worker, or the machine restarts.
@@ -83,12 +84,12 @@ task is complete.
 ```text
 Pi extension
   |- commands, approvals, and semantic status
-  |- orchestration loop
+  |- resident HarnessController
   `- deterministic harness core
        |- workflow compiler
        |- Spec Kit task-graph validator
        |- DAG scheduler
-       |- task/run state machines
+       |- workflow/stage/job/attempt state machines
        |- routing and retry policies
        |- security policy evaluator
        |- verification and integration gates
@@ -110,6 +111,21 @@ for append-only events, JSON for snapshots, the Herdr CLI for simple commands,
 the Herdr socket API for subscriptions, and Git CLI commands for verification
 and integration.
 
+The Pi orchestrator itself runs as a named, resident Pi agent inside a dedicated
+Herdr workspace. The extension creates one long-lived `HarnessController` in
+that Pi process. The controller is an event-driven deterministic loop that
+continues scheduling while the Pi model is idle; it does not require an active
+LLM turn and does not consume model tokens to poll workers. Detaching the Herdr
+client leaves both Pi and the controller running.
+
+The controller is not a second orchestrator or daemon. It is the runtime part
+of the Pi extension and implements only the frozen workflow, state-machine, and
+policy decisions owned by Pi. If the Pi process exits, workers already launched
+by Herdr may continue, but no new scheduling occurs until Herdr restores Pi and
+the extension reacquires the run with a new fencing token and reconciles state.
+`harness start` creates or reattaches this dedicated local Herdr workspace and
+Pi session.
+
 ## 6. Project Layout
 
 Committed project configuration:
@@ -123,7 +139,6 @@ Committed project configuration:
   environment.yaml
   policy.yaml
   harness.lock
-  bootstrap.mjs
   workflows/
     examples/
       spec-kit-codex.yaml
@@ -131,25 +146,42 @@ Committed project configuration:
       mixed-workers.yaml
 ```
 
-Local, gitignored runtime data:
+Repository-local runtime data, shared by every linked worktree through Git's
+common directory:
 
 ```text
-.harness/
+<git-common-dir>/harness/
   runs/
     F023/
       resolved-workflow.json
       state.json
       events.jsonl
+      artifacts/
       assignments/
       workers/
       evidence/
       logs/
-  receipts/
-    machine-identity.json
 ```
 
+Machine-local install receipts live in the platform user-state directory, not
+inside the repository. On Unix-like systems the default is
+`${XDG_STATE_HOME:-~/.local/state}/pi-harness/receipts/`.
+
+The non-bypassable machine security ceiling lives outside the repository at
+the platform user-config location; on Unix-like systems the default is
+`${XDG_CONFIG_HOME:-~/.config}/pi-harness/policy.yaml`. The committed
+`.harness/policy.yaml` may request narrower permissions but cannot replace or
+weaken the machine policy.
+
 `.pi/` remains Pi's native namespace. `.harness/` owns harness configuration
-and state. The design does not use a generic `.ai/` directory.
+only. Runtime state lives under the Git common directory so the control checkout
+and all task worktrees resolve the same run. The design does not use a generic
+`.ai/` directory.
+
+At run creation, Pi resolves and records the canonical repository root and
+`git rev-parse --git-common-dir`. Only the controller writes run state. Worker
+assignments receive absolute paths, and task worktrees may write only their
+local `.harness-output/` result directory.
 
 ## 7. Workflow DSL
 
@@ -161,42 +193,117 @@ restrictions. The engine does not hard-code stage names such as `plan`,
 schema: harness/v1
 name: spec-kit-devin
 
+task_model:
+  source: stages.tasks.outputs.graph
+  complete_when:
+    stage: integrate
+
 stages:
+  - id: specify
+    uses: spec-kit.specify
+    runner: pi
+    model_profile: chatgpt-planning
+    produces:
+      spec: feature/spec.md
+
+  - id: plan
+    uses: spec-kit.plan
+    runner: pi
+    model_profile: chatgpt-planning
+    needs:
+      - stage: specify
+        scope: all
+    produces:
+      plan: feature/plan.md
+
+  - id: approve_plan
+    uses: human.approval
+    needs:
+      - stage: plan
+        scope: all
+
   - id: tasks
     uses: spec-kit.tasks
     runner: pi
     model_profile: chatgpt-planning
+    needs:
+      - stage: approve_plan
+        scope: all
     produces:
       tasks: feature/tasks.md
       graph: feature/task-graph.json
 
   - id: implement
     uses: worker.execute
-    runner: devin
-    needs: [tasks]
-    foreach: tasks.ready
+    runner:
+      prefer: [devin, codex, claude]
+    needs:
+      - stage: tasks
+        scope: all
+    foreach:
+      source: stages.tasks.outputs.graph
+      key: task.id
+    gate: task.dependencies_done
     isolation: worktree
     profile: disciplined-engineer
 
   - id: review
     uses: worker.review
-    runner: codex
-    needs: [implement]
-    foreach: tasks.completed
+    runner:
+      prefer: [codex, claude, devin]
+    needs:
+      - stage: implement
+        scope: same-item
+    foreach:
+      source: stages.tasks.outputs.graph
+      key: task.id
+    policies:
+      require_different_worker_kind: true
+    on_failure:
+      changes_requested:
+        retry_stage: implement
 
   - id: verify
     uses: command.run
-    needs: [review]
+    needs:
+      - stage: review
+        scope: same-item
+    foreach:
+      source: stages.tasks.outputs.graph
+      key: task.id
     with:
-      command: npm test
+      command: ${commands.task_verify}
 
   - id: integrate
     uses: git.integrate
-    needs: [verify]
+    needs:
+      - stage: verify
+        scope: same-item
+    foreach:
+      source: stages.tasks.outputs.graph
+      key: task.id
+
+  - id: final_verify
+    uses: command.run
+    needs:
+      - stage: integrate
+        scope: all
+    with:
+      command: ${commands.full_verify}
+
+  - id: final_pr
+    uses: github.pull-request
+    needs:
+      - stage: final_verify
+        scope: all
 ```
 
 Common stage fields are `id`, `uses`, `runner`, `needs`, `if`, `foreach`,
 `with`, `policies`, `produces`, `retry`, `timeout`, and `on_failure`.
+
+`${commands.*}` references typed named commands declared in
+`environment.yaml`. References are resolved and frozen during compilation;
+they are not shell-expanded while parsing YAML.
 
 `uses` names a registered action or an explicit shell action. `runner` chooses
 where that action runs. Before a run starts, the compiler validates the schema,
@@ -204,8 +311,40 @@ resolves references, checks cycles and capability requirements, intersects
 permissions, and freezes the result as `resolved-workflow.json`. Editing
 `workflow.yaml` never mutates an active run.
 
-The resolved workflow records its content hash. Continuing a run with a
-different workflow requires an explicit new revision or a new run.
+The engine executes four generic entities rather than assuming a software
+development sequence:
+
+- A `WorkflowRun` is one immutable resolved workflow execution.
+- A `StageRun` is the aggregate execution of one declared stage.
+- A `JobRun` is either the single job for a static stage or one fan-out item.
+  Its stable item key correlates jobs across stages.
+- An `Attempt` is one worker/runtime execution of a job. Retries and reroutes
+  create new attempts without creating a new job.
+
+`foreach` fans a stage out into keyed jobs. A dependency with `scope: all` is a
+fan-in barrier over every upstream job; `scope: same-item` joins only the
+upstream job with the same item key. A missing or duplicate key is a compile
+error. Actions may produce typed collections for later fan-out, but an active
+run may not dynamically add stages or rewrite the frozen graph.
+
+`on_failure.retry_stage` may target only an ancestor job with the same item key.
+It creates a new attempt of that existing job, invalidates downstream results
+that depended on the superseded attempt, and then re-evaluates the same frozen
+graph. It does not add a stage or job. The compiler rejects unbounded
+remediation loops; both the target job and whole run must declare finite
+attempt and elapsed-time budgets.
+
+The optional `task_model` projects selected keyed jobs onto Spec Kit tasks.
+`task.dependencies_done` is a deterministic gate over the validated task DAG,
+and `complete_when.stage` defines which successful keyed job makes that task
+complete. This keeps task-aware scheduling explicit without making tasks the
+only execution primitive. Workflows without `task_model` remain valid.
+
+The resolved workflow records its content hash. It freezes stage templates and
+declared fan-out expressions before execution; jobs declared by `foreach` are
+materialized only when their validated source artifact exists. Continuing with
+a different workflow creates a new run revision referencing the old run rather
+than mutating the active run.
 
 ## 8. Spec Kit Contract and Task Graph
 
@@ -215,8 +354,12 @@ definitions, or acceptance criteria.
 
 The standard Spec Kit task format includes task IDs, phases, parallel markers,
 story labels, descriptions, and file paths, but not an explicit dependency
-list for every task. The harness therefore installs a Spec Kit integration that
-generates a machine-readable projection during the same task-planning step:
+list for every task. The harness therefore ships a versioned
+`harness-task-graph` Spec Kit preset. Its tasks command uses Spec Kit's `wrap`
+composition strategy around the core task command, adding the graph contract
+without copying or forking the upstream prompt. The planning model therefore
+emits both the human-readable task list and its machine-readable projection in
+one planning operation:
 
 ```text
 specs/feature-name/
@@ -240,6 +383,13 @@ change `- [ ]` to `- [x]` after a task reaches `DONE` without invalidating the
 graph, while any change to an ID, description, phase, label, or file path does
 invalidate it.
 
+Immediately after the task-planning action returns, the controller directly
+invokes the deterministic graph validator. The two outputs are accepted as one
+artifact set only if their schemas, task identities, acceptance references,
+and semantic hash agree. Spec Kit extension hooks may provide convenience
+automation, but agent-mediated hooks are never a correctness boundary; the
+controller-owned validation call is mandatory even when a hook ran.
+
 Pi refuses execution when the graph has cycles, unknown task IDs, missing
 dependencies, invalid acceptance references, a stale semantic hash, or file
 ownership conflicts between tasks that the graph would otherwise permit to run
@@ -250,22 +400,45 @@ asks an LLM to guess missing dependencies during execution.
 
 Each run stores:
 
-- `resolved-workflow.json`: immutable workflow and validated task graph.
+- `resolved-workflow.json`: immutable compiled workflow.
+- `artifacts/`: content-addressed accepted planning artifacts, including the
+  validated task graph once the task-planning stage completes.
 - `events.jsonl`: append-only authoritative event history.
 - `state.json`: atomically replaced materialized snapshot derived from events.
 - Assignment bundles, attempt records, worker/session identifiers, logs, and
   evidence.
 
-Only one Pi orchestration session may own the run lock. Events have monotonic
-revisions and idempotency keys. Replaying the same event history must always
+Only one controller may own a run lease. The local runtime combines an OS
+advisory lock with a durable lease record. Acquiring or recovering that lease
+atomically increments a fencing token; every state write and external-action
+observation carries the token, and append verifies the current owner while the
+lock is held, so a stale controller cannot append valid events after ownership
+changes.
+
+Every JSONL event contains a monotonic sequence number, timestamp, run and
+entity IDs, idempotency key, fencing token, payload, `prevHash`, and
+`eventHash`. An append is flushed and `fsync`ed before the controller acts on
+it. External side effects use an intent/observation protocol: Pi first records
+an action intent with a stable idempotency key, performs or reconciles the
+operation, then records the observed result. Adapters must use that key when
+the underlying system supports idempotency and otherwise reconcile by native
+session, branch, commit, or worktree identity before retrying.
+
+`state.json` is written to a sibling temporary file, flushed, and atomically
+renamed. It records the last applied sequence and event hash. On recovery, an
+incomplete final JSONL record may be truncated after preserving a diagnostic
+copy; malformed records or hash/sequence breaks anywhere else fail recovery
+and require explicit repair. Replaying the same valid event history must always
 produce the same state.
 
-After restart, Pi acquires the lock, replays events, validates the snapshot,
-queries Herdr for workspaces and agents, inspects Git state and worker results,
-then deterministically reattaches, resumes, retries, blocks, or verifies each
-attempt.
+After restart, Pi acquires the lease with a new fencing token, verifies the
+complete event hash chain, validates the snapshot boundary, applies events
+after that boundary, queries Herdr for workspaces and agents, inspects Git state
+and worker results, then deterministically reattaches, resumes, retries, blocks,
+or verifies each attempt. A side effect with an intent but no observation is
+reconciled before the controller may issue another action.
 
-## 10. Task Lifecycle
+## 10. Job and Task Lifecycle
 
 ```text
 PENDING
@@ -276,19 +449,35 @@ PENDING
 
 Error paths:
   RUNNING or VERIFYING -> RETRY -> READY
+  DONE -> RETRY only when a downstream remediation policy invalidates it
   any active state -> BLOCKED
   retry exhaustion or nonrecoverable error -> FAILED
 ```
 
+The state machine applies to each `JobRun`. For a task-aware workflow, the
+human-facing task state is a projection of the keyed jobs selected by
+`task_model`: it becomes `RUNNING` when its first job starts, `VERIFYING` after
+implementation is submitted, `DONE` only when the declared completion-stage
+job succeeds, `BLOCKED` when an active required job is blocked, and `FAILED`
+when a required job exhausts policy.
+
 Rules:
 
-- `PENDING` becomes `READY` only after every dependency is `DONE`.
-- A task has at most one active lease and one active worker attempt.
-- Worker completion changes the task to `VERIFYING`, never directly to `DONE`.
+- A job becomes `READY` only when its declared stage dependencies, item scope,
+  condition, and gate are satisfied.
+- A task implementation job remains gated until every task dependency is
+  `DONE`.
+- A job has at most one active lease and one active worker attempt.
+- Worker completion changes its job and projected task to `VERIFYING`, never
+  directly to `DONE`.
 - `BLOCKED` does not consume retry budget by itself.
 - Every retry creates an immutable attempt record.
 - Rerouting occurs only between attempts.
-- Pi updates the `tasks.md` checkbox only after `DONE`.
+- A downstream retry remains bound to the exact upstream attempt generation it
+  observed. Retrying an upstream job invalidates dependent results before they
+  can be integrated.
+- Pi updates a `tasks.md` checkbox only after the task projection reaches
+  `DONE`.
 
 Herdr lifecycle is treated as observation:
 
@@ -311,15 +500,28 @@ main at frozen commit
        `- harness/F023-T004
 ```
 
-Herdr creates or opens each task worktree. A task branch begins from an
-integration commit containing all completed dependency commits. Independent
-tasks may run concurrently from their appropriate integration bases.
+Planning actions run in a controller-owned planning worktree on the integration
+branch and may write only declared Spec Kit artifact paths. After human plan
+approval and deterministic task-graph validation, Pi commits the complete
+planning artifact set and records its commit and content hashes. Task branches
+start no earlier than this planning commit. A workflow that starts from
+existing approved artifacts may conditionally skip planning, but it must bind
+their paths, hashes, and containing commit before fan-out.
 
-After worker completion, Pi validates the result and commits, performs review
-and task verification, serializes integration into the run branch, and runs
-post-integration checks. A conflict leaves the task in `VERIFYING` and creates
-a remediation attempt or blocker. `DONE` means the commit is integrated and
-post-integration checks passed.
+Herdr creates or opens a worktree for each job that requests worktree
+isolation. Downstream `same-item` jobs may inherit the upstream artifact,
+branch, and worktree reference when their action contract allows it. In the
+default workflow, the implementation job creates the task branch and the
+review and verification jobs inspect that same branch. A task branch begins
+from an integration commit containing all completed dependency commits.
+Independent tasks may run concurrently from their appropriate integration
+bases.
+
+After worker completion, Pi validates the worker-produced commits, performs
+review and task verification, serializes integration into the run branch, and
+runs post-integration checks. A conflict leaves the task in `VERIFYING` and
+creates a remediation attempt or blocker. `DONE` means the commit is integrated
+and post-integration checks passed for the projected task.
 
 After all tasks are done, Pi runs the full verification suite, reviews the
 final diff, pushes the integration branch, and creates the final pull request.
@@ -360,10 +562,11 @@ cancel
 collect
 ```
 
-Each immutable assignment bundle contains task identity, acceptance
-references, planning-artifact paths, frozen base information, allowed file
-scope, required Superpowers disciplines, verification commands, protected
-paths, and the result schema.
+Each immutable assignment bundle contains workflow, stage, job, attempt, and
+item identity; optional task identity and acceptance references; planning-
+artifact paths; frozen base information; allowed file scope; required
+Superpowers disciplines; verification commands; protected paths; and the
+result schema.
 
 Workers write `.harness-output/result.json` inside their task worktree. The
 directory is gitignored and may not be included in a task commit. Pi copies and
@@ -371,13 +574,19 @@ hashes accepted results and evidence into the run directory.
 
 The normalized result uses `harness/worker-result/v1` and includes:
 
-- Task ID and attempt number.
+- Job ID, stable item key, attempt number, and task ID when task-aware.
 - Outcome: `completed`, `blocked`, or `failed`.
 - Summary and commit SHAs.
 - Test commands, exit codes, and evidence paths.
 - Superpowers disciplines and evidence.
 - A typed blocker with reason, evidence, and suggested change when blocked.
 - A resumable native session reference when available.
+
+Action-specific payloads are schema-discriminated. In particular,
+`worker.review` must identify the exact implementation attempt and commit tree
+reviewed and return `approved`, `changes_requested`, or `blocked` with typed
+findings. `changes_requested` triggers the declared remediation policy; an
+approval for a superseded commit tree is invalid.
 
 Malformed or missing results fail the attempt. Pi never parses a prose terminal
 message to infer successful completion.
@@ -396,9 +605,21 @@ The default completion contract requires tests, commits, evidence, and
 independent verification. A project may explicitly replace or disable the
 discipline in its workflow, subject to the effective machine security policy.
 
+Worker profiles use an explicit Superpowers allowlist. The default permits
+test-driven development, systematic debugging, verification before completion,
+and code-review skills. It excludes planning, global delegation,
+subagent-driven development, parallel-agent dispatch, Git-worktree management,
+and branch-finishing skills because those would overlap Pi's orchestration or
+Herdr's isolation responsibilities. A project may add a skill only when its
+declared capabilities do not cross those boundaries.
+
 Adapters report support as `native`, `injected`, or `unsupported`. A stage that
 requires `native` support fails preflight when its selected worker cannot
-provide it. The harness never silently drops a required discipline.
+provide it. Native support is evidenced by adapter-observed skill invocation
+events. Injected support means the adapter supplied equivalent instructions;
+it is evidenced independently through command logs, Git artifacts, tests, and
+review results. A worker's self-reported claim that it followed a discipline is
+never sufficient. The harness never silently drops a required discipline.
 
 ## 15. Routing, Retries, and Blockers
 
@@ -411,6 +632,14 @@ fallbacks.
 Routing is deterministic and considers only declared order, capabilities,
 availability/authentication, concurrency limits, and policy. Every routing
 decision is recorded as an event.
+
+The shipped policy requires a review job's worker kind to differ from the
+worker kind that produced the implementation it reviews. Thus the normal Devin
+implementation is reviewed by Codex; if implementation falls back to Codex,
+review routes to Claude and then Devin according to declared review fallbacks.
+If no distinct eligible reviewer is available, the review job is `BLOCKED`
+rather than waived. Projects may strengthen this rule but the default machine
+policy does not permit silently disabling it.
 
 Logical model profiles are committed, while provider credentials and the
 mapping from `chatgpt-planning` to the local ChatGPT subscription remain in
@@ -438,20 +667,51 @@ permissions, exposes new credentials, or edits planning artifacts.
 never creates an empty configuration. The default is the Spec Kit -> Devin ->
 Codex -> Pi verification workflow described in this document.
 
+During initialization, the trusted CLI derives named verification commands
+from declarative project metadata such as package manifests and known build
+files. When detection is ambiguous or empty, it asks the operator for the
+command values and writes them into `environment.yaml`; the user never has to
+author YAML merely to obtain a runnable default. Detected commands are shown
+for confirmation and are not executed during bootstrap before approval.
+
 `environment.yaml` declares required versions and capabilities for Pi, Spec
 Kit, Superpowers, Herdr, the four Herdr integrations, Codex CLI, Devin CLI,
-Claude Code, Git, and optional GitHub tooling. `harness.lock` resolves every
+Claude Code, Git, GitHub CLI, and an authenticated GitHub remote. GitHub is
+required in the first release because final pull-request creation is a required
+stage; provider-neutral hosting is deferred. `harness.lock` resolves every
 installable source to an exact version or Git commit and records integrity
 information.
 
 Node.js 22 or newer is the sole bootstrap prerequisite for the first release.
-On a new machine, `node .harness/bootstrap.mjs` reads the lockfile, loads the
-matching harness CLI, inspects the machine, presents a complete install plan,
-requests one approval, installs missing dependencies, merges project-local Pi
-settings, installs Herdr integrations, runs capability and authentication
-probes, and writes a secret-free local receipt. A later standalone bootstrap
-binary may remove the Node.js prerequisite without changing the project
-contract.
+Bootstrap is launched only through a trusted harness CLI installed outside the
+repository: either an already installed binary or an exact-version command
+from the harness release documentation, such as:
+
+```text
+npm exec --yes --package @pi-harness/cli@<exact-version> -- harness bootstrap .
+```
+
+The launcher treats `.harness/*.yaml` and `harness.lock` only as declarative
+data. It never imports project JavaScript, runs repository shell scripts, loads
+Pi extensions, or executes workflow actions before showing the install plan
+and receiving approval. It verifies that its own version matches the desired
+locked harness version; a mismatch produces an explicit trusted upgrade
+command rather than executing repository-provided code.
+
+Each dependency has a typed installer recipe: exact-version `npm`, allowlisted
+package-manager formula, signed release artifact with digest, or `manual`.
+Bootstrap may automatically execute only recipes permitted by machine trust
+policy whose source and integrity match the lock. A manual or unverifiable
+dependency blocks completion with exact install instructions and is re-probed
+after the operator acts; the harness never substitutes a downloaded arbitrary
+install script. Authentication is an explicit interactive follow-up and is
+never copied between machines.
+
+After approval, bootstrap installs eligible missing dependencies, merges
+project-local Pi settings, installs Herdr integrations, runs capability and
+authentication probes, and writes a secret-free local receipt. A later
+standalone bootstrap binary may remove the Node.js prerequisite without
+changing the project contract.
 
 Commands include:
 
@@ -461,6 +721,7 @@ harness bootstrap [--dry-run | --repair | --yes]
 harness doctor [--json]
 harness explain
 harness graph
+harness start
 harness status
 harness recover
 ```
@@ -468,13 +729,23 @@ harness recover
 Bootstrap is idempotent. It prefers project-local installation, identifies
 global mutations separately, does not overwrite customized workflows, does not
 copy credentials, does not remove tools it did not install, and permits
-noninteractive approval only for locked sources allowed by trust policy.
+noninteractive approval only for locked sources allowed by trust policy. A
+receipt records probes and mutations for diagnostics, but it is not proof of
+current machine state; `doctor` always probes again.
 
 ## 17. Security and Isolation
 
 Effective permissions are the intersection of machine policy, project policy,
 and workflow requests. A freely editable workflow cannot silently weaken the
 machine security ceiling.
+
+Starting a workflow is a separate approval boundary from installing its tools.
+Before the first action, Pi displays the frozen workflow hash, resolved shell
+commands, worker and credential profiles, filesystem/network permissions,
+branches, push, and pull-request effects. One run approval authorizes only
+those declared effects and bounded retries. A newly resolved command,
+permission expansion, changed workflow, or different external destination
+requires a new run revision and approval.
 
 Workers receive a dedicated worktree, sanitized environment, explicit
 credential profile, process/resource limits, protected paths, and declared
@@ -486,7 +757,10 @@ preflight capability.
 Repositories and executable packages are untrusted before approval. Floating
 Git branches are forbidden for unattended installs. Bootstrap previews sources,
 versions, checksums, build/install commands, Herdr integration changes, and
-global mutations.
+global mutations. Before approval, the trusted external launcher reads only
+declarative harness files and Git metadata; no executable content from the
+repository is loaded, including package lifecycle scripts, Pi extensions,
+workflow shell actions, or project hooks.
 
 Runtime state is gitignored and user-readable only. Logs are bounded and
 redacted for known patterns, but redaction is not a substitute for excluding
@@ -522,20 +796,27 @@ but they do not schedule new work or make orchestration decisions.
 
 The implementation requires:
 
-- Unit tests for workflow compilation, DAG validation, state transitions,
-  routing, retries, schemas, and policy intersection.
+- Unit tests for workflow compilation, fan-out/fan-in and same-item joins, DAG
+  validation, state transitions and projections, routing, retries, schemas,
+  and policy intersection.
 - Property/invariant tests proving dependency ordering, one active lease,
-  bounded retry, deterministic event replay, and verification before `DONE`.
+  bounded retry, deterministic event replay, independent review, and
+  verification before `DONE`.
 - A shared adapter contract suite executed against fake Codex, Devin, and
   Claude CLIs without consuming subscriptions.
 - Git/worktree integration tests for concurrency, dependency commits, dirty
   worktrees, protected-file changes, conflicts, and failed verification.
 - Crash tests that terminate Pi, Herdr, workers, and state writes at controlled
-  points, then exercise reconciliation.
+  points, including torn final JSONL records, duplicated action intents, stale
+  fencing tokens, and interior log corruption, then exercise reconciliation.
 - Installer tests in temporary repositories and fake home directories covering
   fresh install, dry-run, idempotency, customization preservation, trust,
-  lockfile mismatch, partial failure, and repair.
+  lockfile mismatch, partial failure, repair, and proof that repository code is
+  not executed before approval.
 - Gated end-to-end smoke tests with real Pi, Herdr, and worker CLIs.
+- A longevity test that detaches all clients and leaves the Pi model idle while
+  the resident controller observes worker completion and schedules the next
+  ready jobs.
 
 ## 20. First-Release Scope and Build Order
 
@@ -565,12 +846,13 @@ are implemented sequentially.
 The first release is acceptable when all of the following are demonstrated:
 
 1. `harness init` in a clean Git repository creates a complete workflow,
-   environment contract, policy, lockfile, and Pi settings that pass preflight
-   without requiring the user to author YAML.
+   environment contract, policy, lockfile, and Pi settings that pass schema and
+   configuration preflight without requiring the user to author YAML.
 2. Cloning that configured repository onto a clean test machine and running the
-   bootstrap entrypoint produces an approval plan, installs only locked and
-   trusted dependencies, installs the four Herdr integrations, and passes
-   `harness doctor` after the user completes required CLI authentication.
+   trusted external bootstrap entrypoint produces an approval plan without
+   executing repository code, installs only locked and trusted dependencies,
+   installs the four Herdr integrations, and passes `harness doctor` after the
+   user completes required CLI and GitHub authentication.
 3. The Spec Kit integration generates `tasks.md` and a valid, hash-bound
    `task-graph.json`; stale or ambiguous graphs are rejected before execution.
 4. At least two independent tasks run concurrently through Herdr in distinct
@@ -581,13 +863,23 @@ The first release is acceptable when all of the following are demonstrated:
 6. A worker completion claim without a valid result, commit, required
    Superpowers evidence, review, tests, and successful integration cannot
    produce task state `DONE`.
-7. Pi, Herdr, and worker termination tests recover without duplicate attempts,
-   duplicate commits, skipped dependencies, or lost event history.
-8. A worker can return a typed planning blocker; Pi preserves its evidence and
+7. The default workflow enforces a reviewer worker kind different from its
+   implementation worker kind, including after fallback routing; absence of an
+   eligible independent reviewer blocks the job.
+8. Pi, Herdr, and worker termination tests recover without duplicate attempts,
+   duplicate commits, skipped dependencies, or lost event history. Recovery
+   safely truncates only an incomplete trailing event and rejects interior
+   corruption or a stale fencing token.
+9. A worker can return a typed planning blocker; Pi preserves its evidence and
    escalates without modifying Spec Kit requirements or architecture.
-9. A failed worker can be retried or rerouted according to workflow policy,
+10. A failed worker can be retried or rerouted according to workflow policy,
    with every attempt and routing decision visible in the run history.
-10. A complete sample feature reaches final full-suite verification and creates
+11. With every client detached and the Pi model idle, the resident controller
+    continues a multi-stage run; after a forced Pi-process restart it reacquires
+    the run, reconciles intent/observation events, and resumes safely.
+12. A test workflow demonstrates keyed fan-out, `same-item` joins, an `all`
+    fan-in barrier, and task-state projection without hard-coded stage names.
+13. A complete sample feature reaches final full-suite verification and creates
     one pull request containing the integrated task commits.
 
 ## 22. External References
@@ -596,6 +888,7 @@ The first release is acceptable when all of the following are demonstrated:
 - [Pi extensions](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md)
 - [Spec Kit task generation](https://github.com/github/spec-kit/blob/main/templates/commands/tasks.md)
 - [Spec Kit task template](https://github.com/github/spec-kit/blob/main/templates/tasks-template.md)
+- [Spec Kit presets](https://github.com/github/spec-kit/blob/main/docs/reference/presets.md)
 - [Herdr agent automation](https://herdr.dev/docs/agent-automation/)
 - [Herdr socket API](https://herdr.dev/docs/socket-api/)
 - [Herdr integrations](https://herdr.dev/docs/integrations/)
