@@ -6,7 +6,7 @@
 
 **Architecture:** One TypeScript package contains deterministic contracts, a fenced event store, a serialized resident controller, generic recoverable effects, Herdr-backed worker execution, Spec Kit planning, Git integration, a Pi extension, and a trusted clean-machine bootstrap. This file is the execution index; the exact TDD steps live in five phase plans so a worker never receives an entire multi-subsystem build as one task.
 
-**Tech Stack:** Node.js 22+, TypeScript ESM, `@mariozechner/pi-coding-agent`, `@sinclair/typebox`, Ajv, YAML, Vitest, fast-check, Git CLI, GitHub CLI, Herdr CLI/socket API, and Spec Kit presets.
+**Tech Stack:** Node.js 22+, TypeScript ESM, `@earendil-works/pi-coding-agent@0.86.1`, `typebox@1.3.34`, Ajv with `ajv-formats`, YAML, Vitest, fast-check, Git CLI, GitHub CLI, Herdr CLI/socket API, and Spec Kit presets.
 
 **Spec:** `docs/superpowers/specs/2026-09-20-pi-multi-agent-orchestrator-design.md`
 
@@ -18,9 +18,9 @@
 - The controller is single-writer both across processes and inside one process: an exclusive lock-directory lease plus fencing prevents stale writes; a serialized command queue prevents concurrent derivation.
 - Every external action declares `idempotent`, `reconcilable`, or `non_retryable` recovery semantics and implements both `execute()` and `reconcile()`.
 - An unknown result for a `non_retryable` effect becomes `BLOCKED`; it is never replayed automatically.
-- The built-in trust baseline permits only exact official identities and integrity rules shipped in the signed release manifest. Machine and project policies may narrow it; a machine policy may add a separately approved source.
+- The built-in trust baseline permits only exact official identities and integrity rules embedded in the exact-version harness package. Trust in that baseline derives from the package identity and registry-verified tarball integrity, not from an undefined second signature scheme. Machine and project policies may narrow it; a machine policy may add a separately approved source.
 - Implementers and reviewers never share a working directory. Review uses a separate detached, read-only worktree pinned to the implementation commit.
-- Planning completion is bound to a Pi session/turn correlation ID plus pre/post artifact hashes; a generic `turn_end` cannot accept stale artifacts.
+- Planning completion is bound to a durable Pi custom-entry correlation marker, the correlated agent run's final `turnIndex`, `agent_settled`, and stage-specific pre/post artifact hashes; an intermediate or unrelated `turn_end` cannot accept stale artifacts.
 - Real compatibility checks occur at the milestone that introduces Herdr, Spec Kit, or Pi. Subscription-consuming worker checks remain gated.
 
 ## Global Constraints
@@ -37,12 +37,12 @@
 
 ## Review Focus
 
-- Crash after intent but before observation: reconcile the existing effect and never launch it twice. Owned by Tasks 11, 12, 15, and 33.
+- Crash after intent but before observation: enter the recovery path, reconcile the existing effect, and never launch it twice; a fresh effect never reconciles before its first execution. Owned by Tasks 11, 12, 15, and 33.
 - Timer, Herdr, Pi, and operator wakeups race: serialize them and append one intent/observation pair. Owned by Tasks 12 and 33.
 - Stale controller resumes after lease takeover: reject its fencing token. Owned by Tasks 7–9.
 - Dynamic graph has duplicate keys, invalid joins, cycles, unknown IDs, or unordered file overlap: reject before materialization. Owned by Tasks 5–6.
 - Reviewer mutates or observes a different commit: reject the review evidence. Owned by Tasks 17 and 23.
-- Planning turn ends without producing new correlated artifacts: keep the planning action pending or block it. Owned by Task 25.
+- A correlated planning run settles without producing its required artifact delta: block it; unrelated/intermediate turns keep it pending. Owned by Task 25.
 - Clean machine has no external policy: built-in baseline can install only exact release-manifest sources. Owned by Tasks 29–31.
 - Repository supplies lifecycle scripts or executable config: pre-approval bootstrap never runs it. Owned by Tasks 30–31.
 
@@ -84,7 +84,7 @@ Execute tasks strictly in numeric order. Every task ends in an independently rev
 22. Define the shared worker adapter contract.
 23. Implement Codex, Devin, and Claude adapters.
 24. Ship the Spec Kit graph preset and artifact validator.
-25. Correlate Pi planning turns with new artifact hashes.
+25. Correlate Pi planning runs with new artifact hashes.
 26. Load the extension through Pi's real resource loader.
 27. Generate a complete editable default workflow on `harness init`.
 28. Run resident scheduling and semantic operator commands in Pi.
@@ -104,11 +104,11 @@ Later tasks may consume it only after that owning task passes typecheck.
 | Owner | File | Required exports |
 |---|---|---|
 | Task 3 | `test/support/factories.ts` | `fixtureWorkflow`, `fixtureEnvironment`, `fixtureCompileInput`, `fixtureTaskGraph`, `fixtureGraphContext`, `diamondTaskGraph`, `fixtureEvent`, `completedResult` |
-| Tasks 7–11 | `test/support/state-fixtures.ts` | `createTempRepoWithWorktree`, `journalFixture`, `fixtureEventInput`, `persistedRunFixture`, `fixtureEventsThroughWorkerCompletion`, `fixtureSuccessfulTaskEvents`, `replay`, `fakeHandler`, `effectExecutor`, `fixtureIntent`, `actionContext`, `recoveryContext` |
+| Tasks 7–11 | `test/support/state-fixtures.ts` | `createTempRepoWithWorktree`, `journalFixture`, `fixtureEventInput`, `persistedRunFixture`, `fixtureEventsThroughWorkerCompletion`, `fixtureSuccessfulTaskEvents`, `fixtureEventsWithIntentObservationPauseRetryAndPlanning`, `replay`, `fakeHandler`, `effectExecutor`, `fixtureIntent`, `actionContext`, `recoveryContext` |
 | Tasks 12–15 | `test/support/controller-fixtures.ts` | `controllerQueueFixture`, `command`, `routeFixture`, `reviewFixture`, `assignmentFixture`, `reviewAssignment`, `createControllerFixture`, `successfulFakeResults` |
-| Tasks 16–19 | `test/support/git-fixtures.ts` | `worktreeFixture`, `taskAttempt`, `reviewAttempt`, `cleanReviewBinding`, `fakeProcess`, `fakeCommandLedger`, `commandIntent`, `approvalIntent`, `fakeApprovals`, `integratedGitFixture`, `gitIntegrateIntent`, `prIntent` |
+| Tasks 16–19 | `test/support/git-fixtures.ts` | `createTempRepoWithIntegratedDependencies`, `worktreeFixture`, `taskAttempt`, `reviewAttempt`, `cleanReviewBinding`, `expectedArtifactHashes`, `fakeProcess`, `fakeCommandLedger`, `commandIntent`, `approvalIntent`, `fakeApprovals`, `integratedGitFixture`, `gitIntegrateIntent`, `prIntent` |
 | Tasks 20–23 | `test/support/herdr-fixtures.ts` | `FakeHerdrTransport`, `herdrRuntimeFixture`, `agentSnapshot`, `attemptLabels`, `workerStartIntent`, `contractAssignment`, `preparedWorker`, `workerAdapters` |
-| Tasks 24–28 | `test/support/planning-fixtures.ts` | `resolvePresetFixture`, `expectedArtifactPaths`, `emptyArtifactBaseline`, `planningFixture`, `validArtifactSet`, `changedArtifactSet`, `copyProjectFixture`, `runHarness`, `initializedProject`, `piResidencyFixture` |
+| Tasks 24–28 | `test/support/planning-fixtures.ts` | `resolvePresetFixture`, `artifactPathsFixture`, `artifactContractFixture`, `emptyArtifactBaseline`, `planningFixture`, `validArtifactSet`, `changedArtifactSet`, `copyProjectFixture`, `runHarness`, `initializedProject`, `piResidencyFixture` |
 | Tasks 29–32 | `test/support/install-fixtures.ts` | `builtInBaseline`, `projectPolicy`, `denySource`, `allowEverythingProjectPolicy`, `lockedSource`, `lockWithUnknownSource`, `missingProbes`, `safeNpmPlan`, `approved`, `maliciousProjectFixture`, `operationsFixture` |
 | Task 33 | `test/support/black-box-harness.ts` | `createBlackBoxHarness`, `crashableHarness` |
 | Task 34 | `test/support/package-consumer.ts` | `packHarness`, `installPackedHarness` |
@@ -136,6 +136,7 @@ export interface EffectIntent<K extends string = string, I = unknown> {
   action: K;
   idempotencyKey: string;
   recovery: RecoveryClass;
+  laneKey: string;
   input: I;
 }
 
@@ -186,10 +187,10 @@ export interface ControllerCommand {
   payload: unknown;
 }
 
-export interface PlanningTurnReceipt {
-  sessionId: string;
-  turnId: string;
+export interface PlanningRunReceipt {
+  sessionFile: string;
   correlationId: string;
+  requestEntryId: string;
   startedAt: string;
   completedAt?: string;
 }
@@ -210,7 +211,7 @@ Each phase adds its script before using it:
 ```json
 {
   "scripts": {
-    "check:phase1": "npm run typecheck && vitest run test/unit/contracts test/unit/config test/unit/graph test/integration/package-smoke.test.ts",
+    "check:phase1": "npm run typecheck && npm run build && vitest run test/unit/contracts test/unit/config test/unit/graph test/integration/package-smoke.test.ts",
     "check:phase2": "npm run check:phase1 && vitest run test/unit/state test/unit/core test/integration/controller-race.test.ts test/e2e/fake-controller.test.ts",
     "check:phase3": "npm run check:phase2 && vitest run test/integration/git test/integration/herdr test/contract/workers.test.ts",
     "check:phase4": "npm run check:phase3 && vitest run test/integration/speckit test/integration/pi-loader.test.ts test/integration/init.test.ts test/integration/pi-residency.test.ts",

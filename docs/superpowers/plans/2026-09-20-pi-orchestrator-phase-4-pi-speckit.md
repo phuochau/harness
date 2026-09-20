@@ -4,9 +4,9 @@
 
 **Goal:** Connect deterministic orchestration to Spec Kit planning and a resident Pi extension, then generate a complete editable workflow that runs immediately.
 
-**Architecture:** Spec Kit remains the planning source of truth. Pi planning actions are accepted only when their session/turn correlation and post-turn artifact hashes match the expected artifact set. The extension is tested through Pi's real resource loader before resident scheduling and commands are layered on it.
+**Architecture:** Spec Kit remains the planning source of truth. Pi planning actions are accepted only when a durable custom-entry marker, the correlated agent run reaches `agent_settled`, its final `turnIndex` is recorded, and stage-specific artifact deltas agree. The extension is tested through Pi's real resource loader before resident scheduling and commands are layered on it.
 
-**Tech Stack:** Spec Kit presets, `@mariozechner/pi-coding-agent`, YAML, TypeScript, Vitest.
+**Tech Stack:** Spec Kit presets, `@earendil-works/pi-coding-agent@0.86.1`, YAML, TypeScript, Vitest.
 
 **Spec:** `docs/superpowers/specs/2026-09-20-pi-multi-agent-orchestrator-design.md`
 
@@ -21,8 +21,8 @@
 - Test: `test/integration/speckit/preset.test.ts`, `artifacts.test.ts`
 
 **Interfaces:**
-- Produces `validatePlanningArtifacts(root, expected, before): AcceptedArtifactSet`.
-- Required files are `spec.md`, `plan.md`, `tasks.md`, and `task-graph.json`; acceptance binds path, content hash, and containing commit.
+- Produces `planningArtifactContract(stage, paths)` and `validatePlanningArtifacts(root, contract, before): AcceptedStageArtifacts`.
+- `specify` requires a changed `spec.md`; `plan` requires existing spec plus changed `plan.md`; `tasks` requires the complete set and changed `tasks.md` plus `task-graph.json`.
 
 - [ ] **Step 1: Write preset composition and semantic-hash tests**
 
@@ -30,8 +30,8 @@
 it("wraps speckit.tasks and emits a hash-bound graph", async () => {
   const resolved = await resolvePresetFixture("harness-task-graph");
   expect(resolved.command).toContain("{CORE_TEMPLATE}");
-  const artifacts = await validatePlanningArtifacts(resolved.root, expectedArtifactPaths(), emptyArtifactBaseline());
-  expect(artifacts.graph.tasksSemanticHash).toBe(semanticHash(artifacts.tasks.text));
+  const artifacts = await validatePlanningArtifacts(resolved.root, planningArtifactContract("tasks", artifactPathsFixture()), emptyArtifactBaseline());
+  expect(artifacts.graph?.tasksSemanticHash).toBe(semanticHash(artifacts.files.tasks.text));
 });
 ```
 
@@ -45,18 +45,30 @@ Expected: FAIL.
 
 ```yaml
 # presets/harness-task-graph/preset.yml
-id: harness-task-graph
-version: 1
+schema_version: "1.0"
+preset:
+  id: harness-task-graph
+  name: Harness Task Graph
+  version: "1.0.0"
+  description: Add a deterministic harness task graph to speckit.tasks
+  author: pi-multi-agent-harness
+  license: MIT
+requires:
+  speckit_version: ">=0.1.0"
 provides:
-  commands:
-    - name: speckit.tasks
+  templates:
+    - type: command
+      name: speckit.tasks
       file: commands/speckit.tasks.md
+      description: Generate tasks.md and a hash-bound harness task graph
       strategy: wrap
+tags: [orchestration, task-graph]
 ```
 
 ```md
 ---
 description: Generate Spec Kit tasks and a deterministic harness task graph
+strategy: wrap
 ---
 {CORE_TEMPLATE}
 
@@ -66,13 +78,21 @@ normalized semantic task records. Do not invent dependencies during execution.
 ```
 
 ```ts
-export async function validatePlanningArtifacts(root: string, expected: ArtifactPaths, before: ArtifactBaseline): Promise<AcceptedArtifactSet> {
-  const loaded = await readExpectedFiles(root, expected);
+export function planningArtifactContract(stage: PlanningStage, paths: ArtifactPaths): PlanningArtifactContract {
+  if (stage === "specify") return { paths, required: ["spec"], mustChange: ["spec"], validateGraph: false };
+  if (stage === "plan") return { paths, required: ["spec", "plan"], mustChange: ["plan"], validateGraph: false };
+  return { paths, required: ["spec", "plan", "tasks", "graph"], mustChange: ["tasks", "graph"], validateGraph: true };
+}
+
+export async function validatePlanningArtifacts(root: string, contract: PlanningArtifactContract, before: ArtifactBaseline): Promise<AcceptedStageArtifacts> {
+  const loaded = await readRequiredFiles(root, contract.paths, contract.required);
   const hashes = hashArtifacts(loaded);
-  if (Object.entries(hashes).every(([path, hash]) => before.hashes[path] === hash)) throw new PlanningArtifactError("no correlated artifact changed");
-  const graph = validateTaskGraph(JSON.parse(loaded.graph.text));
-  if (graph.tasksSemanticHash !== semanticHash(loaded.tasks.text)) throw new PlanningArtifactError("tasks semantic hash mismatch");
-  return deepFreeze({ ...loaded, hashes, graph });
+  for (const name of contract.mustChange) {
+    if (before.hashes[loaded[name].path] === hashes[loaded[name].path]) throw new PlanningArtifactError(`${name} did not change in the correlated turn`);
+  }
+  const graph = contract.validateGraph ? validateTaskGraph(JSON.parse(loaded.graph.text)) : undefined;
+  if (graph && graph.tasksSemanticHash !== semanticHash(loaded.tasks.text)) throw new PlanningArtifactError("tasks semantic hash mismatch");
+  return deepFreeze({ files: loaded, hashes, graph });
 }
 ```
 
@@ -82,11 +102,13 @@ When `HARNESS_COMPAT_SPECKIT=1`, run `specify preset add --dev <absolute preset 
 
 ```ts
 it.runIf(process.env.HARNESS_COMPAT_SPECKIT === "1")("resolves through the installed Spec Kit CLI", async () => {
-  const project = await createDisposableSpecKitProject();
+  const project = await createDisposableSpecKitProject({ integration: "claude", aiSkills: false });
   await run("specify", ["preset", "add", "--dev", resolve("presets/harness-task-graph")], { cwd: project });
   const resolved = await run("specify", ["preset", "resolve", "speckit.tasks"], { cwd: project });
-  expect(resolved.stdout).toContain("task-graph.json");
-  expect(resolved.stdout).not.toContain("{CORE_TEMPLATE}");
+  expect(resolved.stdout).toContain("harness-task-graph");
+  const materialized = await readFile(join(project, ".claude/commands/speckit.tasks.md"), "utf8");
+  expect(materialized).toContain("task-graph.json");
+  expect(materialized).not.toContain("{CORE_TEMPLATE}");
 });
 ```
 
@@ -101,7 +123,7 @@ git add presets src/speckit test/integration/speckit
 git commit -m "feat: add Spec Kit task graph preset"
 ```
 
-## Task 25: Correlate Pi Planning Turns with New Artifact Hashes
+## Task 25: Correlate Pi Planning Runs with New Artifact Hashes
 
 **Files:**
 - Create: `src/ports/planning.ts`, `src/pi/planning-agent.ts`, `src/speckit/planning-action.ts`
@@ -109,8 +131,8 @@ git commit -m "feat: add Spec Kit task graph preset"
 - Test: `test/integration/speckit/planning-action.test.ts`
 
 **Interfaces:**
-- Produces `PlanningAgent.enqueue(request): Promise<PlanningTurnReceipt>` and `observe(receipt): Promise<PlanningObservation>`.
-- Observation is `pending`, `completed` with accepted artifacts, or `blocked`; a bare Pi `turn_end` is insufficient.
+- Produces `PlanningAgent.enqueue(request, context): Promise<PlanningRunReceipt>` and `observe(receipt): Promise<PlanningObservation>`.
+- Observation is `pending`, `completed` with accepted artifacts, or `blocked`; a bare Pi `turn_end` is insufficient because one agent run may contain multiple tool turns.
 
 - [ ] **Step 1: Write stale/unrelated-turn tests**
 
@@ -118,15 +140,24 @@ git commit -m "feat: add Spec Kit task graph preset"
 it("does not accept old artifacts after an unrelated turn ends", async () => {
   const fixture = await planningFixture({ existingArtifacts: validArtifactSet() });
   const receipt = await fixture.action.execute(fixture.request());
-  fixture.pi.endTurn({ sessionId: receipt.sessionId, turnId: "other-turn" });
+  fixture.pi.emitTurn({ turnIndex: 7, prompt: "ordinary user turn", correlated: false });
   await expect(fixture.action.observe(receipt)).resolves.toEqual({ status: "pending" });
 });
 
 it("accepts only new hashes from the correlated turn", async () => {
   const fixture = await planningFixture({ existingArtifacts: validArtifactSet() });
   const receipt = await fixture.action.execute(fixture.request());
-  await fixture.writeCorrelatedArtifacts(receipt, changedArtifactSet());
+  await fixture.pi.completeCorrelatedRun(receipt, changedArtifactSet());
   await expect(fixture.action.observe(receipt)).resolves.toMatchObject({ status: "completed", correlationId: receipt.correlationId });
+});
+
+it("seals the final tasks artifact set on the run branch", async () => {
+  const fixture = await planningFixture({ stage: "tasks" });
+  const receipt = await fixture.action.execute(fixture.request());
+  await fixture.pi.completeCorrelatedRun(receipt, changedArtifactSet());
+  const observation = await fixture.action.observe(receipt);
+  expect(observation).toMatchObject({ status: "completed", artifacts: { commit: expect.any(String) } });
+  expect(fixture.git.calls("sealPlanningArtifacts")).toHaveLength(1);
 });
 ```
 
@@ -140,9 +171,10 @@ Expected: FAIL.
 
 ```ts
 export interface PlanningRequest {
+  stage: "specify" | "plan" | "tasks";
   command: "/speckit.specify" | "/speckit.plan" | "/speckit.tasks";
   correlationId: string;
-  expectedPaths: readonly string[];
+  artifactPaths: ArtifactPaths;
   baseline: ArtifactBaseline;
 }
 
@@ -151,19 +183,38 @@ export type PlanningObservation =
   | { status: "completed"; correlationId: string; artifacts: AcceptedArtifactSet }
   | { status: "blocked"; reason: string; evidence: string[] };
 
-async observe(receipt: PlanningTurnReceipt): Promise<PlanningObservation> {
-  const turn = await this.pi.findTurn(receipt.sessionId, receipt.turnId);
-  if (!turn?.ended || turn.metadata.correlationId !== receipt.correlationId) return { status: "pending" };
+async observe(receipt: PlanningRunReceipt): Promise<PlanningObservation> {
+  const markers = await this.pi.findRunMarkers(receipt.sessionFile, receipt.requestEntryId, receipt.correlationId);
+  if (!markers.started || !markers.settled || markers.settled.finalTurnIndex < markers.started.firstTurnIndex) return { status: "pending" };
+  const pending = await this.pendingPlanning.get(receipt.correlationId);
+  if (!pending) return { status: "blocked", reason: "missing durable planning request", evidence: [receipt.correlationId] };
   try {
-    const artifacts = await validatePlanningArtifacts(this.root, turn.metadata.expectedPaths, turn.metadata.baseline);
+    const stageArtifacts = await validatePlanningArtifacts(this.root, planningArtifactContract(pending.stage, pending.artifactPaths), pending.baseline);
+    const artifacts = pending.stage === "tasks"
+      ? await this.worktrees.sealPlanningArtifacts(this.planningWorktree, stageArtifacts.hashes)
+      : stageArtifacts;
     return { status: "completed", correlationId: receipt.correlationId, artifacts };
   } catch (error) {
-    return { status: "blocked", reason: toMessage(error), evidence: [receipt.sessionId, receipt.turnId] };
+    return { status: "blocked", reason: toMessage(error), evidence: [receipt.sessionFile, receipt.requestEntryId, String(markers.settled.finalTurnIndex)] };
   }
 }
 ```
 
-Existing-approved mode is separate: it skips Pi, validates paths/hashes, and binds the containing commit in one explicit action.
+`PlanningAgent.enqueue` requires an idle, persistent session and one pending
+planning action at a time. It calls
+`pi.appendEntry("harness:planning-request", request)`, captures the resulting
+`ctx.sessionManager.getLeafId()` as `requestEntryId`, and then calls
+`pi.sendUserMessage()` with `expandPromptTemplates: true` and an embedded
+correlation marker. `before_agent_start` recognizes that marker; the first
+`turn_start` appends a durable `harness:planning-start` entry. Matching
+`turn_end` events update the last completed index, and only `agent_settled`
+appends `harness:planning-complete` with that final index. On restart, observation scans
+`ctx.sessionManager.getEntries()` after `requestEntryId`. A changed file without
+the durable completion entry remains pending and is never accepted.
+
+Existing-approved mode is separate: it skips Pi, validates the complete paths
+and hashes, requires a clean containing commit, and binds that commit in one
+explicit action.
 
 - [ ] **Step 4: Run correlation tests**
 
@@ -192,14 +243,14 @@ git commit -m "feat: correlate Pi planning artifacts"
 - [ ] **Step 1: Write real loader compatibility test**
 
 ```ts
-import { DefaultResourceLoader } from "@mariozechner/pi-coding-agent";
+import { DefaultResourceLoader } from "@earendil-works/pi-coding-agent";
 
 it("loads the built extension through Pi's resource loader", async () => {
   const loader = new DefaultResourceLoader({ additionalExtensionPaths: [resolve("dist/pi/extension.js")] });
   await loader.reload();
-  const diagnostics = loader.getDiagnostics();
-  expect(diagnostics.errors).toEqual([]);
-  expect(loader.getExtensions().length).toBeGreaterThan(0);
+  const result = loader.getExtensions();
+  expect(result.errors).toEqual([]);
+  expect(result.extensions.length).toBeGreaterThan(0);
 });
 ```
 
@@ -326,7 +377,7 @@ stages:
     uses: command.run
     needs: [{ stage: review, scope: same-item }]
     foreach: { source: stages.tasks.outputs.graph, key: task.id }
-    with: { command: "${commands.task_verify}" }
+    with: { argv: "${commands.task_verify}" }
   - id: integrate
     uses: git.integrate
     needs: [{ stage: verify, scope: same-item }]
@@ -334,7 +385,7 @@ stages:
   - id: final_verify
     uses: command.run
     needs: [{ stage: integrate, scope: all }]
-    with: { command: "${commands.full_verify}" }
+    with: { argv: "${commands.full_verify}" }
   - id: final_pr
     uses: github.pull-request
     needs: [{ stage: final_verify, scope: all }]
@@ -378,7 +429,7 @@ git commit -m "feat: initialize runnable harness workflows"
 - Test: `test/integration/pi-residency.test.ts`, `test/unit/pi-commands.test.ts`
 
 **Interfaces:**
-- Produces `/harness-run`, `status`, `graph`, `task`, `logs`, `retry`, `reroute`, `cancel`, `pause`, `resume`, and `doctor` commands.
+- Produces `/harness-run`, `/harness-status`, `/harness-graph`, `/harness-task`, `/harness-logs`, `/harness-retry`, `/harness-reroute`, `/harness-cancel`, `/harness-pause`, `/harness-resume`, and `/harness-doctor` commands.
 - One controller exists per canonical run and every callback enqueues a `ControllerCommand`.
 
 - [ ] **Step 1: Write idle-residency and command-queue tests**
@@ -422,11 +473,17 @@ export class ControllerRegistry {
 }
 ```
 
-Pi events, timer callbacks, Herdr subscriptions, and commands only create queue commands. `turn_end` wakes a receipt with matching planning metadata; it never advances arbitrary planning. Status commands read snapshots without model calls. Mutating commands append operator intents.
+Pi events, timer callbacks, Herdr subscriptions, and commands only create queue
+commands. The planning event state machine records the correlation marker at
+`before_agent_start`, tracks the correlated run's `turnIndex` values, and
+appends a durable completion entry only at `agent_settled`; intermediate or
+arbitrary turns cannot advance
+planning. Status commands read snapshots without model calls. Mutating commands
+append operator intents.
 
 - [ ] **Step 4: Enforce planning profile and run approval boundaries**
 
-Resolve `chatgpt-planning` from machine-local Pi settings, verify authenticated ChatGPT subscription capability, and restore the prior interactive model after the correlated planning turn. `/harness-run` displays workflow hash, commands, workers, credential profiles, permissions, branches, push, and PR effects before approval. Do not serialize credentials.
+Resolve `chatgpt-planning` from machine-local Pi settings, verify authenticated ChatGPT subscription capability, and restore the prior interactive model after the correlated planning run settles. `/harness-run` displays workflow hash, commands, workers, credential profiles, permissions, branches, push, and PR effects before approval. Do not serialize credentials.
 
 ```ts
 export async function withPlanningProfile<T>(pi: PiModelPort, action: () => Promise<T>): Promise<T> {

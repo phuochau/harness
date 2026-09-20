@@ -165,7 +165,7 @@ git commit -m "feat: append fenced hash-chained events"
 - Test: `test/unit/state/recovery.test.ts`
 
 **Interfaces:**
-- Produces `writeSnapshot(paths, state, boundary)` and `recoverJournal(paths): RecoveryReport`.
+- Produces `writeSnapshot(paths, state, boundary, lease)` and `recoverJournal(paths, lease): RecoveryReport`.
 - Only an incomplete final JSON line is repairable automatically.
 
 - [ ] **Step 1: Write snapshot and corruption tests**
@@ -173,14 +173,23 @@ git commit -m "feat: append fenced hash-chained events"
 ```ts
 it("restores a snapshot boundary and truncates only an incomplete tail", async () => {
   const fixture = await persistedRunFixture({ events: 4, snapshotAt: 2, tornTail: true });
-  const report = await recoverJournal(fixture.paths);
+  const report = await recoverJournal(fixture.paths, fixture.lease);
   expect(report.repairedTail).toBe(true);
   expect(report.events.map((event) => event.sequence)).toEqual([1, 2, 3, 4]);
 });
 
 it("refuses interior corruption", async () => {
   const fixture = await persistedRunFixture({ events: 4, corruptSequence: 2 });
-  await expect(recoverJournal(fixture.paths)).rejects.toThrow(/interior corruption/);
+  await expect(recoverJournal(fixture.paths, fixture.lease)).rejects.toThrow(/interior corruption/);
+});
+
+it("rejects snapshot and repair writes after lease takeover", async () => {
+  const fixture = await persistedRunFixture({ tornTail: true });
+  const stale = fixture.lease;
+  await stale.release();
+  await RunLease.acquire(fixture.paths, "new-owner");
+  await expect(writeSnapshot(fixture.paths, fixture.state, fixture.boundary, stale)).rejects.toThrow(/stale fencing token/);
+  await expect(recoverJournal(fixture.paths, stale)).rejects.toThrow(/stale fencing token/);
 });
 ```
 
@@ -193,21 +202,26 @@ Expected: FAIL.
 - [ ] **Step 3: Implement atomic snapshots and explicit tail repair**
 
 ```ts
-export async function writeSnapshot(paths: RunPaths, state: RunState, boundary: EventBoundary): Promise<void> {
+export async function writeSnapshot(paths: RunPaths, state: RunState, boundary: EventBoundary, lease: LeaseHandle): Promise<void> {
   const temp = `${paths.snapshot}.${process.pid}.tmp`;
+  await lease.assertCurrent();
   await writeFile(temp, JSON.stringify({ schemaVersion: 1, boundary, state }), { mode: 0o600 });
   await fsyncFile(temp);
+  await lease.assertCurrent();
   await rename(temp, paths.snapshot);
   await fsyncDirectory(dirname(paths.snapshot));
 }
 
-export async function recoverJournal(paths: RunPaths): Promise<RecoveryReport> {
+export async function recoverJournal(paths: RunPaths, lease: LeaseHandle): Promise<RecoveryReport> {
   const bytes = await readFile(paths.events);
   const parsed = parseCompleteJsonLines(bytes);
   verifyHashChain(parsed.events);
   if (parsed.incompleteTail) {
+    await lease.assertCurrent();
     await copyFile(paths.events, `${paths.events}.diagnostic-${Date.now()}`);
+    await lease.assertCurrent();
     await truncate(paths.events, parsed.completeByteLength);
+    await fsyncFile(paths.events);
   }
   return { events: parsed.events, repairedTail: Boolean(parsed.incompleteTail) };
 }
@@ -249,6 +263,13 @@ it("replay is deterministic", () => {
   const events = fixtureSuccessfulTaskEvents();
   expect(replay(events)).toEqual(replay(structuredClone(events)));
 });
+
+it("replays controller, effect, operator, and planning events", () => {
+  const state = replay(fixtureEventsWithIntentObservationPauseRetryAndPlanning());
+  expect(state.outstandingEffects).toEqual({});
+  expect(state.operator.paused).toBe(false);
+  expect(state.planning.status).toBe("completed");
+});
 ```
 
 - [ ] **Step 2: Run and observe missing reducer**
@@ -266,14 +287,28 @@ export function reduceEvent(state: RunState, event: HarnessEvent): RunState {
   switch (event.eventType) {
     case "job.ready": transitionJob(next, event.entityId, "PENDING", "READY"); break;
     case "attempt.started": startAttempt(next, event); break;
+    case "worker.routed": recordRouting(next, event); break;
     case "worker.result_observed": observeWorkerResult(next, event); break;
     case "review.approved": recordReview(next, event); break;
+    case "review.changes_requested": requestRemediation(next, event); break;
     case "verification.passed": recordVerification(next, event); break;
+    case "verification.failed": recordVerificationFailure(next, event); break;
     case "integration.observed": recordIntegration(next, event); break;
+    case "integration.conflicted": recordIntegrationConflict(next, event); break;
+    case "effect.intent": reserveEffect(next, event); break;
+    case "effect.observed": observeEffect(next, event); break;
+    case "effect.failed": failEffect(next, event); break;
+    case "operator.intent": applyOperatorIntent(next, event); break;
+    case "planning.queued": queuePlanning(next, event); break;
+    case "planning.agent_settled": settlePlanningRun(next, event); break;
+    case "planning.completed": completePlanning(next, event); break;
+    case "planning.blocked": blockPlanning(next, event); break;
+    case "run.created": initializeRun(next, event); break;
     case "job.done": assertDoneEvidence(next, event.entityId); transitionJob(next, event.entityId, "VERIFYING", "DONE"); break;
+    case "job.invalidated": invalidateJobAndDependents(next, event); break;
     case "job.blocked": blockJob(next, event); break;
     case "job.failed": failJob(next, event); break;
-    default: assertNeverEvent(event);
+    default: assertNever(event);
   }
   next.lastSequence = event.sequence;
   next.lastEventHash = event.eventHash;
@@ -308,21 +343,28 @@ git commit -m "feat: reduce run events deterministically"
 - Test: `test/unit/core/effects.test.ts`
 
 **Interfaces:**
-- Produces the parent plan's `ActionHandler`, `EffectIntent`, `ReconcileResult`, `ActionRegistry`, and `EffectExecutor.run(intent)`.
+- Produces the parent plan's `ActionHandler`, `EffectIntent`, `ReconcileResult`, `ActionRegistry`, `EffectExecutor.runFresh(intent)`, and `EffectExecutor.recover(intent)`.
 
 - [ ] **Step 1: Write recovery-class tests**
 
 ```ts
-it("reconciles before executing an intent that lacks an observation", async () => {
+it("executes a fresh non-retryable intent without reconciling", async () => {
+  const handler = fakeHandler({ recovery: () => "non_retryable", reconcile: { status: "indeterminate", evidence: ["not started"] } });
+  await effectExecutor(handler).runFresh(fixtureIntent({ recovery: "non_retryable" }));
+  expect(handler.reconcile).not.toHaveBeenCalled();
+  expect(handler.execute).toHaveBeenCalledOnce();
+});
+
+it("reconciles during recovery before considering execution", async () => {
   const handler = fakeHandler({ recovery: () => "reconcilable", reconcile: { status: "observed", output: { agentId: "a1" } } });
-  const result = await effectExecutor(handler).run(fixtureIntent());
+  const result = await effectExecutor(handler).recover(fixtureIntent());
   expect(result).toEqual({ agentId: "a1" });
   expect(handler.execute).not.toHaveBeenCalled();
 });
 
 it("blocks an indeterminate non-retryable effect", async () => {
   const handler = fakeHandler({ recovery: () => "non_retryable", reconcile: { status: "indeterminate", evidence: ["exit status lost"] } });
-  await expect(effectExecutor(handler).run(fixtureIntent())).rejects.toMatchObject({ code: "INDETERMINATE_EFFECT" });
+  await expect(effectExecutor(handler).recover(fixtureIntent({ recovery: "non_retryable" }))).rejects.toMatchObject({ code: "INDETERMINATE_EFFECT" });
 });
 ```
 
@@ -349,21 +391,32 @@ export class ActionRegistry {
 }
 
 export class EffectExecutor {
-  async run(intent: EffectIntent): Promise<unknown> {
+  async runFresh(intent: EffectIntent): Promise<unknown> {
     const handler = this.registry.get(intent.action);
-    const prior = await handler.reconcile(this.context, intent);
     const recovery = handler.recovery(intent.input);
     if (recovery !== intent.recovery) throw new Error(`recovery mismatch for ${intent.action}`);
+    return handler.execute(this.contextFor(false), intent);
+  }
+
+  async recover(intent: EffectIntent): Promise<unknown> {
+    const handler = this.registry.get(intent.action);
+    const recovery = handler.recovery(intent.input);
+    if (recovery !== intent.recovery) throw new Error(`recovery mismatch for ${intent.action}`);
+    const prior = await handler.reconcile(this.contextFor(true), intent);
     if (prior.status === "observed") return prior.output;
-    if (prior.status === "indeterminate" || (recovery === "non_retryable" && this.context.isRecovery)) {
+    if (prior.status === "indeterminate" || recovery === "non_retryable") {
       throw new IndeterminateEffect(intent, prior.status === "indeterminate" ? prior.evidence : []);
     }
-    return handler.execute(this.context, intent);
+    return handler.execute(this.contextFor(true), intent);
   }
 }
 ```
 
-Reject a mismatch between `intent.recovery` and the registered handler. An idempotent handler may execute after `not_found`; a reconcilable handler may execute only after a definitive `not_found`.
+`contextFor(false)` and `contextFor(true)` create immutable contexts whose
+`isRecovery` flag matches the call path. Reject a mismatch between
+`intent.recovery` and the registered handler. An idempotent handler may execute
+after `not_found`; a reconcilable handler may execute only after a definitive
+`not_found`.
 
 - [ ] **Step 4: Run effect tests**
 
@@ -381,12 +434,12 @@ git commit -m "feat: define recoverable effect protocol"
 ## Task 12: Serialize Every Controller Command Source
 
 **Files:**
-- Create: `src/controller/command-queue.ts`, `command-source.ts`
+- Create: `src/controller/command-queue.ts`, `command-source.ts`, `effect-lanes.ts`
 - Create: `test/support/controller-fixtures.ts`
 - Test: `test/integration/controller-race.test.ts`
 
 **Interfaces:**
-- Produces `ControllerCommandQueue.enqueue(command): Promise<CommandResult>`.
+- Produces `ControllerCommandQueue.enqueue(command): Promise<CommandResult>` and `reserveEffectLanes(state, candidates): readonly EffectIntent[]`.
 - Queue processing is FIFO and at most one reducer/decision transaction runs at a time.
 
 - [ ] **Step 1: Write the timer/Herdr/operator race test**
@@ -402,6 +455,12 @@ it("serializes concurrent wakeups into one logical launch", async () => {
   expect(fixture.maxConcurrentTransactions).toBe(1);
   expect(fixture.events.filter((event) => event.eventType === "effect.intent" && event.entityId === "implement:T001")).toHaveLength(1);
   expect(results).toHaveLength(3);
+});
+
+it("reserves at most one run-mutating effect until its observation", async () => {
+  const fixture = await controllerQueueFixture({ readyIntegrations: ["T001", "T002"] });
+  await fixture.queue.enqueue(command("timer", "tick:integration"));
+  expect(fixture.events.filter((event) => event.eventType === "effect.intent" && event.payload.laneKey === "run-mutation:F023")).toHaveLength(1);
 });
 ```
 
@@ -431,6 +490,13 @@ export class ControllerCommandQueue {
 
 `processor.process` reloads the latest state after acquiring the lease, deduplicates the command idempotency key, derives decisions once, appends events, then writes the snapshot. It never holds a transaction open while an external effect runs; effect completion re-enters the queue as a new command.
 
+`reserveEffectLanes` is part of the pure decision transaction. Outstanding
+`effect.intent` events occupy their durable `laneKey` until a matching
+`effect.observed` or terminal `effect.failed` event is reduced. Git integration,
+push, and PR creation use `run-mutation:<runId>`; planning uses
+`planning:<runId>`; worker lanes remain per job so independent tasks can run in
+parallel. Candidate selection is stable by materialized job order.
+
 - [ ] **Step 4: Repeat the race 100 times**
 
 ```ts
@@ -448,7 +514,7 @@ Expected: PASS with max concurrency 1 and one launch intent per attempt.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/controller/command-queue.ts src/controller/command-source.ts test/integration/controller-race.test.ts
+git add src/controller/command-queue.ts src/controller/command-source.ts src/controller/effect-lanes.ts test/integration/controller-race.test.ts
 git commit -m "feat: serialize controller wakeups"
 ```
 
@@ -607,14 +673,16 @@ export class HarnessController {
     const state = await this.repository.load();
     const decisions = deriveDecisions(applyCommand(state, command), this.graph, this.policy);
     for (const decision of decisions.events) await this.repository.append(decision, this.lease);
-    for (const intent of decisions.effects) void this.dispatch(intent);
-    await this.repository.snapshot();
+    const reserved = reserveEffectLanes(this.repository.state, decisions.effects);
+    for (const intent of reserved) await this.repository.append(effectIntentEvent(intent), this.lease);
+    await this.repository.snapshot(this.lease);
+    for (const intent of reserved) void this.dispatchFresh(intent);
     return { accepted: true, stateRevision: this.repository.lastSequence };
   }
 
-  private async dispatch(intent: EffectIntent): Promise<void> {
+  private async dispatchFresh(intent: EffectIntent): Promise<void> {
     try {
-      const output = await this.effects.run(intent);
+      const output = await this.effects.runFresh(intent);
       await this.enqueue(effectObservedCommand(intent, output));
     } catch (error) {
       await this.enqueue(effectFailedCommand(intent, error));
@@ -623,7 +691,12 @@ export class HarnessController {
 }
 ```
 
-`deriveDecisions` marks jobs ready only after every dependency is done, observes capacity, creates immutable attempts, chooses workers/reviewers, and never marks `DONE` directly from a worker claim.
+`deriveDecisions` returns ordinary lifecycle events separately from effect
+candidates; it does not emit `effect.intent` itself. `reserveEffectLanes`
+selects candidates and the controller appends each corresponding intent exactly
+once before dispatch. `deriveDecisions` marks jobs ready only after every
+dependency is done, observes capacity, creates immutable attempts, chooses
+workers/reviewers, and never marks `DONE` directly from a worker claim.
 
 - [ ] **Step 4: Add crash-before/after-observation cases and run phase gate**
 

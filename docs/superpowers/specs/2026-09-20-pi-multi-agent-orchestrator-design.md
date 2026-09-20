@@ -383,12 +383,18 @@ change `- [ ]` to `- [x]` after a task reaches `DONE` without invalidating the
 graph, while any change to an ID, description, phase, label, or file path does
 invalidate it.
 
-Immediately after the task-planning action returns, the controller directly
-invokes the deterministic graph validator. The two outputs are accepted as one
-artifact set only if their schemas, task identities, acceptance references,
-and semantic hash agree. Spec Kit extension hooks may provide convenience
-automation, but agent-mediated hooks are never a correctness boundary; the
-controller-owned validation call is mandatory even when a hook ran.
+Each planning stage has its own artifact contract: specification requires a new
+`spec.md`, planning requires a new `plan.md`, and task planning requires new
+`tasks.md` plus `task-graph.json` while preserving the earlier artifacts.
+Completion is correlated to a durable Pi session entry and the settled agent
+run that handled that request; unrelated or intermediate turns cannot make old
+files acceptable. Immediately after the correlated task-planning run settles,
+the controller directly invokes the deterministic graph validator. The two
+task outputs are accepted as one artifact set only if their schemas, task
+identities, acceptance references, and semantic hash agree. Spec Kit extension
+hooks may provide convenience automation, but agent-mediated hooks are never a
+correctness boundary; the controller-owned validation call is mandatory even
+when a hook ran.
 
 Pi refuses execution when the graph has cycles, unknown task IDs, missing
 dependencies, invalid acceptance references, a stale semantic hash, or file
@@ -427,13 +433,18 @@ Every JSONL event contains a monotonic sequence number, timestamp, run and
 entity IDs, idempotency key, fencing token, payload, `prevHash`, and
 `eventHash`. An append is flushed and `fsync`ed before the controller acts on
 it. External side effects use an intent/observation protocol: Pi first records
-an action intent with a stable idempotency key, performs or reconciles the
-operation, then records the observed result. Every action declares one recovery
+an action intent with a stable idempotency key, then records the observed
+result. A fresh intent executes directly; only recovery of an intent without an
+observation calls reconciliation first. Every action declares one recovery
 class: `idempotent`, `reconcilable`, or `non_retryable`. Adapters must use the
 key when the underlying system supports idempotency; reconcilable actions query
 native session, branch, commit, worktree, push, or pull-request identity before
 retrying. A `non_retryable` action whose result is unknown after a crash becomes
 `BLOCKED` with an indeterminate-effect diagnostic instead of running twice.
+Outstanding intents also reserve durable effect lanes. Run-branch mutations
+share one lane until observation, while independent worker lanes remain
+parallel, so serializing controller decisions cannot accidentally launch two
+concurrent integrations.
 
 `state.json` is written to a sibling temporary file, flushed, and atomically
 renamed. It records the last applied sequence and event hash. On recovery, an
@@ -717,11 +728,14 @@ command rather than executing repository-provided code.
 Each dependency has a typed installer recipe: exact-version `npm`, allowlisted
 package-manager formula, signed release artifact with digest, or `manual`.
 Bootstrap ships an immutable built-in trust baseline containing only exact
-official source identities and integrity-verification rules from the signed
-harness release manifest. A machine policy may narrow that baseline or add a
-separately approved source, and project policy may only narrow the effective
-result. Absence of an external machine policy therefore remains useful on a
-clean machine without granting arbitrary repository-controlled installation.
+official source identities and integrity-verification rules embedded in the
+exact-version harness package. Trust in that baseline derives from the trusted
+package identity and registry-verified tarball integrity; the MVP does not
+claim a separate manifest-signature trust root. A machine policy may narrow
+that baseline or add a separately approved source, and project policy may only
+narrow the effective result. Absence of an external machine policy therefore
+remains useful on a clean machine without granting arbitrary
+repository-controlled installation.
 Bootstrap may automatically execute only recipes permitted by that effective
 policy whose source and integrity match the lock. A manual or unverifiable
 dependency blocks completion with exact install instructions and is re-probed
@@ -910,8 +924,8 @@ The first release is acceptable when all of the following are demonstrated:
 
 ## 22. External References
 
-- [Pi packages](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/packages.md)
-- [Pi extensions](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/extensions.md)
+- [Pi packages](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/packages.md)
+- [Pi extensions](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md)
 - [Spec Kit task generation](https://github.com/github/spec-kit/blob/main/templates/commands/tasks.md)
 - [Spec Kit task template](https://github.com/github/spec-kit/blob/main/templates/tasks-template.md)
 - [Spec Kit presets](https://github.com/github/spec-kit/blob/main/docs/reference/presets.md)

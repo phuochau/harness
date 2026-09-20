@@ -4,7 +4,7 @@
 
 **Goal:** Provision a clean machine from declarative locked inputs, operate and recover runs safely, then prove and package the release.
 
-**Architecture:** A trusted external CLI reads only declarative harness files and Git metadata before approval. Effective trust is the intersection of the immutable signed-release baseline, optional machine policy, project policy, and exact lock. Operational recovery reuses the same fenced event/effect protocol as the resident controller.
+**Architecture:** A trusted exact-version external CLI reads only declarative harness files and Git metadata before approval. Effective trust is the intersection of its immutable embedded baseline, optional machine policy, project policy, and exact lock. The MVP trust root is the official package identity plus registry-verified tarball integrity; it does not claim an additional manifest-signature scheme. Operational recovery reuses the same fenced event/effect protocol as the resident controller.
 
 **Tech Stack:** Node.js 22+, npm/package-manager probes, Git/GitHub/Herdr CLIs, TypeScript, Vitest, GitHub Actions.
 
@@ -59,7 +59,14 @@ export function effectivePolicy(baseline: TrustPolicy, machine: TrustPolicy | un
 }
 ```
 
-`release-manifest.json` contains exact identities and integrity-verification rules for the harness, `@mariozechner/pi-coding-agent`, Spec Kit, Superpowers, Herdr, four Herdr integrations, Codex CLI, Devin CLI, Claude Code, Git, and GitHub CLI. Generated releases replace versions/digests atomically; project files cannot alter the built-in manifest.
+`release-manifest.json` contains exact identities and integrity-verification
+rules for the harness, `@earendil-works/pi-coding-agent`, Spec Kit,
+Superpowers, Herdr, four Herdr integrations, Codex CLI, Devin CLI, Claude Code,
+Git, and GitHub CLI. The build freezes this manifest into the exact-version
+package; the release job records the npm tarball `dist.integrity` alongside its
+provenance evidence. Generated releases replace versions/digests atomically;
+project files cannot alter the built-in manifest. A future detached signature
+requires a separate design and is not implied by this MVP.
 
 - [ ] **Step 4: Implement shell-free fresh probes**
 
@@ -293,11 +300,23 @@ export async function start(options: StartOptions, deps: OperationDependencies):
 ```ts
 export async function recoverRun(run: RunRef, deps: RecoveryDependencies): Promise<RecoverySummary> {
   const lease = await RunLease.acquire(run.paths, deps.ownerId);
-  const journal = await recoverJournal(run.paths);
-  const state = replay(journal.events);
-  for (const intent of unobservedIntents(state)) await deps.effects.reconcileOnly(intent, lease);
-  await deps.repository.snapshot();
-  return summarizeRecovery(state, { schedulingEnabled: false });
+  try {
+    const journal = await recoverJournal(run.paths, lease);
+    let state = replay(journal.events);
+    for (const intent of unobservedIntents(state)) {
+      try {
+        const output = await deps.effects.recover(intent);
+        await deps.repository.append(effectObservedEvent(intent, output), lease);
+      } catch (error) {
+        await deps.repository.append(effectRecoveryFailedEvent(intent, error), lease);
+      }
+    }
+    state = await deps.repository.reload();
+    await deps.repository.snapshot(lease);
+    return summarizeRecovery(state, { schedulingEnabled: false });
+  } finally {
+    await lease.release();
+  }
 }
 ```
 
@@ -391,8 +410,8 @@ git commit -m "test: prove durable black-box orchestration"
 ## Task 34: Package, Document, and Verify the Release
 
 **Files:**
-- Create: `.github/workflows/ci.yml`, `README.md`, `SECURITY.md`
-- Create: `docs/installation.md`, `docs/workflow-dsl.md`, `docs/recovery.md`
+- Create: `.github/workflows/ci.yml`, `.github/workflows/release.yml`, `README.md`, `SECURITY.md`
+- Create: `docs/installation.md`, `docs/workflow-dsl.md`, `docs/recovery.md`, `docs/releasing.md`
 - Create: `test/e2e/real-smoke.test.ts`, `test/integration/packed-package.test.ts`
 - Modify: `package.json`, `package-lock.json`
 - Create: `test/support/package-consumer.ts`
@@ -405,7 +424,7 @@ git commit -m "test: prove durable black-box orchestration"
 ```ts
 it("installs the tarball and loads both public entrypoints", async () => {
   const packed = await packHarness();
-  const consumer = await installPackedHarness(packed);
+  const consumer = await installPackedHarness(packed, { peers: releaseManifest().piPeers });
   await expect(consumer.exec("harness", ["--help"])).resolves.toMatchObject({ exitCode: 0 });
   await expect(consumer.loadWithPiResourceLoader()).resolves.toMatchObject({ errors: [] });
   expect(packed.files).not.toEqual(expect.arrayContaining([expect.stringMatching(/test|\.harness-output|events\.jsonl/)]));
@@ -417,6 +436,10 @@ it("installs the tarball and loads both public entrypoints", async () => {
 Run: `npm run build && npm test -- test/integration/packed-package.test.ts`
 
 Expected: FAIL until package files, executable mode, and runtime assets are correct.
+
+`installPackedHarness` installs the exact Pi and TypeBox peer versions recorded
+in the release manifest before installing the tarball; it must not let npm pick
+an unrecorded moving peer version.
 
 - [ ] **Step 3: Add CI lanes and release scripts**
 
@@ -431,7 +454,18 @@ Expected: FAIL until package files, executable mode, and runtime assets are corr
 }
 ```
 
-CI runs Node 22 unit/integration/fake-E2E, build, pack, and packed consumer tests. A separate environment with pinned Herdr/Spec Kit/Pi runs non-subscription compatibility on every release candidate. `HARNESS_E2E_REAL=1` remains manual and requires authenticated disposable worker accounts. PR creation additionally requires `HARNESS_E2E_GITHUB_REPO` naming a disposable repository.
+CI runs Node 22 unit/integration/fake-E2E, build, pack, and packed consumer
+tests. A separate environment with pinned Herdr/Spec Kit/Pi runs
+non-subscription compatibility on every release candidate.
+`HARNESS_E2E_REAL=1` remains manual and requires authenticated disposable
+worker accounts. PR creation additionally requires `HARNESS_E2E_GITHUB_REPO`
+naming a disposable repository.
+
+The tag-gated release workflow reruns every gate, verifies the npm actor is an
+owner of `pi-multi-agent-harness`, publishes with `npm publish --provenance`,
+then records `npm view pi-multi-agent-harness@<version> dist.integrity` in the
+GitHub release evidence. First-time namespace reservation is an explicit human
+precondition; the workflow never silently switches package names or scopes.
 
 - [ ] **Step 4: Document exact install, DSL, security, and recovery**
 
@@ -442,7 +476,14 @@ npm exec --yes --package pi-multi-agent-harness@0.1.0 -- harness init
 npm exec --yes --package pi-multi-agent-harness@0.1.0 -- harness bootstrap --dry-run .
 ```
 
-`installation.md` separates install approval, authentication, and run approval. `workflow-dsl.md` documents keyed fan-out, `same-item`, `all`, task projection, recovery classes, and complete YAML. `SECURITY.md` documents the built-in baseline, machine/project narrowing, protected paths, credential exclusion, and pre-approval read boundary. `recovery.md` documents lock-directory leases, fencing, torn-tail repair, interior corruption, indeterminate effects, and commands.
+`installation.md` separates install approval, authentication, and run approval.
+`workflow-dsl.md` documents keyed fan-out, `same-item`, `all`, task projection,
+recovery classes, and complete YAML. `SECURITY.md` documents the built-in
+baseline, machine/project narrowing, protected paths, credential exclusion,
+and pre-approval read boundary. `recovery.md` documents lock-directory leases,
+fencing, torn-tail repair, interior corruption, indeterminate effects, and
+commands. `releasing.md` documents namespace ownership, tag/version matching,
+npm trusted publishing, provenance, and the external `dist.integrity` evidence.
 
 - [ ] **Step 5: Commit after final gates and package inspection**
 
@@ -456,7 +497,7 @@ npm pack --dry-run --json
 Expected: zero test failures; successful TypeScript build; tarball contains only `dist/`, `bin/`, `presets/`, and `src/defaults/`; CLI and extension load from the installed tarball; no credentials, run state, tests, or `.harness-output/` are present.
 
 ```bash
-git add .github/workflows/ci.yml README.md SECURITY.md docs/installation.md docs/workflow-dsl.md docs/recovery.md test/e2e/real-smoke.test.ts test/integration/packed-package.test.ts package.json package-lock.json
+git add .github/workflows/ci.yml .github/workflows/release.yml README.md SECURITY.md docs/installation.md docs/workflow-dsl.md docs/recovery.md docs/releasing.md test/e2e/real-smoke.test.ts test/integration/packed-package.test.ts package.json package-lock.json
 git commit -m "docs: package verified harness release"
 ```
 

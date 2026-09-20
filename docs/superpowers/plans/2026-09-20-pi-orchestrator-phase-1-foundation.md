@@ -6,7 +6,7 @@
 
 **Architecture:** This phase contains no external side effects. TypeBox owns wire formats, the compiler freezes a normalized workflow, and graph materialization produces stable job IDs consumed by all later phases.
 
-**Tech Stack:** Node.js 22+, TypeScript ESM, `@sinclair/typebox`, Ajv, YAML, Vitest, fast-check.
+**Tech Stack:** Node.js 22+, TypeScript ESM, `@earendil-works/pi-coding-agent@0.86.1`, `typebox@1.3.34`, Ajv with `ajv-formats`, YAML, Vitest, fast-check.
 
 **Spec:** `docs/superpowers/specs/2026-09-20-pi-multi-agent-orchestrator-design.md`
 
@@ -24,20 +24,20 @@
 - [ ] **Step 1: Write the failing package smoke test**
 
 ```ts
-import { mkdtemp, readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { access, readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { execa } from "execa";
 import { expect, it } from "vitest";
 
-it("packs a runnable CLI and loadable extension", async () => {
+it("builds a runnable CLI and importable extension", async () => {
   const pkg = JSON.parse(await readFile("package.json", "utf8"));
   expect(pkg.name).toBe("pi-multi-agent-harness");
   expect(pkg.pi.extensions).toEqual(["./dist/pi/extension.js"]);
-  const cwd = await mkdtemp(join(tmpdir(), "harness-package-"));
   const result = await execa(process.execPath, ["bin/harness.mjs", "--help"], { cwd: process.cwd() });
   expect(result.stdout).toContain("harness");
-  expect(cwd).toBeTruthy();
+  await expect(access(resolve("dist/pi/extension.js"))).resolves.toBeUndefined();
+  await expect(import(pathToFileURL(resolve("dist/pi/extension.js")).href)).resolves.toHaveProperty("default");
 });
 ```
 
@@ -67,11 +67,11 @@ Expected: FAIL because the package and entrypoints do not exist.
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "check:phase1": "npm run typecheck && vitest run test/unit/contracts test/unit/config test/unit/graph test/integration/package-smoke.test.ts"
+    "check:phase1": "npm run typecheck && npm run build && vitest run test/unit/contracts test/unit/config test/unit/graph test/integration/package-smoke.test.ts"
   },
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": "*",
-    "@sinclair/typebox": "*"
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
   }
 }
 ```
@@ -79,9 +79,13 @@ Expected: FAIL because the package and entrypoints do not exist.
 Run:
 
 ```bash
-npm install --save-exact ajv commander execa proper-lockfile yaml
-npm install --save-dev --save-exact @mariozechner/pi-coding-agent@0.73.1 @sinclair/typebox@0.34.52 @types/node @types/proper-lockfile fast-check typescript vitest
+npm install --save-exact ajv ajv-formats commander execa proper-lockfile yaml
+npm install --save-dev --save-exact @earendil-works/pi-coding-agent@0.86.1 typebox@1.3.34 @types/node @types/proper-lockfile fast-check typescript vitest
 ```
+
+Pi-bundled packages remain `"*"` peers as required by Pi package loading; the
+development lockfile and release compatibility manifest pin the exact tested
+host versions shown above.
 
 ```ts
 // src/cli/main.ts
@@ -97,7 +101,7 @@ export async function main(argv: readonly string[]): Promise<number> {
 
 ```ts
 // src/pi/extension.ts
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export default function harnessExtension(pi: ExtensionAPI): void {
   pi.registerCommand("harness-doctor", {
@@ -166,12 +170,14 @@ Expected: FAIL with missing module exports.
 
 ```ts
 // src/contracts/common.ts
-import { Type, type Static, type TSchema } from "@sinclair/typebox";
+import { Type, type Static, type TSchema } from "typebox";
 import Ajv from "ajv";
+import addFormats from "ajv-formats";
 
 export const HashSchema = Type.String({ pattern: "^sha256:[0-9a-f]{64}$" });
 export const VersionSchema = Type.Literal(1);
 const ajv = new Ajv({ allErrors: true, strict: true });
+addFormats(ajv);
 
 export function validator<T extends TSchema>(schema: T): (value: unknown) => Static<T> {
   const check = ajv.compile(schema);
@@ -184,7 +190,7 @@ export function validator<T extends TSchema>(schema: T): (value: unknown) => Sta
 
 ```ts
 // src/contracts/task-graph.ts
-import { Type, type Static } from "@sinclair/typebox";
+import { Type, type Static } from "typebox";
 import { HashSchema, VersionSchema, validator } from "./common.js";
 
 export const TaskNodeSchema = Type.Object({
@@ -207,19 +213,61 @@ export const validateTaskGraph = validator(TaskGraphSchema);
 
 ```ts
 // src/contracts/events.ts
-export const HarnessEventSchema = Type.Object({
+import { Type, type Static, type TSchema } from "typebox";
+import { HashSchema, VersionSchema, validator } from "./common.js";
+import { WorkerResultSchema } from "./worker-result.js";
+
+const EventEnvelopeProperties = {
   schemaVersion: VersionSchema,
   sequence: Type.Integer({ minimum: 1 }),
   timestamp: Type.String({ format: "date-time" }),
   runId: Type.String({ minLength: 1 }),
   entityId: Type.String({ minLength: 1 }),
-  eventType: Type.String({ minLength: 1 }),
   idempotencyKey: Type.String({ minLength: 1 }),
   fencingToken: Type.Integer({ minimum: 1 }),
-  payload: Type.Unknown(),
   prevHash: HashSchema,
   eventHash: HashSchema,
-}, { additionalProperties: false });
+};
+
+function event<T extends string, P extends TSchema>(eventType: T, payload: P) {
+  return Type.Object({ ...EventEnvelopeProperties, eventType: Type.Literal(eventType), payload }, { additionalProperties: false });
+}
+
+const RecoveryClassSchema = Type.Union([Type.Literal("idempotent"), Type.Literal("reconcilable"), Type.Literal("non_retryable")]);
+const BlockerSchema = Type.Object({ reason: Type.String(), evidence: Type.Array(Type.String()), suggestedChange: Type.String() }, { additionalProperties: false });
+const EffectIntentPayloadSchema = Type.Object({ action: Type.String(), idempotencyKey: Type.String(), recovery: RecoveryClassSchema, laneKey: Type.String(), input: Type.Unknown() }, { additionalProperties: false });
+const EffectObservationPayloadSchema = Type.Object({ action: Type.String(), intentKey: Type.String(), output: Type.Unknown() }, { additionalProperties: false });
+const EffectFailurePayloadSchema = Type.Object({ action: Type.String(), intentKey: Type.String(), code: Type.String(), evidence: Type.Array(Type.String()) }, { additionalProperties: false });
+const OperatorIntentPayloadSchema = Type.Object({ operation: Type.Union([Type.Literal("retry"), Type.Literal("reroute"), Type.Literal("cancel"), Type.Literal("pause"), Type.Literal("resume")]), target: Type.String(), arguments: Type.Record(Type.String(), Type.Unknown()) }, { additionalProperties: false });
+const PlanningMarkerPayloadSchema = Type.Object({ sessionFile: Type.String(), correlationId: Type.String(), requestEntryId: Type.String(), command: Type.String() }, { additionalProperties: false });
+const PlanningSettledPayloadSchema = Type.Object({ correlationId: Type.String(), finalTurnIndex: Type.Integer({ minimum: 0 }) }, { additionalProperties: false });
+const PlanningCompletedPayloadSchema = Type.Object({ correlationId: Type.String(), commit: Type.Optional(Type.String()), hashes: Type.Record(Type.String(), HashSchema) }, { additionalProperties: false });
+
+export const HarnessEventSchema = Type.Union([
+  event("run.created", Type.Object({ workflowRevision: HashSchema }, { additionalProperties: false })),
+  event("job.ready", Type.Object({}, { additionalProperties: false })),
+  event("attempt.started", Type.Object({ attempt: Type.Integer({ minimum: 1 }), worker: Type.String() }, { additionalProperties: false })),
+  event("worker.routed", Type.Object({ worker: Type.String(), reason: Type.String() }, { additionalProperties: false })),
+  event("worker.result_observed", WorkerResultSchema),
+  event("review.approved", Type.Object({ commit: Type.String(), reviewer: Type.String() }, { additionalProperties: false })),
+  event("review.changes_requested", Type.Object({ commit: Type.String(), reviewer: Type.String(), findings: Type.Array(Type.String(), { minItems: 1 }) }, { additionalProperties: false })),
+  event("verification.passed", Type.Object({ commit: Type.String(), evidence: Type.Array(Type.String()) }, { additionalProperties: false })),
+  event("verification.failed", Type.Object({ commit: Type.String(), evidence: Type.Array(Type.String(), { minItems: 1 }) }, { additionalProperties: false })),
+  event("integration.observed", Type.Object({ commit: Type.String(), patchId: Type.String() }, { additionalProperties: false })),
+  event("integration.conflicted", Type.Object({ sourceCommit: Type.String(), evidence: Type.Array(Type.String(), { minItems: 1 }) }, { additionalProperties: false })),
+  event("effect.intent", EffectIntentPayloadSchema),
+  event("effect.observed", EffectObservationPayloadSchema),
+  event("effect.failed", EffectFailurePayloadSchema),
+  event("operator.intent", OperatorIntentPayloadSchema),
+  event("planning.queued", PlanningMarkerPayloadSchema),
+  event("planning.agent_settled", PlanningSettledPayloadSchema),
+  event("planning.completed", PlanningCompletedPayloadSchema),
+  event("planning.blocked", BlockerSchema),
+  event("job.done", Type.Object({}, { additionalProperties: false })),
+  event("job.invalidated", Type.Object({ supersededGeneration: Type.Integer({ minimum: 1 }), reason: Type.String() }, { additionalProperties: false })),
+  event("job.blocked", BlockerSchema),
+  event("job.failed", Type.Object({ reason: Type.String() }, { additionalProperties: false })),
+]);
 export type HarnessEvent = Static<typeof HarnessEventSchema>;
 export const validateHarnessEvent = validator(HarnessEventSchema);
 ```
@@ -229,7 +277,9 @@ export const validateHarnessEvent = validator(HarnessEventSchema);
 const EvidenceSchema = Type.Object({ kind: Type.String(), path: Type.String(), sha256: HashSchema }, { additionalProperties: false });
 const BlockerSchema = Type.Object({ reason: Type.String(), evidence: Type.Array(Type.String()), suggestedChange: Type.String() }, { additionalProperties: false });
 export const WorkerResultSchema = Type.Union([
-  Type.Object({ schemaVersion: VersionSchema, assignmentHash: HashSchema, outcome: Type.Literal("completed"), commit: Type.String(), evidence: Type.Array(EvidenceSchema) }, { additionalProperties: false }),
+  Type.Object({ schemaVersion: VersionSchema, assignmentHash: HashSchema, role: Type.Literal("implementation"), outcome: Type.Literal("completed"), commit: Type.String(), evidence: Type.Array(EvidenceSchema) }, { additionalProperties: false }),
+  Type.Object({ schemaVersion: VersionSchema, assignmentHash: HashSchema, role: Type.Literal("review"), outcome: Type.Literal("approved"), reviewedCommit: Type.String(), findings: Type.Array(Type.String()), evidence: Type.Array(EvidenceSchema) }, { additionalProperties: false }),
+  Type.Object({ schemaVersion: VersionSchema, assignmentHash: HashSchema, role: Type.Literal("review"), outcome: Type.Literal("changes_requested"), reviewedCommit: Type.String(), findings: Type.Array(Type.String(), { minItems: 1 }), evidence: Type.Array(EvidenceSchema) }, { additionalProperties: false }),
   Type.Object({ schemaVersion: VersionSchema, assignmentHash: HashSchema, outcome: Type.Literal("blocked"), blocker: BlockerSchema }, { additionalProperties: false }),
   Type.Object({ schemaVersion: VersionSchema, assignmentHash: HashSchema, outcome: Type.Literal("failed"), reason: Type.String(), evidence: Type.Array(Type.String()) }, { additionalProperties: false }),
 ]);
@@ -258,12 +308,13 @@ const StageSchema = Type.Object({
   gate: Type.Optional(Type.String()),
   isolation: Type.Optional(Type.Literal("worktree")),
   profile: Type.Optional(Type.String()),
+  if: Type.Optional(Type.Object({ expression: Type.String({ minLength: 1 }) }, { additionalProperties: false })),
   with: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
-  policies: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+  policies: Type.Optional(Type.Object({ require_different_worker_kind: Type.Optional(Type.Boolean()) }, { additionalProperties: false })),
   produces: Type.Optional(Type.Record(Type.String(), Type.String())),
-  retry: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+  retry: Type.Optional(Type.Object({ max_attempts: Type.Integer({ minimum: 1 }), max_elapsed_seconds: Type.Integer({ minimum: 1 }) }, { additionalProperties: false })),
   timeout: Type.Optional(Type.Integer({ minimum: 1 })),
-  on_failure: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+  on_failure: Type.Optional(Type.Object({ changes_requested: Type.Optional(Type.Object({ retry_stage: Type.String() }, { additionalProperties: false })) }, { additionalProperties: false })),
 }, { additionalProperties: false });
 const TaskModelSchema = Type.Object({
   source: Type.String(),
@@ -309,7 +360,9 @@ expect(() => validateTaskGraph({ schemaVersion: 2, tasksSemanticHash: `sha256:${
 expect(() => validateTaskGraph({ schemaVersion: 1, tasksSemanticHash: `sha256:${"a".repeat(64)}`, tasks: [], extra: true })).toThrow();
 ```
 
-Use the 64-character hash as the valid fixture. Add invalid task IDs, negative sequence/fencing values, missing evidence, and extra-key cases.
+Use the 64-character hash as the valid fixture. Add invalid task IDs, invalid
+RFC 3339 timestamps, negative sequence/fencing values, malformed
+action-specific payloads, missing evidence, and extra-key cases.
 
 Run: `npm test -- test/unit/contracts/schemas.test.ts`
 
@@ -318,7 +371,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/contracts test/unit/contracts
+git add src/contracts src/shared test/unit/contracts
 git commit -m "feat: define versioned harness contracts"
 ```
 
@@ -339,7 +392,7 @@ import { expect, it } from "vitest";
 import { diamondTaskGraph, fixtureEvent, fixtureWorkflow } from "../../support/factories.js";
 
 it("builds schema-valid independent fixtures", () => {
-  expect(fixtureWorkflow().schemaVersion).toBe(1);
+  expect(fixtureWorkflow().schema).toBe("harness/v1");
   expect(fixtureEvent().eventHash).toMatch(/^sha256:[0-9a-f]{64}$/);
   expect(diamondTaskGraph().tasks.map((task) => task.id)).toEqual(["T001", "T002", "T003"]);
 });
@@ -355,6 +408,16 @@ Expected: FAIL with missing exports.
 
 ```ts
 export type DeepPartial<T> = T extends object ? { [K in keyof T]?: DeepPartial<T[K]> } : T;
+
+export function deepMerge<T>(base: T, overrides: DeepPartial<T>): T {
+  if (Array.isArray(base) || Array.isArray(overrides)) return structuredClone(overrides ?? base) as T;
+  if (!base || typeof base !== "object" || !overrides || typeof overrides !== "object") return structuredClone(overrides ?? base) as T;
+  const result = structuredClone(base) as Record<string, unknown>;
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value !== undefined) result[key] = deepMerge(result[key], value);
+  }
+  return result as T;
+}
 
 export function fixture<T>(base: () => T): (overrides?: DeepPartial<T>) => T {
   return (overrides = {}) => deepFreeze(deepMerge(base(), overrides));
@@ -392,13 +455,14 @@ git commit -m "test: add typed harness factories"
 ## Task 4: Compile and Freeze Workflow Configuration
 
 **Files:**
-- Create: `src/config/load.ts`, `interpolate.ts`, `compile.ts`, `hash.ts`
+- Create: `src/config/load.ts`, `interpolate.ts`, `compile.ts`, `hash.ts`, `action-inputs.ts`
 - Test: `test/unit/config/compiler.test.ts`
 - Fixtures: `test/fixtures/workflows/valid.yaml`, `unknown-command.yaml`, `cycle.yaml`
 
 **Interfaces:**
 - Produces `compileWorkflow(input: CompileInput): CompiledWorkflow`.
 - `CompiledWorkflow` is deeply frozen and includes `revision: sha256:<64 hex>`.
+- `CompileInput.actionSchemas` defaults to the closed built-in schemas and may add schemas from installed, policy-approved action plugins; the built-ins include `command.run: { argv, cwd?, env?, probe? }`.
 
 - [ ] **Step 1: Write compiler tests**
 
@@ -429,7 +493,7 @@ export function compileWorkflow(input: CompileInput): CompiledWorkflow {
   const document = validateWorkflow(structuredClone(input.workflow));
   const stages = topologicalStages(document.stages).map((stage) => ({
     ...stage,
-    action: { kind: stage.uses, input: resolveReferences(stage.with ?? {}, input.environment.commands) },
+    action: validateActionInput(stage.uses, resolveReferences(stage.with ?? {}, input.environment.commands)),
   }));
   const normalized = { schemaVersion: 1 as const, name: document.name, taskModel: document.task_model, stages };
   const revision = sha256(canonicalJson(normalized));
@@ -437,7 +501,29 @@ export function compileWorkflow(input: CompileInput): CompiledWorkflow {
 }
 ```
 
-Interpolation accepts only complete scalar references like `${commands.task_verify}` and expands them to stored argv arrays. Reject shell strings, environment recursion, missing names, duplicate stage IDs, unknown dependencies, cycles, `same-item` without matching `foreach`, incompatible fan-out definitions, and mutation after compilation.
+```ts
+// src/config/action-inputs.ts
+export const BuiltInActionInputSchemas = {
+  "command.run": Type.Object({
+    argv: Type.Array(Type.String(), { minItems: 1 }),
+    cwd: Type.Optional(Type.String()),
+    env: Type.Optional(Type.Record(Type.String(), Type.String())),
+    probe: Type.Optional(Type.Array(Type.String(), { minItems: 1 })),
+  }, { additionalProperties: false }),
+  "human.approval": Type.Object({}, { additionalProperties: false }),
+  "spec-kit.specify": Type.Object({}, { additionalProperties: false }),
+  "spec-kit.plan": Type.Object({}, { additionalProperties: false }),
+  "spec-kit.tasks": Type.Object({}, { additionalProperties: false }),
+  "worker.execute": Type.Object({}, { additionalProperties: false }),
+  "worker.review": Type.Object({}, { additionalProperties: false }),
+  "git.verify": Type.Object({}, { additionalProperties: false }),
+  "git.integrate": Type.Object({}, { additionalProperties: false }),
+  "git.push": Type.Object({}, { additionalProperties: false }),
+  "github.pull-request": Type.Object({}, { additionalProperties: false }),
+} as const;
+```
+
+Interpolation accepts only complete scalar references like `${commands.task_verify}` and expands them to stored argv arrays. `validateActionInput` selects a closed schema by `uses`; for example `command.run` requires `{ argv: readonly string[] }`. Reject unknown action kinds, action-specific extra keys, shell strings, environment recursion, missing names, duplicate stage IDs, unknown dependencies, cycles, `same-item` without matching `foreach`, incompatible fan-out definitions, and mutation after compilation.
 
 - [ ] **Step 4: Add property tests for deterministic hashing**
 

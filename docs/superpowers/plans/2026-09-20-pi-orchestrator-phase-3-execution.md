@@ -18,7 +18,7 @@
 - Test: `test/integration/git/branches.test.ts`
 
 **Interfaces:**
-- Produces `GitRepository.inspect()`, `ensureRunBranch(runId, base)`, and `ensureTaskBranch(runId, taskId, dependencyCommit)`.
+- Produces `GitRepository.inspect()`, `ensureRunBranch(runId, base)`, and `ensureTaskBranch(runId, taskId, integrationBase)`.
 - Every method accepts argv arrays and never invokes a shell.
 
 - [ ] **Step 1: Write branch creation/reconciliation tests**
@@ -32,6 +32,12 @@ it("reuses a branch only when it points at the expected base", async () => {
   await repo.commitOnBranch(first.name, "unexpected");
   await expect(repo.ensureTaskBranch("F023", "T001", repo.initialCommit)).rejects.toThrow(/unexpected head/);
 });
+
+it("bases a dependent task on the integration commit containing every completed dependency", async () => {
+  const repo = await createTempRepoWithIntegratedDependencies(["T001", "T002"]);
+  const branch = await repo.ensureTaskBranch("F023", "T003", repo.integrationHead);
+  expect(await repo.mergeBase(branch.name, repo.integrationHead)).toBe(repo.integrationHead);
+});
 ```
 
 - [ ] **Step 2: Run and observe missing Git repository**
@@ -44,12 +50,12 @@ Expected: FAIL.
 
 ```ts
 export class GitRepository {
-  async ensureTaskBranch(runId: string, taskId: string, base: string): Promise<BranchRef> {
+  async ensureTaskBranch(runId: string, taskId: string, integrationBase: string): Promise<BranchRef> {
     const name = `harness/${runId}-${taskId}`;
     const existing = await this.revParseOptional(`refs/heads/${name}`);
-    if (existing && existing !== base) throw new GitInvariantError(`${name} has unexpected head ${existing}`);
-    if (!existing) await this.git(["branch", name, base]);
-    return { name, commit: base };
+    if (existing && existing !== integrationBase) throw new GitInvariantError(`${name} has unexpected head ${existing}`);
+    if (!existing) await this.git(["branch", name, integrationBase]);
+    return { name, commit: integrationBase };
   }
   private git(argv: string[]): Promise<ProcessResult> {
     return this.process.run("git", ["-C", this.root, ...argv], { shell: false });
@@ -57,7 +63,11 @@ export class GitRepository {
 }
 ```
 
-Canonicalize the repository root, reject dirty planning/integration worktrees before mutation, and record base/head SHAs for every operation.
+Canonicalize the repository root, reject dirty planning/integration worktrees
+before mutation, and record base/head SHAs for every operation. The scheduler
+computes `integrationBase` only after all dependency integration observations
+are present; for a multi-parent dependency set it is the single current run
+branch head containing every dependency, never an arbitrary dependency branch.
 
 - [ ] **Step 4: Run Git branch tests**
 
@@ -80,7 +90,7 @@ git commit -m "feat: manage harness branches"
 - Test: `test/integration/git/worktrees.test.ts`
 
 **Interfaces:**
-- Produces `openImplementation`, `releaseImplementation`, `openReview`, `validateReview`, and `openRemediation`.
+- Produces `openPlanning`, `sealPlanningArtifacts`, `openImplementation`, `sealImplementation`, `releaseImplementation`, `openReview`, `validateReview`, and `openRemediation`.
 - Review/verification bindings have `branch: null` and `writable: false`.
 
 - [ ] **Step 1: Write ownership and mutation tests**
@@ -89,11 +99,21 @@ git commit -m "feat: manage harness branches"
 it("reviews in a separate detached worktree after implementer release", async () => {
   const manager = await worktreeFixture();
   const implementation = await manager.openImplementation(taskAttempt());
-  await expect(manager.openReview(reviewAttempt({ commit: implementation.commit }))).rejects.toThrow(/implementation workspace active/);
-  await manager.releaseImplementation(implementation);
-  const review = await manager.openReview(reviewAttempt({ commit: implementation.commit }));
-  expect(review).toMatchObject({ branch: null, writable: false, commit: implementation.commit });
+  const resultCommit = await manager.commitWorkerChange(implementation.path);
+  const sealed = await manager.sealImplementation(implementation, resultCommit);
+  await expect(manager.openReview(reviewAttempt({ commit: sealed.commit }))).rejects.toThrow(/implementation workspace active/);
+  await manager.releaseImplementation(sealed);
+  const review = await manager.openReview(reviewAttempt({ commit: sealed.commit }));
+  expect(review).toMatchObject({ branch: null, writable: false, commit: sealed.commit });
   expect(review.path).not.toBe(implementation.path);
+});
+
+it("seals the complete planning artifact tree on the run branch", async () => {
+  const manager = await worktreeFixture();
+  const planning = await manager.openPlanning({ runId: "F023", runBranch: "harness/run-F023" });
+  const sealed = await manager.sealPlanningArtifacts(planning, expectedArtifactHashes());
+  expect(sealed.commit).toBe(await manager.revParse("harness/run-F023"));
+  expect(sealed.hashes).toEqual(expectedArtifactHashes());
 });
 
 it("rejects a dirty review worktree", async () => {
@@ -120,6 +140,13 @@ async openReview(input: ReviewWorkspaceInput): Promise<WorktreeBinding> {
   return this.registry.add({ role: "review", path, branch: null, commit: input.commit, writable: false });
 }
 
+async sealImplementation(binding: WorktreeBinding, reportedCommit: string): Promise<WorktreeBinding> {
+  const head = (await this.gitAt(binding.path, ["rev-parse", "HEAD"])).stdout.trim();
+  const status = await this.gitAt(binding.path, ["status", "--porcelain"]);
+  if (head !== reportedCommit || status.stdout !== "") throw new WorkspaceInvariantError("implementation result is not a clean reported commit");
+  return this.registry.replace(binding, { ...binding, commit: head });
+}
+
 async validateReview(binding: WorktreeBinding): Promise<void> {
   const head = await this.gitAt(binding.path, ["rev-parse", "HEAD"]);
   const status = await this.gitAt(binding.path, ["status", "--porcelain"]);
@@ -127,7 +154,11 @@ async validateReview(binding: WorktreeBinding): Promise<void> {
 }
 ```
 
-Only `.harness-output/` may be writable for the reviewer and it must be excluded from Git status. Remediation always creates a new writable path with a new attempt number; never reopen the reviewer path.
+Only `.harness-output/` may be writable for the reviewer and it must be
+excluded from Git status. `sealPlanningArtifacts` permits only the declared
+Spec Kit paths, verifies their hashes, commits them on the run branch, and
+returns that exact commit. Remediation always creates a new writable path with
+a new attempt number; never reopen the reviewer path.
 
 - [ ] **Step 4: Run worktree tests**
 
@@ -244,7 +275,13 @@ async reconcile(ctx: ActionContext, intent: GitIntegrateIntent): Promise<Reconci
 }
 ```
 
-`git.verify` binds command output to commit SHA. `git.push` checks remote ref/commit. `github.pull-request` uses `gh pr list --head --base --json number,url,headRefOid` before creation. Integration is serialized by the controller queue; conflicts return typed remediation evidence instead of partial success.
+`git.verify` binds command output to commit SHA. `git.push` checks remote
+ref/commit. `github.pull-request` uses
+`gh pr list --head --base --json number,url,headRefOid` before creation. Git
+integration, push, and PR effects share the durable
+`run-mutation:<runId>` lane introduced in Task 12; the command queue alone is
+not treated as effect serialization. Conflicts return typed remediation
+evidence instead of partial success.
 
 - [ ] **Step 4: Run Git action tests**
 
@@ -278,7 +315,7 @@ it("correlates responses and validates event payloads", async () => {
   const transport = new FakeHerdrTransport();
   const client = new HerdrClient(transport);
   const pending = client.request("workspace.list", {});
-  transport.receive({ id: "1", result: { workspaces: [] } });
+  transport.receive({ id: "harness-1", result: { workspaces: [] } });
   await expect(pending).resolves.toEqual({ workspaces: [] });
   expect(HERDR_SCHEMA_SHA256).toMatch(/^sha256:[0-9a-f]{64}$/);
 });
