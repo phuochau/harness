@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { copyFile, lstat, mkdir } from "node:fs/promises";
+import { chmod, copyFile, lstat, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ResolvedProfile } from "../../config/profiles.js";
@@ -22,6 +22,7 @@ async function copyCredential(source: string, target: string): Promise<boolean> 
     }
     await mkdir(dirname(target), { recursive: true, mode: 0o700 });
     await copyFile(source, target, constants.COPYFILE_EXCL);
+    await chmod(target, 0o600);
     return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;

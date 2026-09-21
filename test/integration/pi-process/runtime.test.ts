@@ -102,6 +102,40 @@ describe("durable Pi process transport", () => {
     });
   });
 
+  it("accepts durable terminal evidence when the recorded pid has been reused", async () => {
+    const sessionDir = await temporaryDirectory();
+    const eventsPath = join(sessionDir, "events.jsonl");
+    await writeFile(eventsPath, [
+      JSON.stringify({ type: "message_end", role: "assistant", content: "RESULT" }),
+      JSON.stringify({ type: "turn_end", stopReason: "stop" }),
+      JSON.stringify({ type: "agent_settled" }),
+      "",
+    ].join("\n"));
+    const record = processRecord({
+      sessionDir,
+      eventsPath,
+      stderrPath: join(sessionDir, "stderr.log"),
+      recordPath: join(sessionDir, "process.json"),
+    });
+    const supervisor = new NodePiProcessSupervisor({
+      identity: new FakeProcessIdentity({
+        pid: record.pid,
+        startIdentity: "reused-pid-start",
+        executable: "/usr/bin/unrelated",
+        attemptToken: record.attemptToken,
+      }),
+    });
+
+    expect(await supervisor.observe(record)).toMatchObject({
+      status: "exited",
+      exit: {
+        exitCode: null,
+        signal: null,
+        terminal: { settled: true, finalAssistantText: "RESULT" },
+      },
+    });
+  });
+
   it("observes a matching live process without launching a replacement", async () => {
     const sessionDir = await temporaryDirectory();
     const supervisor = new NodePiProcessSupervisor();

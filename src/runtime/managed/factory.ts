@@ -2,7 +2,7 @@ import { access, realpath } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import type { ProfileDocument } from "../../contracts/profiles.js";
 import { resolveProfiles, type LockedProfileResources, type ResolvedProfiles } from "../../config/profiles.js";
 import { NodeProcessRunner } from "../../git/process.js";
@@ -47,7 +47,7 @@ async function supportedNode(pathValue: string): Promise<string | undefined> {
 async function resolveNodeRuntime(pathValue: string): Promise<string> {
   const candidates = [
     process.execPath,
-    ...pathValue.split(":").map((directory) => join(directory, process.platform === "win32" ? "node.exe" : "node")),
+    ...pathValue.split(delimiter).map((directory) => join(directory, process.platform === "win32" ? "node.exe" : "node")),
   ];
   for (const candidate of [...new Set(candidates)]) {
     const supported = await supportedNode(candidate);
@@ -63,11 +63,14 @@ export async function createManagedPiRuntime(input: {
   readonly dataHome?: string;
   readonly ambient?: Readonly<Record<string, string | undefined>>;
 }): Promise<ManagedPiRuntimeBundle> {
-  const dataHome = input.dataHome ?? process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share");
+  const ambient = input.ambient ?? process.env;
+  const userHome = ambient.HOME ?? homedir();
+  const executablePath = ambient.PATH ?? "/usr/bin:/bin";
+  const dataHome = input.dataHome ?? ambient.XDG_DATA_HOME ?? join(userHome, ".local", "share");
   const base = managedRuntimePaths({ dataHome, runtimeVersion: input.runtimeVersion, profileId: "planner-codex" });
   const packageModules = join(base.packages, "node_modules");
   const superpowersRoot = join(
-    process.env.CODEX_HOME ?? join(homedir(), ".codex"),
+    ambient.CODEX_HOME ?? join(userHome, ".codex"),
     "plugins", "cache", "superpowers-dev", "superpowers", "6.4.1", "skills",
   );
   const skillIds = new Set(Object.values(input.profiles.profiles).flatMap((profile) => profile.skills.map((skill) => skill.id)));
@@ -109,15 +112,15 @@ export async function createManagedPiRuntime(input: {
   for (const profile of Object.values(profiles.byId)) {
     const paths = managedRuntimePaths({ dataHome, runtimeVersion: input.runtimeVersion, profileId: profile.id });
     managedProfiles[profile.id] = await materializeProfile(profile, paths, {
-      ambient: input.ambient ?? process.env,
+      ambient,
       forwardedKeys: [],
-      executablePath: process.env.PATH ?? "/usr/bin:/bin",
+      executablePath,
       retainExtensionSources: true,
     });
     await projectLocalSubscriptionCredentials({
       profile,
       paths,
-      ambient: input.ambient ?? process.env,
+      ambient,
     });
   }
   const supervisor = new NodePiProcessSupervisor();
@@ -125,7 +128,7 @@ export async function createManagedPiRuntime(input: {
     join(packageModules, ".bin", "pi"),
   ], "managed Pi coding agent");
   const piCliReal = await realpath(piCli);
-  const piExecutable = await resolveNodeRuntime(process.env.PATH ?? "/usr/bin:/bin");
+  const piExecutable = await resolveNodeRuntime(executablePath);
   const piExecutableArgs = [piCliReal] as const;
   const transportExtensionPath = join(input.packageRoot, "dist", "pi", "worker-transport-extension.js");
   await access(transportExtensionPath);

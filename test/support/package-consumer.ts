@@ -37,11 +37,9 @@ async function run(
 export async function packHarness(): Promise<PackedHarness> {
   const root = resolve(".");
   const directory = await mkdtemp(join(tmpdir(), "harness-pack-"));
-  const build = await run("npm", ["run", "build"], root);
-  if (build.exitCode !== 0) throw new Error(build.stderr || build.stdout);
   const packed = await run(
     "npm",
-    ["pack", "--json", "--pack-destination", directory],
+    ["pack", "--ignore-scripts", "--json", "--pack-destination", directory],
     root,
   );
   if (packed.exitCode !== 0) throw new Error(packed.stderr || packed.stdout);

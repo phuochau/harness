@@ -219,19 +219,21 @@ export class NodePiProcessSupervisor implements PiProcessSupervisor {
     if (owned !== undefined && owned.child.exitCode !== null) {
       return { status: "exited", exit: await owned.exit };
     }
-    const observed = await this.identity.inspect(record);
-    if (observed !== undefined) {
-      const evidence = identityMismatchEvidence(observed, record);
-      return evidence.length === 0
-        ? { status: "running", record }
-        : { status: "identity_mismatch", evidence };
-    }
     const persistedExit = await processExitFromFile(record.eventsPath);
     if (persistedExit !== undefined) {
       return {
         status: "exited",
         exit: { ...persistedExit, terminal: await terminalFromFile(record.eventsPath) },
       };
+    }
+    const observed = await this.identity.inspect(record);
+    if (observed !== undefined) {
+      const evidence = identityMismatchEvidence(observed, record);
+      if (evidence.length === 0) return { status: "running", record };
+      const terminal = await terminalFromFile(record.eventsPath);
+      return isAcceptedTerminal(terminal)
+        ? { status: "exited", exit: { exitCode: null, signal: null, terminal } }
+        : { status: "identity_mismatch", evidence };
     }
     const terminal = await terminalFromFile(record.eventsPath);
     if (isAcceptedTerminal(terminal)) {
