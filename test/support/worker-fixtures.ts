@@ -12,7 +12,15 @@ import { FakeProcessRunner } from "./fake-process.js";
 export function contractAssignment(
   overrides: Partial<AssignmentInput> = {},
 ): WorkerAssignment {
-  return createAssignment({ ...assignmentFixture(), ...overrides });
+  const input = { ...assignmentFixture(), ...overrides };
+  if (overrides.workerKind !== undefined) {
+    input.profileFamily = overrides.workerKind;
+    input.profileId = `${input.role === "review" ? "reviewer" : "implementer"}-${overrides.workerKind}`;
+  }
+  if (overrides.implementationWorkerKind !== undefined) {
+    input.implementationProfileFamily = overrides.implementationWorkerKind;
+  }
+  return createAssignment(input);
 }
 
 export function workerProbeContext(
@@ -44,4 +52,3 @@ export function completedResultText(assignment: WorkerAssignment): string {
     completedResult({ assignmentHash: assignment.assignmentHash }),
   );
 }
-

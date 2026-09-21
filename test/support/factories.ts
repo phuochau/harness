@@ -3,12 +3,18 @@ import type {
   JsonValue,
   HarnessEvent,
   HarnessLock,
+  ProfileDocument,
   TaskGraphDocument,
   WorkerResult,
   WorkflowDocument,
 } from "../../src/contracts/index.js";
 import { BuiltInActionInputSchemas } from "../../src/config/action-inputs.js";
 import type { CompileInput } from "../../src/config/compile.js";
+import {
+  resolveProfiles,
+  type LockedProfileResources,
+  type ResolvedProfiles,
+} from "../../src/config/profiles.js";
 import type { GraphContext } from "../../src/core/task-graph.js";
 import type { DeepPartial } from "./fixture.js";
 import { fixture } from "./fixture.js";
@@ -32,14 +38,20 @@ export const fixtureWorkflow = fixture<WorkflowDocument>(() => ({
     {
       id: "tasks",
       uses: "spec-kit.tasks",
-      runner: "pi",
+      runner: "planner-codex",
       needs: [{ stage: "prepare", scope: "all" }],
       produces: { graph: "specs/fixture/task-graph.json" },
     },
     {
       id: "implement",
       uses: "worker.execute",
-      runner: { prefer: ["devin", "codex", "claude"] },
+      runner: {
+        prefer: [
+          "implementer-devin",
+          "implementer-codex",
+          "implementer-claude",
+        ],
+      },
       needs: [{ stage: "tasks", scope: "all" }],
       foreach: { source: "stages.tasks.outputs.graph", key: "task.id" },
       gate: "task.dependencies_done",
@@ -49,10 +61,12 @@ export const fixtureWorkflow = fixture<WorkflowDocument>(() => ({
     {
       id: "review",
       uses: "worker.review",
-      runner: { prefer: ["codex", "claude", "devin"] },
+      runner: {
+        prefer: ["reviewer-codex", "reviewer-claude", "reviewer-devin"],
+      },
       needs: [{ stage: "implement", scope: "same-item" }],
       foreach: { source: "stages.tasks.outputs.graph", key: "task.id" },
-      policies: { require_different_worker_kind: true, scope: "task" },
+      policies: { require_different_profile_family: true, scope: "task" },
       retry: { max_attempts: 3, max_elapsed_seconds: 3600 },
       on_failure: { changes_requested: { retry_stage: "implement" } },
     },
@@ -93,9 +107,11 @@ export const fixtureWorkflow = fixture<WorkflowDocument>(() => ({
     {
       id: "final_review",
       uses: "worker.review",
-      runner: { prefer: ["codex", "claude", "devin"] },
+      runner: {
+        prefer: ["reviewer-codex", "reviewer-claude", "reviewer-devin"],
+      },
       needs: [{ stage: "final_verify", scope: "all" }],
-      policies: { require_different_worker_kind: true, scope: "final_diff" },
+      policies: { scope: "final_diff" },
     },
     {
       id: "push",
@@ -126,6 +142,140 @@ export const fixtureEnvironment = fixture<EnvironmentDocument>(() => ({
   ],
   agent_plugins: [],
 }));
+
+export const fixtureProfiles = fixture<ProfileDocument>(() => ({
+  schema: "harness/profiles/v1",
+  profiles: {
+    "planner-codex": {
+      family: "codex",
+      runtime: "pi",
+      provider: "openai-codex",
+      model: "openai-codex/gpt-5.6-luna",
+      thinking: "high",
+      role: "planning",
+      environment: "isolated",
+      tools: ["read", "write"],
+      extensions: [],
+      skills: [],
+      context_files: false,
+      prompt_templates: ["spec-kit"],
+      mcp: [],
+    },
+    "implementer-devin": {
+      family: "devin",
+      runtime: "pi",
+      provider: "devin",
+      model: "devin/swe-2",
+      role: "implementation",
+      environment: "isolated",
+      tools: ["read", "bash", "edit", "write"],
+      extensions: ["devin-acp"],
+      skills: [
+        {
+          id: "superpowers:test-driven-development",
+          targets: ["pi", "provider"],
+        },
+      ],
+      context_files: false,
+      prompt_templates: [],
+      mcp: [],
+    },
+    "implementer-codex": {
+      family: "codex",
+      runtime: "pi",
+      provider: "openai-codex",
+      model: "openai-codex/gpt-5.6-luna",
+      role: "implementation",
+      environment: "isolated",
+      tools: ["read", "bash", "edit", "write"],
+      extensions: [],
+      skills: [
+        { id: "superpowers:test-driven-development", targets: ["pi"] },
+      ],
+      context_files: false,
+      prompt_templates: [],
+      mcp: [],
+    },
+    "implementer-claude": {
+      family: "claude",
+      runtime: "pi",
+      provider: "claude-bridge",
+      model: "claude-bridge/claude-sonnet-5",
+      role: "implementation",
+      environment: "isolated",
+      tools: ["read", "bash", "edit", "write"],
+      extensions: ["claude-bridge"],
+      skills: [
+        {
+          id: "superpowers:test-driven-development",
+          targets: ["pi", "provider"],
+        },
+      ],
+      context_files: false,
+      prompt_templates: [],
+      mcp: [],
+    },
+    "reviewer-codex": {
+      family: "codex",
+      runtime: "pi",
+      provider: "openai-codex",
+      model: "openai-codex/gpt-5.6-luna",
+      role: "review",
+      environment: "isolated",
+      tools: ["read", "bash"],
+      extensions: [],
+      skills: [],
+      context_files: false,
+      prompt_templates: [],
+      mcp: [],
+    },
+    "reviewer-claude": {
+      family: "claude",
+      runtime: "pi",
+      provider: "claude-bridge",
+      model: "claude-bridge/claude-sonnet-5",
+      role: "review",
+      environment: "isolated",
+      tools: ["read", "bash"],
+      extensions: ["claude-bridge"],
+      skills: [],
+      context_files: false,
+      prompt_templates: [],
+      mcp: [],
+    },
+    "reviewer-devin": {
+      family: "devin",
+      runtime: "pi",
+      provider: "devin",
+      model: "devin/swe-2",
+      role: "review",
+      environment: "isolated",
+      tools: ["read", "bash"],
+      extensions: ["devin-acp"],
+      skills: [],
+      context_files: false,
+      prompt_templates: [],
+      mcp: [],
+    },
+  },
+}));
+
+export const fixtureLockedProfileResources = fixture<LockedProfileResources>(() => ({
+  extensions: {
+    "devin-acp": "/managed/extensions/devin-acp/index.js",
+    "claude-bridge": "/managed/extensions/claude-bridge/index.js",
+  },
+  skills: {
+    "superpowers:test-driven-development":
+      "/managed/skills/test-driven-development/SKILL.md",
+  },
+  promptTemplates: { "spec-kit": "/managed/prompts/spec-kit.md" },
+  mcp: {},
+}));
+
+export const fixtureResolvedProfiles = fixture<ResolvedProfiles>(() =>
+  resolveProfiles(fixtureProfiles(), fixtureLockedProfileResources()),
+);
 
 export const fixtureHarnessLock = fixture<HarnessLock>(() => ({
   schema: "harness/lock/v1",
@@ -254,6 +404,7 @@ export const completedResult = fixture<WorkerResult>(() => ({
 export const fixtureCompileInput = fixture<CompileInput>(() => ({
   workflow: fixtureWorkflow(),
   environment: fixtureEnvironment(),
+  profiles: fixtureResolvedProfiles(),
   actionSchemas: BuiltInActionInputSchemas,
 }));
 

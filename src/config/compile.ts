@@ -13,10 +13,12 @@ import {
 } from "./action-inputs.js";
 import { contentRevision } from "./hash.js";
 import { resolveReferences } from "./interpolate.js";
+import type { ResolvedProfiles } from "./profiles.js";
 
 export interface CompileInput {
   readonly workflow: WorkflowDocument;
   readonly environment: EnvironmentDocument;
+  readonly profiles?: ResolvedProfiles;
   readonly actionSchemas?: Readonly<Record<string, TSchema>>;
 }
 
@@ -34,7 +36,41 @@ export interface CompiledWorkflow {
   readonly name: string;
   readonly taskModel?: Exclude<WorkflowDocument["task_model"], undefined>;
   readonly stages: readonly CompiledStage[];
+  readonly profiles: ResolvedProfiles;
+  readonly resolvedProfilesHash: `sha256:${string}`;
   readonly revision: `sha256:${string}`;
+}
+
+function stageProfileIds(stage: StageDocument): readonly string[] {
+  if (stage.runner === undefined) return [];
+  return typeof stage.runner === "string" ? [stage.runner] : stage.runner.prefer;
+}
+
+function expectedRole(stage: StageDocument): "planning" | "implementation" | "review" | undefined {
+  if (stage.uses.startsWith("spec-kit.")) return "planning";
+  if (stage.uses === "worker.execute") return "implementation";
+  if (stage.uses === "worker.review") return "review";
+  return undefined;
+}
+
+function validateStageProfiles(
+  stages: readonly StageDocument[],
+  profiles: ResolvedProfiles,
+): void {
+  for (const stage of stages) {
+    const role = expectedRole(stage);
+    for (const profileId of stageProfileIds(stage)) {
+      const profile = profiles.byId[profileId];
+      if (profile === undefined) {
+        throw new Error(`unknown profile ${profileId} referenced by ${stage.id}`);
+      }
+      if (role !== undefined && profile.role !== role) {
+        throw new Error(
+          `profile ${profileId} has role ${profile.role}, expected ${role} for ${stage.id}`,
+        );
+      }
+    }
+  }
 }
 
 function topologicalStages(stages: readonly StageDocument[]): StageDocument[] {
@@ -128,11 +164,18 @@ function validateRemediationTargets(stages: readonly StageDocument[]): void {
 export function compileWorkflow(input: CompileInput): CompiledWorkflow {
   const document = validateWorkflow(structuredClone(input.workflow));
   const environment = validateEnvironment(structuredClone(input.environment));
+  const profiles = structuredClone(
+    input.profiles ?? {
+      byId: {},
+      hash: contentRevision({}),
+    },
+  );
   const schemas = {
     ...BuiltInActionInputSchemas,
     ...(input.actionSchemas ?? {}),
   };
   const ordered = topologicalStages(document.stages);
+  if (input.profiles !== undefined) validateStageProfiles(ordered, profiles);
   validateRemediationTargets(ordered);
   const stages = ordered.map((stage) => ({
     ...stage,
@@ -150,6 +193,8 @@ export function compileWorkflow(input: CompileInput): CompiledWorkflow {
     name: document.name,
     ...(document.task_model === undefined ? {} : { taskModel: document.task_model }),
     stages,
+    profiles,
+    resolvedProfilesHash: profiles.hash,
   };
   return deepFreeze({ ...normalized, revision: contentRevision(normalized) });
 }

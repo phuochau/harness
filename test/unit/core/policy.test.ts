@@ -7,21 +7,23 @@ import {
   routeFixture,
 } from "../../support/controller-fixtures.js";
 
-it("uses Codex after Devin fails and Claude for independent review", () => {
+it("uses Codex profile after Devin fails and Claude family for independent review", () => {
   const implementation = selectWorker(
     routeFixture({ unavailable: ["devin"] }),
   );
-  expect(implementation.kind).toBe("codex");
+  expect(implementation.profileId).toBe("implementer-codex");
   expect(
-    selectReviewer(reviewFixture({ implementationWorker: "codex" })).kind,
-  ).toBe("claude");
+    selectReviewer(
+      reviewFixture({ implementationFamily: "codex" }),
+    ).profileId,
+  ).toBe("reviewer-claude");
 });
 
 it("blocks when no distinct reviewer is eligible", () => {
   expect(() =>
     selectReviewer(
       reviewFixture({
-        implementationWorker: "codex",
+        implementationFamily: "codex",
         unavailable: ["claude", "devin"],
       }),
     ),
@@ -36,7 +38,7 @@ it("filters workers by capabilities and authentication", () => {
       capabilities: { codex: ["sandbox"], claude: [] },
     }),
   );
-  expect(selected.kind).toBe("codex");
+  expect(selected.profileId).toBe("implementer-codex");
 });
 
 it("bounds retries by attempts and elapsed time", () => {

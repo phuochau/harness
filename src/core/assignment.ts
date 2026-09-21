@@ -1,4 +1,5 @@
 import type { WorkerKind } from "./routing.js";
+import type { ProfileFamily } from "../contracts/profiles.js";
 import { canonicalJson } from "../shared/canonical-json.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 import { sha256 } from "../shared/sha256.js";
@@ -23,7 +24,10 @@ export interface AssignmentInput {
   readonly runHead?: string;
   readonly attempt: number;
   readonly role: "implementation" | "review";
+  readonly profileId?: string;
+  readonly profileFamily?: ProfileFamily;
   readonly workerKind: WorkerKind;
+  readonly implementationProfileFamily?: ProfileFamily;
   readonly implementationWorkerKind?: WorkerKind;
   readonly commit: string;
   readonly allowedPaths: readonly string[];
@@ -33,11 +37,17 @@ export interface AssignmentInput {
   readonly worktree: WorktreeBinding;
 }
 
-interface WorkerAssignmentBase extends AssignmentInput {
+type WorkerAssignmentBase = Omit<
+  AssignmentInput,
+  "profileId" | "profileFamily" | "implementationProfileFamily"
+> & {
+  readonly profileId: string;
+  readonly profileFamily: ProfileFamily;
+  readonly implementationProfileFamily?: ProfileFamily;
   readonly schemaVersion: 1;
   readonly protectedPaths: readonly string[];
   readonly assignmentHash: `sha256:${string}`;
-}
+};
 
 export type WorkerAssignment =
   | (WorkerAssignmentBase & {
@@ -61,6 +71,24 @@ export type WorkerAssignment =
     });
 
 export function createAssignment(input: AssignmentInput): WorkerAssignment {
+  const profileFamily = input.profileFamily ?? input.workerKind;
+  if (profileFamily !== input.workerKind) {
+    throw new Error("profile family does not match transitional worker kind");
+  }
+  const implementationProfileFamily =
+    input.implementationProfileFamily ?? input.implementationWorkerKind;
+  if (
+    input.implementationProfileFamily !== undefined &&
+    input.implementationWorkerKind !== undefined &&
+    input.implementationProfileFamily !== input.implementationWorkerKind
+  ) {
+    throw new Error(
+      "implementation profile family does not match transitional worker kind",
+    );
+  }
+  const profileId =
+    input.profileId ??
+    `${input.role === "implementation" ? "implementer" : "reviewer"}-${profileFamily}`;
   const scope = input.role === "implementation"
     ? "task"
     : input.reviewScope ?? "task";
@@ -107,6 +135,11 @@ export function createAssignment(input: AssignmentInput): WorkerAssignment {
   const body = {
     schemaVersion: 1 as const,
     ...structuredClone(input),
+    profileId,
+    profileFamily,
+    ...(implementationProfileFamily === undefined
+      ? {}
+      : { implementationProfileFamily }),
     scope,
     protectedPaths: [...DefaultProtectedPaths],
   };

@@ -10,17 +10,13 @@ export const NeedSchema = Type.Object(
 );
 
 export const RunnerSchema = Type.Union([
-  Type.Literal("pi"),
+  Type.String({ pattern: "^[a-z][a-z0-9-]*$" }),
   Type.Object(
     {
-      prefer: Type.Array(
-        Type.Union([
-          Type.Literal("codex"),
-          Type.Literal("devin"),
-          Type.Literal("claude"),
-        ]),
-        { minItems: 1 },
-      ),
+      prefer: Type.Array(Type.String({ pattern: "^[a-z][a-z0-9-]*$" }), {
+        minItems: 1,
+        uniqueItems: true,
+      }),
     },
     { additionalProperties: false },
   ),
@@ -56,7 +52,7 @@ export const StageSchema = Type.Object(
     policies: Type.Optional(
       Type.Object(
         {
-          require_different_worker_kind: Type.Optional(Type.Boolean()),
+          require_different_profile_family: Type.Optional(Type.Boolean()),
           scope: Type.Optional(
             Type.Union([Type.Literal("task"), Type.Literal("final_diff")]),
           ),

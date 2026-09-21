@@ -6,14 +6,12 @@ task_model:
 stages:
   - id: specify
     uses: spec-kit.specify
-    runner: pi
-    model_profile: chatgpt-planning
+    runner: planner-codex
     produces:
       spec: specs/feature/spec.md
   - id: plan
     uses: spec-kit.plan
-    runner: pi
-    model_profile: chatgpt-planning
+    runner: planner-codex
     needs: [{ stage: specify, scope: all }]
     produces:
       plan: specs/feature/plan.md
@@ -22,27 +20,25 @@ stages:
     needs: [{ stage: plan, scope: all }]
   - id: tasks
     uses: spec-kit.tasks
-    runner: pi
-    model_profile: chatgpt-planning
+    runner: planner-codex
     needs: [{ stage: approve_plan, scope: all }]
     produces:
       tasks: specs/feature/tasks.md
       graph: specs/feature/task-graph.json
   - id: implement
     uses: worker.execute
-    runner: { prefer: [devin, codex, claude] }
+    runner: { prefer: [implementer-devin, implementer-codex, implementer-claude] }
     needs: [{ stage: tasks, scope: all }]
     foreach: { source: stages.tasks.outputs.graph, key: task.id }
     gate: task.dependencies_done
     isolation: worktree
-    profile: disciplined-engineer
     retry: { max_attempts: 3, max_elapsed_seconds: 86400 }
   - id: review
     uses: worker.review
-    runner: { prefer: [codex, claude, devin] }
+    runner: { prefer: [reviewer-codex, reviewer-claude, reviewer-devin] }
     needs: [{ stage: implement, scope: same-item }]
     foreach: { source: stages.tasks.outputs.graph, key: task.id }
-    policies: { require_different_worker_kind: true, scope: task }
+    policies: { require_different_profile_family: true, scope: task }
     retry: { max_attempts: 3, max_elapsed_seconds: 86400 }
     on_failure:
       changes_requested: { retry_stage: implement }
@@ -76,7 +72,7 @@ stages:
     with: { argv: "${commands.full_verify}" }
   - id: final_review
     uses: worker.review
-    runner: { prefer: [codex, claude, devin] }
+    runner: { prefer: [reviewer-codex, reviewer-claude, reviewer-devin] }
     needs: [{ stage: final_verify, scope: all }]
     policies: { scope: final_diff }
     on_failure:

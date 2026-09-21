@@ -1,6 +1,7 @@
 import { parse } from "yaml";
 import {
   validateEnvironmentAndLock,
+  validateProfiles,
   validateWorkflow,
 } from "../contracts/index.js";
 import { compileWorkflow } from "../config/compile.js";
@@ -56,6 +57,7 @@ function settingsPackages(value: unknown): readonly PiSettingsPackage[] {
 
 export function validateGeneratedConfiguration(files: Readonly<Record<string, string>>): void {
   const workflow = validateWorkflow(parse(files[".harness/workflow.yaml"]!));
+  validateProfiles(parse(files[".harness/profiles.yaml"]!));
   const { environment, lock } = validateEnvironmentAndLock(
     parse(files[".harness/environment.yaml"]!),
     parse(files[".harness/harness.lock"]!),

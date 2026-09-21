@@ -51,7 +51,7 @@ it("treats every missing required locked capability as unhealthy", async () => {
     .toBe(true);
 });
 
-it("requires current Herdr integrations for Pi and every routed worker", async () => {
+it("projects routed profile IDs to distinct provider families", async () => {
   const root = await maliciousProjectFixture();
   temporary.push(root);
   const capabilities = executableCapabilities(await readDeclarativeProject(root));
@@ -62,7 +62,6 @@ it("requires current Herdr integrations for Pi and every routed worker", async (
     "herdr-integration:claude",
     "herdr-integration:codex",
     "herdr-integration:devin",
-    "herdr-integration:pi",
   ]);
   for (const integration of integrations) {
     const target = integration.id.slice("herdr-integration:".length);

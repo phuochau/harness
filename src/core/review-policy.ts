@@ -1,18 +1,18 @@
 import {
   PolicyBlocker,
   eligibleWorkers,
-  type WorkerKind,
   type WorkerProfile,
   type WorkerSelection,
 } from "./routing.js";
+import type { ProfileFamily } from "../contracts/profiles.js";
 
 export interface ReviewSelection extends WorkerSelection {
-  readonly implementationWorker: WorkerKind;
+  readonly implementationFamily: ProfileFamily;
 }
 
 export function selectReviewer(input: ReviewSelection): WorkerProfile {
   const selected = eligibleWorkers(input).find(
-    (profile) => profile.kind !== input.implementationWorker,
+    (profile) => profile.family !== input.implementationFamily,
   );
   if (!selected) {
     throw new PolicyBlocker(

@@ -11,6 +11,7 @@ export * from "./lock.js";
 export * from "./task-graph.js";
 export * from "./worker-result.js";
 export * from "./workflow.js";
+export * from "./profiles.js";
 
 const unsafePathPattern = /(^\/)|(^|\/)\.\.?(\/|$)|[\\\0*?\[\]{}]/;
 

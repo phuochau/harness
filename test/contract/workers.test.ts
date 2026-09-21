@@ -109,6 +109,8 @@ it("launches Claude as a one-shot headless worker", async () => {
   const adapter = new ClaudeAdapter();
   const prepared = await adapter.prepare(createAssignment({
     ...assignmentFixture(),
+    profileId: "implementer-claude",
+    profileFamily: "claude",
     workerKind: "claude",
   }));
   expect(adapter.launchSpec(prepared).args).toContain("--print");
@@ -124,6 +126,8 @@ it("models final-diff review as a detached read-only assignment without a task",
     itemKey: "run:F023",
     role: "review",
     reviewScope: "final_diff",
+    profileId: "reviewer-codex",
+    profileFamily: "codex",
     workerKind: "codex",
     frozenBase: "base123",
     runHead: "head456",

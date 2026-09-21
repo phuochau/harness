@@ -9,7 +9,6 @@ import type { CompiledStage, CompiledWorkflow } from "../config/compile.js";
 import { materializeJobs, type MaterializedJob } from "./materialize.js";
 import type { RunState } from "./state.js";
 import type { ValidatedTaskGraph } from "./task-graph.js";
-import type { WorkerKind } from "./routing.js";
 
 export interface WorkflowCommandDeriverOptions {
   readonly workflow: CompiledWorkflow;
@@ -30,8 +29,9 @@ export function emptyTaskGraph(): ValidatedTaskGraph {
   });
 }
 
-function workerPreference(stage: CompiledStage): readonly WorkerKind[] {
-  return typeof stage.runner === "object" ? stage.runner.prefer : [];
+function workerPreference(stage: CompiledStage): readonly string[] {
+  if (stage.runner === undefined) return [];
+  return typeof stage.runner === "string" ? [stage.runner] : stage.runner.prefer;
 }
 
 function implementationWorker(state: RunState, taskId: string): string | undefined {
@@ -42,25 +42,32 @@ function implementationWorker(state: RunState, taskId: string): string | undefin
 
 function selectWorker(
   state: RunState,
+  workflow: CompiledWorkflow,
   stage: CompiledStage,
   job: MaterializedJob,
   attempt: number,
   requested?: string,
 ): string {
-  if (stage.runner === "pi") return "pi";
   const preference = workerPreference(stage);
   if (preference.length === 0) return "system";
-  if (requested !== undefined && !preference.includes(requested as WorkerKind)) {
+  if (requested !== undefined && !preference.includes(requested)) {
     throw new Error(`worker ${requested} is not declared for ${job.id}`);
   }
   if (
     stage.uses === "worker.review" &&
     job.taskId !== undefined &&
-    stage.policies?.require_different_worker_kind === true
+    stage.policies?.require_different_profile_family === true
   ) {
     const implementation = implementationWorker(state, job.taskId);
-    const eligible = preference.filter((worker) => worker !== implementation);
-    if (requested !== undefined && !eligible.includes(requested as WorkerKind)) {
+    const implementationFamily = implementation === undefined
+      ? undefined
+      : workflow.profiles.byId[implementation]?.family;
+    const eligible = preference.filter((profileId) =>
+      implementationFamily === undefined
+        ? profileId !== implementation
+        : workflow.profiles.byId[profileId]?.family !== implementationFamily,
+    );
+    if (requested !== undefined && !eligible.includes(requested)) {
       throw new Error(`worker ${requested} is not an independent reviewer for ${job.id}`);
     }
     const reviewer = requested ?? eligible[(attempt - 1) % eligible.length];
@@ -430,7 +437,14 @@ export function createWorkflowCommandDeriver(
       occupiedLanes.add(laneKey);
       const current = state.jobs[job.id];
       const attempt = (current?.attempt ?? 0) + 1;
-      const worker = selectWorker(state, stage, job, attempt, forcedWorkers.get(job.id));
+      const worker = selectWorker(
+        state,
+        options.workflow,
+        stage,
+        job,
+        attempt,
+        forcedWorkers.get(job.id),
+      );
       if (current === undefined || current.state === "PENDING") {
         events.push({
           eventType: "job.ready",

@@ -26,6 +26,7 @@ export class InitError extends Error {}
 
 const defaultAssets: Readonly<Record<string, string>> = {
   ".harness/workflow.yaml": "workflow.yaml",
+  ".harness/profiles.yaml": "profiles.yaml",
   ".harness/environment.yaml": "environment.yaml",
   ".harness/policy.yaml": "policy.yaml",
   ".harness/harness.lock": "harness.lock",

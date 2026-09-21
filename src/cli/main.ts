@@ -137,12 +137,16 @@ export function executableCapabilities(
     }
   }
   const herdrTargets = new Set<string>();
-  if (project.workflow.stages.some((stage) => stage.runner === "pi")) {
-    herdrTargets.add("pi");
-  }
   for (const stage of project.workflow.stages) {
-    if (typeof stage.runner !== "object") continue;
-    stage.runner.prefer.forEach((worker) => herdrTargets.add(worker));
+    const profileIds = stage.runner === undefined
+      ? []
+      : typeof stage.runner === "string"
+        ? [stage.runner]
+        : stage.runner.prefer;
+    for (const profileId of profileIds) {
+      const profile = project.profiles.profiles[profileId];
+      if (profile !== undefined) herdrTargets.add(profile.family);
+    }
   }
   for (const target of herdrTargets) {
     result.push({

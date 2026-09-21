@@ -7,7 +7,11 @@ import { initProject, InitError } from "../../src/cli/init.js";
 import { main } from "../../src/cli/main.js";
 import { mergeHarnessIgnore } from "../../src/cli/ignore-merge.js";
 import { findPackageRoot } from "../../src/cli/package-root.js";
-import { validateEnvironmentAndLock, validateWorkflow } from "../../src/contracts/index.js";
+import {
+  validateEnvironmentAndLock,
+  validateProfiles,
+  validateWorkflow,
+} from "../../src/contracts/index.js";
 
 const temporary: string[] = [];
 afterEach(async () => {
@@ -50,16 +54,26 @@ describe("harness init", () => {
       "final_pr",
     ]);
     expect(workflow.stages.find((stage: { id: string }) => stage.id === "implement").runner.prefer).toEqual([
-      "devin",
-      "codex",
-      "claude",
+      "implementer-devin",
+      "implementer-codex",
+      "implementer-claude",
     ]);
     expect(workflow.stages.find((stage: { id: string }) => stage.id === "review").runner.prefer).toEqual([
-      "codex",
-      "claude",
-      "devin",
+      "reviewer-codex",
+      "reviewer-claude",
+      "reviewer-devin",
     ]);
     expect(() => validateWorkflow(workflow)).not.toThrow();
+    const profiles = await yaml(join(root, ".harness/profiles.yaml"));
+    expect(() => validateProfiles(profiles)).not.toThrow();
+    expect(profiles.profiles["planner-codex"]).toMatchObject({
+      provider: "openai-codex",
+      role: "planning",
+    });
+    expect(profiles.profiles["implementer-devin"]).toMatchObject({
+      provider: "devin",
+      role: "implementation",
+    });
 
     const environment = await yaml(join(root, ".harness/environment.yaml"));
     const lock = await yaml(join(root, ".harness/harness.lock"));

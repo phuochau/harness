@@ -3,9 +3,11 @@ import { join } from "node:path";
 import { parse } from "yaml";
 import {
   validateEnvironmentAndLock,
+  validateProfiles,
   validateWorkflow,
   type EnvironmentDocument,
   type HarnessLock,
+  type ProfileDocument,
   type WorkflowDocument,
 } from "../contracts/index.js";
 import type { TrustPolicy } from "../install/types.js";
@@ -14,6 +16,7 @@ const MAX_DECLARATIVE_BYTES = 1024 * 1024;
 
 export const ALLOWED_PRE_APPROVAL_PATHS = [
   ".harness/workflow.yaml",
+  ".harness/profiles.yaml",
   ".harness/environment.yaml",
   ".harness/policy.yaml",
   ".harness/harness.lock",
@@ -23,6 +26,7 @@ export const ALLOWED_PRE_APPROVAL_PATHS = [
 export interface DeclarativeProject {
   readonly root: string;
   readonly workflow: WorkflowDocument;
+  readonly profiles: ProfileDocument;
   readonly environment: EnvironmentDocument;
   readonly lock: HarnessLock;
   readonly projectPolicy: TrustPolicy;
@@ -95,12 +99,13 @@ export async function readDeclarativeProject(rootInput: string): Promise<Declara
     assertDirectoryNotSymlink(join(root, ".harness")),
     assertDirectoryNotSymlink(join(root, ".pi")),
   ]);
-  const [workflowText, environmentText, policyText, lockText, settingsText] =
+  const [workflowText, profilesText, environmentText, policyText, lockText, settingsText] =
     await Promise.all(
       ALLOWED_PRE_APPROVAL_PATHS.map((path) => boundedRegularFile(join(root, path))),
     );
   try {
     const workflow = validateWorkflow(parse(workflowText!));
+    const profiles = validateProfiles(parse(profilesText!));
     const { environment, lock } = validateEnvironmentAndLock(
       parse(environmentText!),
       parse(lockText!),
@@ -112,6 +117,7 @@ export async function readDeclarativeProject(rootInput: string): Promise<Declara
     return {
       root,
       workflow,
+      profiles,
       environment,
       lock,
       projectPolicy: parseProjectPolicy(parse(policyText!)),

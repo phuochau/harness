@@ -432,13 +432,18 @@ interface RouteFixtureOverrides {
   readonly requirements?: readonly string[];
   readonly capabilities?: Partial<Record<WorkerKind, readonly string[]>>;
   readonly preference?: readonly WorkerKind[];
+  readonly implementationFamily?: WorkerKind;
+  /** @deprecated Compatibility for older race fixtures. */
+  readonly implementationWorker?: WorkerKind;
 }
 
 function workerProfiles(
   overrides: RouteFixtureOverrides,
-): Record<WorkerKind, WorkerProfile> {
+): Record<string, WorkerProfile> {
   const unauthenticated = new Set(overrides.unauthenticated ?? []);
-  const make = (kind: WorkerKind): WorkerProfile => ({
+  const make = (profileId: string, kind: WorkerKind): WorkerProfile => ({
+    profileId,
+    family: kind,
     kind,
     authenticated: !unauthenticated.has(kind),
     available: true,
@@ -448,29 +453,48 @@ function workerProfiles(
     concurrencyLimit: 2,
     active: 0,
   });
-  return { codex: make("codex"), devin: make("devin"), claude: make("claude") };
+  return {
+    "implementer-codex": make("implementer-codex", "codex"),
+    "implementer-devin": make("implementer-devin", "devin"),
+    "implementer-claude": make("implementer-claude", "claude"),
+    "reviewer-codex": make("reviewer-codex", "codex"),
+    "reviewer-devin": make("reviewer-devin", "devin"),
+    "reviewer-claude": make("reviewer-claude", "claude"),
+  };
 }
 
 export function routeFixture(
   overrides: RouteFixtureOverrides = {},
 ): WorkerSelection {
   return {
-    preference: overrides.preference ?? ["devin", "codex", "claude"],
+    preference: (overrides.preference ?? ["devin", "codex", "claude"]).map(
+      (family) => `implementer-${family}`,
+    ),
     profiles: workerProfiles(overrides),
     requirements: new Set(overrides.requirements ?? []),
-    unavailable: new Set(overrides.unavailable ?? []),
+    unavailable: new Set(
+      (overrides.unavailable ?? []).flatMap((family) => [
+        `implementer-${family}`,
+        `reviewer-${family}`,
+      ]),
+    ),
   };
 }
 
 export function reviewFixture(
-  overrides: RouteFixtureOverrides & { implementationWorker?: WorkerKind } = {},
+  overrides: RouteFixtureOverrides = {},
 ): ReviewSelection {
-  return {
-    ...routeFixture({
+  const selection = routeFixture({
       ...overrides,
       preference: overrides.preference ?? ["codex", "claude", "devin"],
-    }),
-    implementationWorker: overrides.implementationWorker ?? "devin",
+    });
+  return {
+    ...selection,
+    preference: selection.preference.map((id) =>
+      id.replace("implementer-", "reviewer-"),
+    ),
+    implementationFamily:
+      overrides.implementationFamily ?? overrides.implementationWorker ?? "devin",
   };
 }
 
@@ -482,6 +506,8 @@ export const assignmentFixture = fixture<AssignmentInput>(() => ({
   taskId: "T001",
   attempt: 1,
   role: "implementation",
+  profileId: "implementer-devin",
+  profileFamily: "devin",
   workerKind: "devin",
   commit: "abc123",
   allowedPaths: ["src/**", "test/**"],
@@ -508,7 +534,10 @@ export function reviewAssignment(
     stageId: "review",
     jobId: "review:T001",
     role: "review",
+    profileId: "reviewer-codex",
+    profileFamily: "codex",
     workerKind: "codex",
+    implementationProfileFamily: "devin",
     implementationWorkerKind: "devin",
     requiredDisciplines: ["requesting-code-review"],
     verificationCommands: [],

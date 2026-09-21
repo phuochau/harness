@@ -4,7 +4,10 @@ import { compileWorkflow } from "../../../src/config/compile.js";
 import {
   compileInputCase,
   fixtureCompileInput,
+  fixtureLockedProfileResources,
+  fixtureProfiles,
 } from "../../support/factories.js";
+import { resolveProfiles } from "../../../src/config/profiles.js";
 
 it("resolves named argv commands and returns a frozen revision", () => {
   const compiled = compileWorkflow(fixtureCompileInput());
@@ -61,6 +64,7 @@ it("hashes normalized content deterministically and includes command changes", (
         left.environment.commands.task_verify = argv;
         const right = {
           actionSchemas: left.actionSchemas!,
+          profiles: left.profiles!,
           environment: {
             pi_packages: left.environment.pi_packages,
             ...(left.environment.agent_plugins === undefined
@@ -88,4 +92,20 @@ it("hashes normalized content deterministically and includes command changes", (
   expect(compileWorkflow(fixtureCompileInput()).revision).not.toBe(
     compileWorkflow(changed).revision,
   );
+});
+
+it("freezes active-run profiles and records their independent hash", () => {
+  const run = compileWorkflow(fixtureCompileInput());
+  const editedDocument = structuredClone(fixtureProfiles());
+  editedDocument.profiles["planner-codex"]!.model = "openai-codex/changed";
+  const edited = resolveProfiles(
+    editedDocument,
+    fixtureLockedProfileResources(),
+  );
+
+  expect(run.resolvedProfilesHash).not.toBe(edited.hash);
+  expect(run.profiles.byId["planner-codex"]?.model).toBe(
+    "openai-codex/gpt-5.6-luna",
+  );
+  expect(Object.isFrozen(run.profiles)).toBe(true);
 });

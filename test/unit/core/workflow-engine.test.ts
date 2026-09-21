@@ -72,7 +72,7 @@ it("turns task cancellation into a durable worker cancellation effect", () => {
   state.jobs["implement:T001"] = {
     state: "RUNNING",
     attempt: 1,
-    worker: "codex",
+    worker: "implementer-codex",
   };
   const original = {
     action: "worker.execute",
@@ -85,7 +85,7 @@ it("turns task cancellation into a durable worker cancellation effect", () => {
       stageId: "implement",
       taskId: "T001",
       attempt: 1,
-      worker: "codex",
+      worker: "implementer-codex",
     },
   };
   state.outstandingEffects[original.idempotencyKey] = original;
@@ -126,7 +126,7 @@ it("turns an explicit retry into a new immutable attempt and fallback route", ()
   state.jobs["implement:T001"] = {
     state: "FAILED",
     attempt: 1,
-    worker: "devin",
+    worker: "implementer-devin",
     failure: "worker unavailable",
   };
   state.jobs.prepare = { state: "DONE", attempt: 1, worker: "system" };
@@ -149,7 +149,7 @@ it("turns an explicit retry into a new immutable attempt and fallback route", ()
       expect.objectContaining({
         eventType: "attempt.started",
         entityId: "implement:T001",
-        payload: { attempt: 2, worker: "codex" },
+        payload: { attempt: 2, worker: "implementer-codex" },
       }),
     ]),
   );
@@ -163,13 +163,13 @@ it("remediates review changes by invalidating and rerunning the declared impleme
   state.jobs["implement:T001"] = {
     state: "DONE",
     attempt: 1,
-    worker: "devin",
+    worker: "implementer-devin",
     firstAttemptAt: "2026-09-21T00:00:00.000Z",
   };
   state.jobs["review:T001"] = {
     state: "RETRY",
     attempt: 1,
-    worker: "codex",
+    worker: "reviewer-codex",
     retryReason: "changes_requested",
     firstAttemptAt: "2026-09-21T00:00:00.000Z",
   };
@@ -189,12 +189,12 @@ it("remediates review changes by invalidating and rerunning the declared impleme
     expect.objectContaining({
       eventType: "attempt.started",
       entityId: "implement:T001",
-      payload: { attempt: 2, worker: "codex" },
+      payload: { attempt: 2, worker: "implementer-codex" },
     }),
   ]));
   expect(decision.effects).toContainEqual(expect.objectContaining({
     action: "worker.execute",
-    input: expect.objectContaining({ taskId: "T001", attempt: 2, worker: "codex" }),
+    input: expect.objectContaining({ taskId: "T001", attempt: 2, worker: "implementer-codex" }),
   }));
   expect(decision.effects).not.toContainEqual(expect.objectContaining({
     action: "worker.review",
@@ -210,7 +210,7 @@ it("resolves a task-level reroute target and honors the requested declared worke
   state.jobs["implement:T001"] = {
     state: "BLOCKED",
     attempt: 1,
-    worker: "devin",
+    worker: "implementer-devin",
     firstAttemptAt: "2026-09-21T00:00:00.000Z",
   };
 
@@ -221,7 +221,7 @@ it("resolves a task-level reroute target and honors the requested declared worke
       source: "operator",
       kind: "operator_intent",
       idempotencyKey: "reroute:T001:claude",
-      payload: { operation: "reroute", target: "T001", arguments: { worker: "claude" } },
+      payload: { operation: "reroute", target: "T001", arguments: { worker: "implementer-claude" } },
     }),
   );
   expect(decision.events).toEqual(expect.arrayContaining([
@@ -229,7 +229,7 @@ it("resolves a task-level reroute target and honors the requested declared worke
     expect.objectContaining({
       eventType: "attempt.started",
       entityId: "implement:T001",
-      payload: { attempt: 2, worker: "claude" },
+      payload: { attempt: 2, worker: "implementer-claude" },
     }),
   ]));
 });
@@ -242,7 +242,7 @@ it("fails a retrying job when its finite attempt budget is exhausted", () => {
   state.jobs["implement:T001"] = {
     state: "RETRY",
     attempt: 3,
-    worker: "claude",
+    worker: "implementer-claude",
     retryReason: "task_failure",
     firstAttemptAt: "2026-09-21T00:00:00.000Z",
   };
@@ -282,7 +282,7 @@ it("turns a declared remediation block into a durable blocker", () => {
   state.jobs.final_review = {
     state: "RETRY",
     attempt: 1,
-    worker: "codex",
+    worker: "reviewer-codex",
     retryReason: "changes_requested",
     firstAttemptAt: "2026-09-21T00:00:00.000Z",
   };

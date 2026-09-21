@@ -1,0 +1,140 @@
+schema: harness/profiles/v1
+profiles:
+  planner-codex:
+    family: codex
+    runtime: pi
+    provider: openai-codex
+    model: openai-codex/gpt-5.6-luna
+    thinking: high
+    role: planning
+    environment: isolated
+    tools: [read, grep, find, ls, write, edit]
+    extensions: []
+    skills: []
+    context_files: false
+    prompt_templates: [spec-kit]
+    mcp: []
+  planner-devin:
+    family: devin
+    runtime: pi
+    provider: devin
+    model: devin/swe-2
+    role: planning
+    environment: isolated
+    tools: [read, grep, find, ls, write, edit]
+    extensions: [devin-acp]
+    skills: []
+    context_files: false
+    prompt_templates: [spec-kit]
+    mcp: []
+  planner-claude:
+    family: claude
+    runtime: pi
+    provider: claude-bridge
+    model: claude-bridge/claude-sonnet-5
+    thinking: high
+    role: planning
+    environment: isolated
+    tools: [read, grep, find, ls, write, edit]
+    extensions: [claude-bridge]
+    skills: []
+    context_files: false
+    prompt_templates: [spec-kit]
+    mcp: []
+  implementer-codex:
+    family: codex
+    runtime: pi
+    provider: openai-codex
+    model: openai-codex/gpt-5.6-luna
+    thinking: high
+    role: implementation
+    environment: isolated
+    tools: [read, bash, edit, write, grep, find, ls]
+    extensions: []
+    skills:
+      - { id: superpowers:using-superpowers, targets: [pi] }
+      - { id: superpowers:test-driven-development, targets: [pi] }
+      - { id: superpowers:systematic-debugging, targets: [pi] }
+      - { id: superpowers:verification-before-completion, targets: [pi] }
+    context_files: false
+    prompt_templates: []
+    mcp: []
+  implementer-devin:
+    family: devin
+    runtime: pi
+    provider: devin
+    model: devin/swe-2
+    role: implementation
+    environment: isolated
+    tools: [read, bash, edit, write, grep, find, ls]
+    extensions: [devin-acp]
+    skills:
+      - { id: superpowers:using-superpowers, targets: [pi, provider] }
+      - { id: superpowers:test-driven-development, targets: [pi, provider] }
+      - { id: superpowers:systematic-debugging, targets: [pi, provider] }
+      - { id: superpowers:verification-before-completion, targets: [pi, provider] }
+    context_files: false
+    prompt_templates: []
+    mcp: []
+  implementer-claude:
+    family: claude
+    runtime: pi
+    provider: claude-bridge
+    model: claude-bridge/claude-sonnet-5
+    thinking: high
+    role: implementation
+    environment: isolated
+    tools: [read, bash, edit, write, grep, find, ls]
+    extensions: [claude-bridge]
+    skills:
+      - { id: superpowers:using-superpowers, targets: [pi, provider] }
+      - { id: superpowers:test-driven-development, targets: [pi, provider] }
+      - { id: superpowers:systematic-debugging, targets: [pi, provider] }
+      - { id: superpowers:verification-before-completion, targets: [pi, provider] }
+    context_files: false
+    prompt_templates: []
+    mcp: []
+  reviewer-codex:
+    family: codex
+    runtime: pi
+    provider: openai-codex
+    model: openai-codex/gpt-5.6-luna
+    thinking: high
+    role: review
+    environment: isolated
+    tools: [read, bash, grep, find, ls]
+    extensions: []
+    skills:
+      - { id: superpowers:verification-before-completion, targets: [pi] }
+    context_files: false
+    prompt_templates: []
+    mcp: []
+  reviewer-devin:
+    family: devin
+    runtime: pi
+    provider: devin
+    model: devin/swe-2
+    role: review
+    environment: isolated
+    tools: [read, bash, grep, find, ls]
+    extensions: [devin-acp]
+    skills:
+      - { id: superpowers:verification-before-completion, targets: [pi, provider] }
+    context_files: false
+    prompt_templates: []
+    mcp: []
+  reviewer-claude:
+    family: claude
+    runtime: pi
+    provider: claude-bridge
+    model: claude-bridge/claude-sonnet-5
+    thinking: high
+    role: review
+    environment: isolated
+    tools: [read, bash, grep, find, ls]
+    extensions: [claude-bridge]
+    skills:
+      - { id: superpowers:verification-before-completion, targets: [pi, provider] }
+    context_files: false
+    prompt_templates: []
+    mcp: []
