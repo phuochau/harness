@@ -23,14 +23,9 @@ import { NodeProcessRunner } from "../../../src/git/process.js";
 import { FakeProcessRunner } from "../../support/fake-process.js";
 import { createTempGitRepository } from "../../support/git-fixtures.js";
 import { FakeClock } from "../../support/fake-clock.js";
+import { exactTaskDocumentFixture } from "../../support/planning-fixtures.js";
 
-const TASKS = [
-  "# Tasks",
-  "",
-  "- [ ] T001 Implement first feature",
-  "- [ ] T002 Implement second feature",
-  "",
-].join("\n");
+const TASKS = exactTaskDocumentFixture();
 
 function context(
   git: NativeGitActionPort,
@@ -180,7 +175,7 @@ it("atomically promotes a verified candidate with one checkbox transition", asyn
     expect(await fixture.port.treeContains(output.targetCommit, ["first.txt", "second.txt"])).toBe(true);
     expect(
       await fixture.port.readTextAt(output.targetCommit, "specs/F023/tasks.md"),
-    ).toContain("- [x] T001 Implement first feature");
+    ).toContain("- [x] T001 [P] [US1] Implement parser");
     await expect(
       project.reconcile(context(fixture.port), projectionIntent),
     ).resolves.toEqual({ status: "observed", output });

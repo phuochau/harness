@@ -4,6 +4,7 @@ import type {
 } from "../contracts/task-graph.js";
 import { validateTaskGraph } from "../contracts/task-graph.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
+import { canonicalJson } from "../shared/canonical-json.js";
 import { normalizeOwnedPath, pathsOverlap } from "./path-conflicts.js";
 
 export interface GraphContext {
@@ -33,7 +34,7 @@ function normalizedTask(task: TaskNode): TaskNode {
 
 function assertCanonicalProjection(actual: TaskNode, expected?: TaskNode): void {
   if (!expected) throw new GraphError(`task ${actual.id} does not match tasks.md`);
-  if (JSON.stringify(normalizedTask(actual)) !== JSON.stringify(normalizedTask(expected))) {
+  if (canonicalJson(normalizedTask(actual)) !== canonicalJson(normalizedTask(expected))) {
     throw new GraphError(`task ${actual.id} does not match tasks.md`);
   }
 }

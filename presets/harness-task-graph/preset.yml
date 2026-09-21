@@ -1,0 +1,19 @@
+schema_version: "1.0"
+preset:
+  id: harness-task-graph
+  name: Harness Task Graph
+  version: "1.0.0"
+  description: Add a deterministic harness task graph to speckit.tasks
+  author: pi-multi-agent-harness
+  license: MIT
+requires:
+  speckit_version: ">=0.1.0"
+provides:
+  templates:
+    - type: command
+      name: speckit.tasks
+      file: commands/speckit.tasks.md
+      description: Generate tasks.md and a hash-bound harness task graph
+      strategy: wrap
+tags: [orchestration, task-graph]
+

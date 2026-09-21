@@ -2,7 +2,8 @@ import type {
   IntegrationIdentity,
   NativeGitActionPort,
 } from "../git/action-port.js";
-import { sha256 } from "../shared/sha256.js";
+import { semanticHash } from "../speckit/semantic-hash.js";
+import { parseSpecKitTasks } from "../speckit/task-records.js";
 import type {
   ActionContext,
   ActionHandler,
@@ -42,14 +43,8 @@ export interface TaskFinalizationOutput {
 
 export class TaskFinalizationInvariantError extends Error {}
 
-function normalizedTaskSemantics(text: string): string {
-  return text
-    .replace(/\r\n/g, "\n")
-    .replace(/^(\s*[-*]\s+\[)[ xX](\])/gm, "$1 $2");
-}
-
 export function tasksSemanticHash(text: string): string {
-  return sha256(normalizedTaskSemantics(text));
+  return semanticHash(parseSpecKitTasks(text));
 }
 
 function checkedTask(text: string, taskId: string): string {
@@ -221,4 +216,3 @@ export class GitProjectTaskStatusAction
     return { status: "observed", output: outputFor(intent, commit) };
   }
 }
-
