@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { HarnessLock, LockedDependency } from "../contracts/lock.js";
 import { canonicalJson } from "../shared/canonical-json.js";
 import { recipeFor } from "./recipes.js";
+import { OFFICIAL_NPM_REGISTRY } from "./recipes.js";
 import type { CapabilityReport, EffectivePolicy, TrustedSource } from "./types.js";
 
 export interface SkippedInstallStep {
@@ -24,6 +25,7 @@ export interface AutomaticInstallStep {
   readonly blocking: true;
   readonly executable: string;
   readonly argv: readonly string[];
+  readonly environment?: Readonly<Record<string, string>>;
   readonly cwd: "trusted-install-root";
   readonly scope: "project" | "global";
   readonly source: TrustedSource;
@@ -100,6 +102,7 @@ function trustedSource(dependency: LockedDependency): TrustedSource | undefined 
     identity: dependency.source.identity,
     version: dependency.source.version,
     integrity: dependency.source.integrity,
+    ...(dependency.source.kind === "npm" ? { registry: OFFICIAL_NPM_REGISTRY } : {}),
   };
 }
 

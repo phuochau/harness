@@ -1,9 +1,17 @@
 import type { LockedDependency } from "../contracts/lock.js";
 import type { TrustedSource } from "./types.js";
 
+export const OFFICIAL_NPM_REGISTRY = "https://registry.npmjs.org/";
+
+const npmRegistryEnvironment = Object.freeze({
+  NPM_CONFIG_REGISTRY: OFFICIAL_NPM_REGISTRY,
+  npm_config_registry: OFFICIAL_NPM_REGISTRY,
+});
+
 export interface AutomaticInstallRecipe {
   readonly executable: string;
   readonly argv: readonly string[];
+  readonly environment?: Readonly<Record<string, string>>;
   readonly cwd: "trusted-install-root";
   readonly scope: "project" | "global";
   readonly expectedMutations: readonly string[];
@@ -37,6 +45,7 @@ export function recipeFor(
       recipe: {
         executable: "pi",
         argv: ["install", "-l", piSource],
+        environment: npmRegistryEnvironment,
         cwd: "trusted-install-root",
         scope: "project",
         expectedMutations: [".pi/settings.json", ".pi/npm/**"],
@@ -54,8 +63,10 @@ export function recipeFor(
           "install",
           "--global",
           "--ignore-scripts",
+          `--registry=${OFFICIAL_NPM_REGISTRY}`,
           `${source.identity}@${source.version}`,
         ],
+        environment: npmRegistryEnvironment,
         cwd: "trusted-install-root",
         scope: "global",
         expectedMutations: ["global npm prefix"],

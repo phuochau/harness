@@ -178,6 +178,7 @@ export function createHarnessSystem(
   const dispatches = new Set<Promise<void>>();
   const recovering = new Set<string>();
   let activityRevision = 0;
+  let dispatchFailure: unknown;
   let disposed = false;
   let controller: HarnessController;
 
@@ -195,12 +196,50 @@ export function createHarnessSystem(
     recovering.add(intent.idempotencyKey);
     activityRevision += 1;
     const operation = (async () => {
-      let command: ControllerCommand;
       try {
-        const output = mode === "fresh"
-          ? await ports.effects.runFresh(intent)
-          : await ports.effects.recover(intent);
-        command = effectResultCommand(
+        let output: unknown;
+        try {
+          output = mode === "fresh"
+            ? await ports.effects.runFresh(intent)
+            : await ports.effects.recover(intent);
+        } catch (error) {
+          const defaultFailure: DecisionEventDraft = {
+            eventType: "job.failed",
+            entityId: entityFor(intent, ports.runId),
+            idempotencyKey: `job-failed:${intent.idempotencyKey}`,
+            payload: {
+              reason: error instanceof Error ? error.message : String(error),
+            },
+          };
+          await controller.enqueue(effectResultCommand(
+            ports.runId,
+            intent,
+            {
+              status: "failed",
+              code:
+                typeof error === "object" &&
+                error !== null &&
+                typeof (error as { code?: unknown }).code === "string"
+                  ? (error as { code: string }).code
+                  : "EFFECT_EXECUTION_FAILED",
+              evidence: safeEvidence(error),
+              lifecycle: ports.lifecycle?.failed?.(intent, error) ?? [defaultFailure],
+            },
+          ));
+          await controller.enqueue({
+            schemaVersion: 1,
+            source: "timer",
+            kind: "tick",
+            idempotencyKey: `wake-after-effect:${intent.idempotencyKey}`,
+            payload: { reason: "effect_result", intentKey: intent.idempotencyKey },
+          });
+          return;
+        }
+
+        // Mapping successful external output into lifecycle evidence is deliberately
+        // outside the execution catch. If the mapper rejects the output, the durable
+        // intent remains outstanding so recovery can reconcile it safely.
+        await controller.enqueue(effectResultCommand(
           ports.runId,
           intent,
           {
@@ -208,34 +247,7 @@ export function createHarnessSystem(
             output,
             lifecycle: ports.lifecycle?.observed(intent, output) ?? [],
           },
-        );
-      } catch (error) {
-        const defaultFailure: DecisionEventDraft = {
-          eventType: "job.failed",
-          entityId: entityFor(intent, ports.runId),
-          idempotencyKey: `job-failed:${intent.idempotencyKey}`,
-          payload: {
-            reason: error instanceof Error ? error.message : String(error),
-          },
-        };
-        command = effectResultCommand(
-          ports.runId,
-          intent,
-          {
-            status: "failed",
-            code:
-              typeof error === "object" &&
-              error !== null &&
-              typeof (error as { code?: unknown }).code === "string"
-                ? (error as { code: string }).code
-                : "EFFECT_EXECUTION_FAILED",
-            evidence: safeEvidence(error),
-            lifecycle: ports.lifecycle?.failed?.(intent, error) ?? [defaultFailure],
-          },
-        );
-      }
-      try {
-        await controller.enqueue(command);
+        ));
         await controller.enqueue({
           schemaVersion: 1,
           source: "timer",
@@ -250,7 +262,10 @@ export function createHarnessSystem(
     dispatches.add(operation);
     void operation.then(
       () => dispatches.delete(operation),
-      () => dispatches.delete(operation),
+      (error) => {
+        dispatchFailure ??= error;
+        dispatches.delete(operation);
+      },
     );
   };
 
@@ -273,11 +288,21 @@ export function createHarnessSystem(
 
   const drain = async (): Promise<void> => {
     while (true) {
+      if (dispatchFailure !== undefined) {
+        const failure = dispatchFailure;
+        dispatchFailure = undefined;
+        throw failure;
+      }
       const observedRevision = activityRevision;
       await controller.drain();
       const active = [...dispatches];
-      await Promise.all(active);
+      await Promise.allSettled(active);
       await controller.drain();
+      if (dispatchFailure !== undefined) {
+        const failure = dispatchFailure;
+        dispatchFailure = undefined;
+        throw failure;
+      }
       if (
         dispatches.size === 0 &&
         activityRevision === observedRevision

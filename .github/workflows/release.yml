@@ -46,8 +46,25 @@ jobs:
       - run: npm run compat:speckit
       - run: npm run compat:herdr
 
+  real-e2e:
+    runs-on: [self-hosted, harness-e2e]
+    timeout-minutes: 40
+    env:
+      HARNESS_E2E_REAL: "1"
+      HARNESS_E2E_DISPOSABLE: "1"
+      HARNESS_E2E_GITHUB_REPO: ${{ vars.HARNESS_E2E_GITHUB_REPO }}
+      HARNESS_E2E_COMMAND: ${{ vars.HARNESS_E2E_COMMAND }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.19.0"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run e2e:real
+
   publish:
-    needs: [verify, compatibility]
+    needs: [verify, compatibility, real-e2e]
     runs-on: ubuntu-latest
     environment: npm
     steps:

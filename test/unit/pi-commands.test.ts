@@ -5,6 +5,7 @@ import {
   HarnessCommandService,
   type HarnessCommandBackend,
 } from "../../src/pi/commands.js";
+import { previewEffectKinds } from "../../src/pi/dependencies.js";
 
 function fixture(confirm = true) {
   const commands: ControllerCommand[] = [];
@@ -83,5 +84,22 @@ it("does not enqueue a denied run and emits typed retry/reroute intents", async 
   expect(run.commands.map((command) => command.payload)).toEqual([
     { operation: "retry", target: "T001", arguments: {} },
     { operation: "reroute", target: "T001", arguments: { worker: "claude" } },
+  ]);
+});
+
+it("previews every distinct workflow effect before run approval", () => {
+  expect(previewEffectKinds([
+    { uses: "spec-kit.specify" },
+    { uses: "worker.execute" },
+    { uses: "command.run" },
+    { uses: "worker.execute" },
+    { uses: "git.push" },
+    { uses: "github.pull-request" },
+  ])).toEqual([
+    "spec-kit.specify",
+    "worker.execute",
+    "command.run",
+    "git.push",
+    "github.pull-request",
   ]);
 });

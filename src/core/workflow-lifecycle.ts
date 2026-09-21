@@ -259,6 +259,25 @@ export function createWorkflowLifecycle(): WorkflowLifecycle {
     failed(intent, error) {
       const bound = identity(intent);
       const message = error instanceof Error ? error.message : String(error);
+      const code =
+        typeof error === "object" &&
+        error !== null &&
+        typeof (error as { code?: unknown }).code === "string"
+          ? (error as { code: string }).code
+          : undefined;
+      if (code === "INDETERMINATE_EFFECT") {
+        const rawEvidence = (error as { evidence?: unknown }).evidence;
+        const evidence = Array.isArray(rawEvidence)
+          ? rawEvidence.filter((item): item is string => typeof item === "string")
+          : [];
+        return [blocked(
+          intent,
+          bound.jobId,
+          message,
+          evidence,
+          "Inspect external state, then retry recovery or resolve the effect manually.",
+        )];
+      }
       return [{
         eventType: "job.failed",
         entityId: bound.jobId,

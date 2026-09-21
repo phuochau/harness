@@ -34,6 +34,10 @@ it("uses the exact locked project-local Pi package recipe", () => {
     mode: "automatic",
     executable: "pi",
     argv: ["install", "-l", "npm:pi-multi-agent-harness@0.1.0"],
+    environment: {
+      NPM_CONFIG_REGISTRY: "https://registry.npmjs.org/",
+      npm_config_registry: "https://registry.npmjs.org/",
+    },
     expectedMutations: [".pi/settings.json", ".pi/npm/**"],
   });
   expect(plan.warnings.join(" ")).toMatch(/arbitrary code/);

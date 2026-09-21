@@ -1,5 +1,4 @@
 import { Command } from "commander";
-import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { bootstrap } from "./bootstrap.js";
 import { parseArgvJson } from "./command-detection.js";
@@ -10,12 +9,12 @@ import { probeEnvironment } from "../install/probes.js";
 import { ReceiptStore } from "../install/receipts.js";
 import type { CapabilityReport, ExecutableCapability } from "../install/types.js";
 import type { TrustedSource } from "../install/types.js";
+import { OFFICIAL_NPM_REGISTRY } from "../install/recipes.js";
 import { NodeProcessRunner } from "../git/process.js";
 import type { DeclarativeProject } from "./trusted-project-reader.js";
 import { connectInstalledHerdr } from "../runtime/herdr/client.js";
 import { explain } from "./explain.js";
 import { graph } from "./graph.js";
-import { recover } from "./recover.js";
 import { installedStartDependencies, start } from "./start.js";
 import { status } from "./status.js";
 
@@ -55,6 +54,36 @@ function executableCapabilities(project: DeclarativeProject): readonly Executabl
     devin: "devin",
     claude: "claude",
   };
+  const auth: Readonly<Record<string, ExecutableCapability["auth"]>> = {
+    "pi-coding-agent": {
+      args: ["auth", "check", "--provider", "openai-codex", "--json", "--no-refresh"],
+      isAuthenticated: (stdout) => {
+        try {
+          return (JSON.parse(stdout) as { status?: unknown }).status === "ready";
+        } catch {
+          return false;
+        }
+      },
+    },
+    codex: {
+      args: ["login", "status"],
+      isAuthenticated: (stdout, stderr) => /logged in/i.test(`${stdout}\n${stderr}`),
+    },
+    devin: {
+      args: ["auth", "status"],
+      isAuthenticated: (stdout, stderr) => /logged in/i.test(`${stdout}\n${stderr}`),
+    },
+    claude: {
+      args: ["auth", "status"],
+      isAuthenticated: (stdout) => {
+        try {
+          return (JSON.parse(stdout) as { loggedIn?: unknown }).loggedIn === true;
+        } catch {
+          return /logged in/i.test(stdout) && !/not logged in/i.test(stdout);
+        }
+      },
+    },
+  };
   for (const dependency of project.lock.dependencies) {
     if (dependency.id === "typebox") {
       result.push({
@@ -68,12 +97,14 @@ function executableCapabilities(project: DeclarativeProject): readonly Executabl
     }
     const command = commands[dependency.id];
     if (command !== undefined) {
+      const authConfig = auth[dependency.id];
       result.push({
         id: dependency.id,
         command,
         versionArgs: ["--version"],
         expectedVersion: dependency.version,
         parseVersion: semver,
+        ...(authConfig === undefined ? {} : { auth: authConfig }),
       });
     }
   }
@@ -94,12 +125,13 @@ async function defaultProbe(
     const result = byId[`pi-package:${requirement.id}`];
     if (result !== undefined) byId[requirement.dependency] = result;
   }
-  const hasPlanningProfile = project.workflow.stages.some(
-    (stage) => stage.model_profile === "chatgpt-planning",
-  );
+  const planningAuth = byId["auth:pi-coding-agent"];
   byId["planning-profile:chatgpt"] = {
     id: "planning-profile:chatgpt",
-    status: hasPlanningProfile ? "present" : "missing",
+    status: planningAuth?.status === "present" ? "present" : "unverifiable",
+    ...(planningAuth?.status === "present"
+      ? {}
+      : { evidence: ["Pi openai-codex credential readiness was not proven"] }),
   };
   return { byId };
 }
@@ -108,9 +140,21 @@ async function npmRegistryIntegrity(
   processRunner: NodeProcessRunner,
   source: { identity: string; version: string },
 ): Promise<string | undefined> {
+  if (
+    "registry" in source &&
+    (source as { registry?: unknown }).registry !== OFFICIAL_NPM_REGISTRY
+  ) {
+    throw new Error("npm source is not bound to the official registry");
+  }
   const result = await processRunner.run(
     "npm",
-    ["view", `${source.identity}@${source.version}`, "dist.integrity", "--json"],
+    [
+      "view",
+      `${source.identity}@${source.version}`,
+      "dist.integrity",
+      "--json",
+      `--registry=${OFFICIAL_NPM_REGISTRY}`,
+    ],
     { shell: false, timeoutMs: 30_000 },
   );
   if (result.exitCode !== 0) return undefined;
@@ -134,14 +178,21 @@ async function resolveRegistrySource(
   if (integrity === undefined || !integrity.startsWith("sha512-")) {
     throw new Error(`npm registry did not return a sha512 integrity for ${source.identity}`);
   }
-  return { ...source, integrity };
+  return { ...source, registry: OFFICIAL_NPM_REGISTRY, integrity };
 }
 
 async function verifyNpmIntegrity(
   processRunner: NodeProcessRunner,
-  source: { kind: string; identity: string; version: string; integrity: string },
+  source: {
+    kind: string;
+    identity: string;
+    version: string;
+    integrity: string;
+    registry?: string;
+  },
 ): Promise<boolean> {
   if (source.kind !== "npm" || !source.integrity.startsWith("sha512-")) return false;
+  if (source.registry !== OFFICIAL_NPM_REGISTRY) return false;
   return await npmRegistryIntegrity(processRunner, source) === source.integrity;
 }
 
@@ -315,22 +366,11 @@ export async function main(argv: readonly string[]): Promise<number> {
     });
   program
     .command("recover <run-id> [path]")
-    .description("Repair the journal and reconcile recorded effects without scheduling")
-    .action(async (runId: string, path: string | undefined) => {
-      const summary = await recover(
-        { root: path ?? ".", runId },
-        {
-          ownerId: `recover:${process.pid}:${randomUUID()}`,
-          effects: {
-            async recover() {
-              throw new Error(
-                "standalone recovery has no matching action adapter; external state is indeterminate",
-              );
-            },
-          },
-        },
+    .description("Reconcile a run using installed production action adapters")
+    .action(async (_runId: string, _path: string | undefined) => {
+      throw new Error(
+        "standalone recovery is unavailable until production action adapters are connected; journal was not modified",
       );
-      process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
     });
   await program.parseAsync([...argv], { from: "user" });
   return 0;

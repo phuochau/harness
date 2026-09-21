@@ -32,6 +32,9 @@ driver. The driver performs the real run and prints one JSON object containing
 `runState: "DONE"`, `verified: true`, and the created pull request URL and
 repository. The test executes that argv directly with no shell.
 
+Publication is blocked unless this smoke passes on the `harness-e2e` runner.
+A skipped test does not satisfy the release gate.
+
 ## Automated release
 
 Push an annotated `vX.Y.Z` tag. The release workflow:

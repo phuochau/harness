@@ -18,6 +18,7 @@ function authorized(expected: TrustedSource, actual: TrustedSource): boolean {
     actual.kind === expected.kind &&
     actual.identity === expected.identity &&
     actual.version === expected.version &&
+    actual.registry === expected.registry &&
     /^sha512-[A-Za-z0-9+/]+={0,2}$/.test(actual.integrity)
   );
 }

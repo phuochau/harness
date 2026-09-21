@@ -85,6 +85,7 @@ export async function executeInstallPlan(
     try {
       result = await dependencies.process.run(step.executable, step.argv, {
         cwd: dependencies.root,
+        ...(step.environment === undefined ? {} : { env: step.environment }),
         shell: false,
         timeoutMs: 120_000,
       });

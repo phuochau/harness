@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import type { EffectIntent } from "../../../src/actions/types.js";
 import type { JsonValue } from "../../../src/contracts/common.js";
 import { createWorkflowLifecycle } from "../../../src/core/workflow-lifecycle.js";
+import { IndeterminateEffect } from "../../../src/actions/executor.js";
 
 const hash = `sha256:${"a".repeat(64)}` as const;
 
@@ -115,4 +116,27 @@ it("fails closed for an unregistered custom action lifecycle", () => {
       { ok: true },
     ),
   ).toThrow(/no lifecycle mapper/);
+});
+
+it("maps an indeterminate external outcome to BLOCKED with retained evidence", () => {
+  const lifecycle = createWorkflowLifecycle();
+  const effect = intent("worker.execute", {
+    entityId: "implement:T001",
+    jobId: "implement:T001",
+    stageId: "implement",
+    taskId: "T001",
+    worker: "devin",
+  });
+  const events = lifecycle.failed(
+    effect,
+    new IndeterminateEffect(effect, ["remote session cannot be reconciled"]),
+  );
+  expect(events).toEqual([
+    expect.objectContaining({
+      eventType: "job.blocked",
+      payload: expect.objectContaining({
+        evidence: ["remote session cannot be reconciled"],
+      }),
+    }),
+  ]);
 });

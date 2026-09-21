@@ -32,7 +32,17 @@ function automaticPlan(): InstallPlan {
         mode: "automatic",
         blocking: true,
         executable: "npm",
-        argv: ["install", "--global", "--ignore-scripts", "tool@1.2.3"],
+        argv: [
+          "install",
+          "--global",
+          "--ignore-scripts",
+          "--registry=https://registry.npmjs.org/",
+          "tool@1.2.3",
+        ],
+        environment: {
+          NPM_CONFIG_REGISTRY: "https://registry.npmjs.org/",
+          npm_config_registry: "https://registry.npmjs.org/",
+        },
         cwd: "trusted-install-root",
         scope: "global",
         source: {
@@ -69,7 +79,13 @@ it("never invokes a shell or repository lifecycle script", async () => {
   );
   expect(process.calls[0]).toMatchObject({
     executable: "npm",
-    options: { shell: false },
+    options: {
+      shell: false,
+      env: {
+        NPM_CONFIG_REGISTRY: "https://registry.npmjs.org/",
+        npm_config_registry: "https://registry.npmjs.org/",
+      },
+    },
   });
   expect(process.calls[0]!.argv).toContain("--ignore-scripts");
 });

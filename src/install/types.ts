@@ -5,6 +5,7 @@ export interface TrustedSource {
   readonly identity: string;
   readonly version: string;
   readonly integrity: string;
+  readonly registry?: string;
 }
 
 export interface SourceSelector {

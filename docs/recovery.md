@@ -22,12 +22,14 @@ different copies of one run.
 harness status F023 .
 harness graph F023 .
 harness explain F023 implement:T001 .
-harness recover F023 .
 ```
 
-`status`, `graph`, and `explain` validate and read only. `recover` does not run
-the scheduler. It repairs only an incomplete final JSONL record after copying a
-diagnostic; interior corruption or a broken hash chain is fatal. It drains
+`status`, `graph`, and `explain` validate and read only. The current CLI refuses
+`harness recover` before taking a lease because the packaged production action
+registry is not connected yet; it does not append synthetic failures or mutate
+the journal. The internal recovery engine repairs only an incomplete final
+JSONL record after copying a diagnostic; interior corruption or a broken hash
+chain is fatal. Once wired to the exact action registry for the run, it drains
 accepted commands through their durable decision boundary, reconciles every
 unobserved effect by external identity, records observations/failures, and then
 writes an atomic snapshot.

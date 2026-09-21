@@ -53,6 +53,12 @@ interface LoadedProjectConfiguration {
   readonly permissions: readonly string[];
 }
 
+export function previewEffectKinds(
+  stages: readonly { readonly uses: string }[],
+): readonly string[] {
+  return [...new Set(stages.map((stage) => stage.uses))];
+}
+
 async function loadProjectConfiguration(
   cwd: string,
 ): Promise<LoadedProjectConfiguration> {
@@ -180,8 +186,10 @@ class ProjectCommandBackend implements HarnessCommandBackend {
           summary: this.configurationError ?? "Harness is not initialized",
         }
       : {
-          ready: true,
-          summary: `Harness ready (${this.configuration.workflow.revision})`,
+          ready: false,
+          summary:
+            `Configuration valid (${this.configuration.workflow.revision}), ` +
+            "but resident production action adapters are not connected in this build",
         };
   }
 
@@ -205,13 +213,23 @@ class ProjectCommandBackend implements HarnessCommandBackend {
       credentialProfiles: [...profiles],
       permissions: this.configuration.permissions,
       branches: ["harness/run-<run-id>", "harness/<run-id>-<task-id>"],
-      effects: stages
-        .map((stage) => stage.uses)
-        .filter((uses) => uses === "git.push" || uses === "github.pull-request"),
+      effects: previewEffectKinds(stages),
     };
   }
 
   public async enqueue(command: ControllerCommand): Promise<void> {
+    if (
+      command.source === "operator" &&
+      command.kind === "operator_intent" &&
+      typeof command.payload === "object" &&
+      command.payload !== null &&
+      !Array.isArray(command.payload) &&
+      command.payload.operation === "run"
+    ) {
+      throw new Error(
+        "resident production action adapters are not connected; run was not accepted",
+      );
+    }
     await this.controller.enqueue(command);
   }
 }

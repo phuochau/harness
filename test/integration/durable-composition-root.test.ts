@@ -5,6 +5,8 @@ import { afterEach, expect, it } from "vitest";
 import type { AcceptedCommandRecord } from "../../src/controller/command-source.js";
 import type { RunState } from "../../src/core/state.js";
 import { createHarnessSystem } from "../../src/durable-composition-root.js";
+import { IndeterminateEffect } from "../../src/actions/executor.js";
+import { createWorkflowLifecycle } from "../../src/core/workflow-lifecycle.js";
 import { Journal } from "../../src/state/journal.js";
 import { RunLease } from "../../src/state/lease.js";
 import type { RunPaths } from "../../src/state/types.js";
@@ -139,5 +141,130 @@ it("reconciles an outstanding intent on resident restart without fresh execution
   await system.drain();
   expect(recovered).toBe(1);
   expect(Object.keys((await system.readState()).outstandingEffects)).toEqual([]);
+  await system.dispose();
+});
+
+it("keeps a successful effect outstanding when lifecycle evidence cannot be mapped", async () => {
+  const root = await mkdtemp(join(tmpdir(), "durable-composition-lifecycle-"));
+  temporary.push(root);
+  const paths = runPaths(root);
+  const lease = await RunLease.acquire(paths, "controller:test-lifecycle");
+  const journal = new Journal(paths);
+  let acceptLifecycle = false;
+  const system = createHarnessSystem({
+    runId: "F025",
+    workflowRevision: `sha256:${"c".repeat(64)}`,
+    journal,
+    lease,
+    clock: new FakeClock(),
+    derive: (_state, accepted) => ({
+      events: [],
+      effects: accepted.command.source === "operator" ? [{
+        action: "custom.unmapped",
+        idempotencyKey: "custom.unmapped:F025:1",
+        recovery: "reconcilable" as const,
+        laneKey: "custom:F025",
+        input: {
+          entityId: "job:F025",
+          jobId: "job:F025",
+          stageId: "custom",
+          worker: "system",
+        },
+      }] : [],
+    }),
+    effects: {
+      async runFresh() {
+        return { externallyCompleted: true };
+      },
+      async recover() {
+        return { externallyCompleted: true };
+      },
+    },
+    lifecycle: {
+      observed(intent, output) {
+        if (!acceptLifecycle) {
+          return createWorkflowLifecycle().observed(intent, output);
+        }
+        return [];
+      },
+    },
+  });
+
+  await system.controller.enqueue({
+    schemaVersion: 1,
+    source: "operator",
+    kind: "operator_intent",
+    idempotencyKey: "run:F025",
+    payload: { operation: "run" },
+  });
+  await expect(system.drain()).rejects.toThrow(/no lifecycle mapper/);
+  const events = await journal.read();
+  expect(events.some((event) => event.eventType === "effect.intent")).toBe(true);
+  expect(events.some((event) => event.eventType === "effect.failed")).toBe(false);
+  expect(Object.keys((await system.readState()).outstandingEffects)).toEqual([
+    "custom.unmapped:F025:1",
+  ]);
+  acceptLifecycle = true;
+  await system.recover();
+  await system.drain();
+  expect(Object.keys((await system.readState()).outstandingEffects)).toEqual([]);
+  await system.dispose();
+});
+
+it("blocks an indeterminate recovery with its evidence", async () => {
+  const root = await mkdtemp(join(tmpdir(), "durable-composition-indeterminate-"));
+  temporary.push(root);
+  const paths = runPaths(root);
+  const lease = await RunLease.acquire(paths, "controller:test-indeterminate");
+  const clock = new FakeClock();
+  const journal = new Journal(paths);
+  const effect = {
+    action: "worker.execute",
+    idempotencyKey: "worker.execute:implement:T001:1",
+    recovery: "non_retryable" as const,
+    laneKey: "job:implement:T001",
+    input: {
+      entityId: "implement:T001",
+      jobId: "implement:T001",
+      stageId: "implement",
+      taskId: "T001",
+      worker: "devin",
+    },
+  };
+  await journal.append({
+    schemaVersion: 1,
+    timestamp: clock.now().toISOString(),
+    runId: "F026",
+    entityId: "implement:T001",
+    idempotencyKey: "intent:event",
+    eventType: "effect.intent",
+    payload: effect,
+  }, lease);
+  const system = createHarnessSystem({
+    runId: "F026",
+    workflowRevision: `sha256:${"d".repeat(64)}`,
+    journal,
+    lease,
+    clock,
+    derive: () => ({ events: [], effects: [] }),
+    effects: {
+      async runFresh() {
+        throw new Error("not used");
+      },
+      async recover(intent) {
+        throw new IndeterminateEffect(intent, ["worker session outcome is unknown"]);
+      },
+    },
+    lifecycle: createWorkflowLifecycle(),
+  });
+
+  await system.recover();
+  await system.drain();
+  const state = await system.readState();
+  expect(state.jobs["implement:T001"]?.state).toBe("BLOCKED");
+  const blocked = (await journal.read()).find((event) => event.eventType === "job.blocked");
+  expect(blocked?.payload).toMatchObject({
+    evidence: ["worker session outcome is unknown"],
+  });
   await system.dispose();
 });

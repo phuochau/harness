@@ -11,6 +11,7 @@ import type {
   TrustedSource,
   TrustPolicy,
 } from "../install/types.js";
+import { OFFICIAL_NPM_REGISTRY } from "../install/recipes.js";
 import { doctor, type DoctorReport } from "./doctor.js";
 import {
   assertLauncherMatchesLock,
@@ -118,6 +119,9 @@ export async function bootstrap(
         identity: dependency.source.identity,
         version: dependency.source.version,
         integrity: dependency.source.integrity,
+        ...(dependency.source.kind === "npm"
+          ? { registry: OFFICIAL_NPM_REGISTRY }
+          : {}),
       };
       const resolved = await dependencies.resolveSource(declared);
       if (

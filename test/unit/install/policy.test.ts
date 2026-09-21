@@ -8,6 +8,7 @@ const harness: TrustedSource = {
   identity: "pi-multi-agent-harness",
   version: "0.1.0",
   integrity: "npm-registry:dist.integrity",
+  registry: "https://registry.npmjs.org/",
 };
 
 it("allows exact release-manifest sources without an external machine policy", () => {
@@ -29,6 +30,11 @@ it("allows a registry-resolved digest only for the exact declared npm identity a
   expect(policy.allows({
     ...harness,
     version: "0.1.1",
+    integrity: `sha512-${"a".repeat(88)}`,
+  })).toBe(false);
+  expect(policy.allows({
+    ...harness,
+    registry: "https://registry.example.invalid/",
     integrity: `sha512-${"a".repeat(88)}`,
   })).toBe(false);
 });

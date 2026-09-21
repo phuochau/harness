@@ -5,10 +5,18 @@ multi-agent engineering run. Pi owns global orchestration; Codex, Devin, and
 Claude are workers; Superpowers is the engineering discipline inside workers;
 tests and CI decide correctness.
 
-The default editable workflow is immediately usable and prefers Devin → Codex
-→ Claude for implementation, then Codex → Claude → Devin for independent
-review. Change those arrays in `.harness/workflow.yaml` or select one of the
-generated workflow variants—worker order is data, not hard-coded policy.
+The default editable workflow prefers Devin → Codex → Claude for
+implementation, then Codex → Claude → Devin for independent review. Change
+those arrays in `.harness/workflow.yaml` or select one of the generated workflow
+variants—worker order is data, not hard-coded policy.
+
+> **Development status:** the durable core, workflow compiler, worker/action
+> adapters, bootstrap, and compatibility contracts are implemented. The Pi
+> extension does not yet compose those adapters into the resident durable
+> controller. This build therefore previews the complete workflow but refuses
+> `/harness-run` before accepting a run. Standalone `harness recover` also
+> refuses before taking a lease or mutating the journal. Release publication is
+> gated on a real authenticated end-to-end run.
 
 ## Quick start
 
@@ -29,9 +37,10 @@ harness doctor --json .
 harness start .
 ```
 
-Inside the dedicated Pi session, use `/harness-run`, review its effects, and
-approve the run. Operational commands include `harness status`, `graph`,
-`explain`, and `recover`; Pi also registers `/harness-status`,
+Inside the dedicated Pi session, `/harness-run` currently provides a full
+effect preview and then fails closed until resident adapter composition lands.
+Read-only operational commands include `harness status`, `graph`, and
+`explain`; Pi also registers `/harness-status`,
 `/harness-graph`, `/harness-retry`, `/harness-reroute`, `/harness-pause`, and
 the related run commands.
 
