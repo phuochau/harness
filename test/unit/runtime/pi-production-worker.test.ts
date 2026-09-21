@@ -10,6 +10,7 @@ import type { PiProcessRecord } from "../../../src/runtime/pi-process/types.js";
 import type { PiWorkerRuntime } from "../../../src/runtime/pi-worker/runtime.js";
 import { ProductionPiWorkerRuntime } from "../../../src/runtime/production/pi-worker.js";
 import { DurableRecordStore } from "../../../src/runtime/production/records.js";
+import { sha256 } from "../../../src/shared/sha256.js";
 import { fixtureResolvedProfiles } from "../../support/factories.js";
 import { processRecord } from "../../support/pi-process-fixtures.js";
 
@@ -76,6 +77,11 @@ async function fixture() {
     },
   };
   const profile = fixtureResolvedProfiles().byId[assignment.profileId]!;
+  const controlDir = join(
+    root,
+    "processes",
+    sha256("F001:implement:T001:1").slice("sha256:".length),
+  );
   const process = processRecord({
     attemptId: "F001:implement:T001:1",
     attemptToken: "token",
@@ -83,9 +89,9 @@ async function fixture() {
     cwd: worktree,
     sessionId: "session",
     sessionDir: join(root, "session"),
-    eventsPath: join(root, "session", "events.jsonl"),
-    stderrPath: join(root, "session", "stderr.log"),
-    recordPath: join(root, "session", "process.json"),
+    eventsPath: join(controlDir, "events.jsonl"),
+    stderrPath: join(controlDir, "stderr.log"),
+    recordPath: join(controlDir, "process.json"),
   });
   const prepared = {
     attemptId: process.attemptId,
@@ -137,6 +143,7 @@ async function fixture() {
       profiles: fixtureResolvedProfiles(),
       attempts,
       records,
+      processRoot: join(root, "processes"),
     }),
   };
 }
@@ -176,6 +183,16 @@ it("coalesces concurrent execute calls into one Pi process launch", async () => 
     value.runtime.execute(prepared, value.intent),
   ]);
   expect(value.pi.launch).toHaveBeenCalledOnce();
+});
+
+it("rejects a persisted attempt whose controller directory was redirected", async () => {
+  const value = await fixture();
+  const prepared = await value.runtime.prepare(value.intent) as any;
+  prepared.launch.controlDir = join(value.binding.path, ".harness-output", "forged-control");
+  await expect(value.runtime.execute(prepared, value.intent)).rejects.toThrow(
+    "persisted Pi worker attempt identity mismatch",
+  );
+  expect(value.pi.launch).not.toHaveBeenCalled();
 });
 
 it("does not signal a process that has already completed during cancellation", async () => {

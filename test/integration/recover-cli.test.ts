@@ -62,6 +62,13 @@ it("runs standalone recovery with scheduling disabled for an existing durable ru
   });
   await writeResolvedRunConfig(initialized.paths.resolvedConfig, {
     schemaVersion: 1,
+    runtime: {
+      harnessVersion: "0.1.0",
+      packageName: "pi-multi-agent-harness",
+      packageVersion: "0.1.0",
+      packageRoot: process.cwd(),
+      transportHash: `sha256:${"b".repeat(64)}`,
+    },
     workflow,
     commands: environment.commands,
   });
@@ -69,6 +76,12 @@ it("runs standalone recovery with scheduling disabled for an existing durable ru
   await writeFile(
     profilesPath,
     (await readFile(profilesPath, "utf8")).replaceAll("pi-shell-acp/gpt-5.5", "pi-shell-acp/future-model"),
+    "utf8",
+  );
+  const lockPath = join(repo.path, ".harness/harness.lock");
+  await writeFile(
+    lockPath,
+    (await readFile(lockPath, "utf8")).replace("harnessVersion: 0.1.0", "harnessVersion: 9.9.9"),
     "utf8",
   );
   const lease = await RunLease.acquire(initialized.paths, "fixture");
@@ -108,6 +121,13 @@ it("runs standalone recovery with scheduling disabled for an existing durable ru
   await expect(main(["recover", "F023", repo.path], {
     createManagedRuntimeFromResolved: async (input) => {
       expect(input.profiles).toEqual(workflow.profiles);
+      expect(input.runtimeVersion).toBe("0.1.0");
+      expect(input.packageRoot).toBe(process.cwd());
+      expect(input.expectedPackage).toEqual({
+        name: "pi-multi-agent-harness",
+        version: "0.1.0",
+        transportHash: `sha256:${"b".repeat(64)}`,
+      });
       return managed;
     },
     createStandaloneEffects: async (input) => {

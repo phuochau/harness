@@ -1,4 +1,4 @@
-import { access, realpath } from "node:fs/promises";
+import { access, readFile, realpath } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { homedir } from "node:os";
@@ -12,6 +12,7 @@ import { PiWorkerRuntime } from "../pi-worker/runtime.js";
 import { materializeProfile, type ManagedProfileView } from "./materialize.js";
 import { managedRuntimePaths } from "./paths.js";
 import { projectLocalSubscriptionCredentials } from "./credentials.js";
+import { sha256 } from "../../shared/sha256.js";
 
 export interface ManagedPiRuntimeBundle {
   readonly profiles: ResolvedProfiles;
@@ -29,6 +30,33 @@ export interface ManagedPiRuntimeBaseInput {
   readonly dataHome?: string;
   readonly ambient?: Readonly<Record<string, string | undefined>>;
   readonly projectCredentials?: boolean;
+  readonly expectedPackage?: {
+    readonly name: string;
+    readonly version: string;
+    readonly transportHash?: `sha256:${string}`;
+  };
+}
+
+async function assertPackageIdentity(input: ManagedPiRuntimeBaseInput): Promise<void> {
+  if (input.expectedPackage === undefined) return;
+  const value = JSON.parse(await readFile(join(input.packageRoot, "package.json"), "utf8")) as {
+    name?: unknown;
+    version?: unknown;
+  };
+  if (
+    value.name !== input.expectedPackage.name ||
+    value.version !== input.expectedPackage.version
+  ) {
+    throw new Error("frozen harness package identity is unavailable");
+  }
+  if (input.expectedPackage.transportHash !== undefined) {
+    const transport = await readFile(
+      join(input.packageRoot, "dist", "pi", "worker-transport-extension.js"),
+    );
+    if (sha256(transport) !== input.expectedPackage.transportHash) {
+      throw new Error("frozen harness transport identity is unavailable");
+    }
+  }
 }
 
 async function existing(paths: readonly string[], label: string): Promise<string> {
@@ -118,6 +146,7 @@ export async function createManagedPiRuntime(input: ManagedPiRuntimeBaseInput & 
 export async function createManagedPiRuntimeFromResolved(
   input: ManagedPiRuntimeBaseInput & { readonly profiles: ResolvedProfiles },
 ): Promise<ManagedPiRuntimeBundle> {
+  await assertPackageIdentity(input);
   const ambient = input.ambient ?? process.env;
   const userHome = ambient.HOME ?? homedir();
   const executablePath = ambient.PATH ?? "/usr/bin:/bin";

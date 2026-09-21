@@ -141,7 +141,9 @@ it.runIf(real)("plans with Codex CLI, implements with Devin CLI, and reviews ind
       status: "invalid",
       reason: "review was not attempted",
     };
-    for (let attempt = 1; attempt <= 2 && review.status === "invalid"; attempt += 1) {
+    // Match the bounded retry budget in the shipped workflow. Subscription
+    // agents can occasionally terminate a turn before emitting the contract.
+    for (let attempt = 1; attempt <= 3 && review.status === "invalid"; attempt += 1) {
       const reviewAssignment = createAssignment({
         runId: "REAL001",
         stageId: "review",

@@ -4,6 +4,8 @@ import { processRecord, supervisorFixture } from "../../support/pi-process-fixtu
 describe("Pi process cancellation", () => {
   it("rechecks exact identity before each escalation signal", async () => {
     const fixture = supervisorFixture();
+    fixture.identity.inspect = async () =>
+      fixture.signals.includes("SIGKILL") ? undefined : fixture.identity.observed;
     const evidence = await fixture.supervisor.cancel(processRecord(), 0);
     expect(evidence.signals).toEqual(["SIGINT", "SIGTERM", "SIGKILL"]);
     expect(fixture.signals).toEqual(["SIGINT", "SIGTERM", "SIGKILL"]);

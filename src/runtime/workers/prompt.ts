@@ -87,3 +87,16 @@ export function buildWorkerPrompt(
   }
   return `${sections.join("\n")}\n`;
 }
+
+export function buildWorkerEntryInstruction(assignment: WorkerAssignment): string {
+  const base = "Read .harness-output/assignment.md and execute that harness assignment exactly.";
+  if (assignment.role === "review") {
+    return [
+      base,
+      "This is a non-interactive machine assignment: inspect the commit and run every required verification before answering.",
+      "Do not stop after announcing what you will read or do.",
+      "Your final response must end with the two unwrapped HARNESS_REVIEW_RESULT_V1 protocol lines required by the assignment.",
+    ].join(" ");
+  }
+  return `${base} Do not stop after announcing what you will read or do; finish the required work and structured result.`;
+}

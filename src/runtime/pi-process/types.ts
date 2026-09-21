@@ -24,6 +24,7 @@ export interface PiLaunchSpec {
   readonly env: Readonly<Record<string, string>>;
   readonly sessionId: string;
   readonly sessionDir: string;
+  readonly controlDir?: string;
   readonly stdin?: Uint8Array;
 }
 

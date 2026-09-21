@@ -13,7 +13,7 @@ import type {
   PiProcessRecord,
   PiProcessSupervisor,
 } from "../pi-process/types.js";
-import { buildWorkerPrompt } from "../workers/prompt.js";
+import { buildWorkerEntryInstruction, buildWorkerPrompt } from "../workers/prompt.js";
 import { superpowersProfile } from "../workers/superpowers-profile.js";
 import type { ParsedWorkerResult } from "../workers/types.js";
 import { buildPiLaunchSpec, buildPiProbePrefix } from "./launch-spec.js";
@@ -262,7 +262,7 @@ export class PiWorkerRuntime {
       cwd: assignment.worktree.path,
       sessionId,
       sessionDir,
-      prompt: "Read .harness-output/assignment.md and execute that harness assignment exactly.",
+      prompt: buildWorkerEntryInstruction(assignment),
     });
     return { attemptId: id, assignment, profile, launch, prompt, resultPath };
   }

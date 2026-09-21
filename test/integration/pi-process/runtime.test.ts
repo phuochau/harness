@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -11,6 +11,15 @@ async function temporaryDirectory(): Promise<string> {
   const path = await mkdtemp(join(tmpdir(), "harness-pi-process-"));
   temporaryDirectories.push(path);
   return path;
+}
+
+async function waitFor(path: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    try { await access(path); return; } catch {}
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`timed out waiting for ${path}`);
 }
 
 afterEach(async () => {
@@ -164,6 +173,96 @@ describe("durable Pi process transport", () => {
     const second = await new NodePiProcessSupervisor().launch(spec);
     expect(second).toEqual(first);
     await supervisor.cancel(first, 25);
+  });
+
+  it("replays an unclaimed launch intent without spawning duplicate providers", async () => {
+    const sessionDir = await temporaryDirectory();
+    const attemptId = "attempt-unclaimed";
+    const attemptToken = "token-unclaimed";
+    const sessionId = "session-unclaimed";
+    const argv = ["-e", "setTimeout(() => {}, 10000)"];
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(join(sessionDir, "session.json"), `${JSON.stringify({
+      schemaVersion: 1, attemptId, attemptToken, sessionId,
+    })}\n`);
+    await writeFile(join(sessionDir, "stdin.bin"), "");
+    await writeFile(join(sessionDir, "launch.json"), `${JSON.stringify({
+      schemaVersion: 1,
+      attemptId,
+      executable: process.execPath,
+      argv,
+      cwd: sessionDir,
+      sessionId,
+      sessionDir,
+      eventsPath: join(sessionDir, "events.jsonl"),
+      stderrPath: join(sessionDir, "stderr.log"),
+      recordPath: join(sessionDir, "process.json"),
+      exitPath: join(sessionDir, "exit.json"),
+      stdinPath: join(sessionDir, "stdin.bin"),
+    })}\n`);
+    const supervisor = new NodePiProcessSupervisor();
+    const record = await supervisor.launch({
+      attemptId, attemptToken, executable: process.execPath, argv,
+      cwd: sessionDir, env: {}, sessionId, sessionDir,
+    });
+    await expect(supervisor.observe(record)).resolves.toMatchObject({ status: "running" });
+    await supervisor.cancel(record, 25);
+  });
+
+  it("keeps monitor control receipts outside the worker session directory", async () => {
+    const root = await temporaryDirectory();
+    const sessionDir = join(root, "worker-session");
+    const controlDir = join(root, "controller-state");
+    const forgedExit = join(sessionDir, "exit.json");
+    const script = [
+      `require("node:fs").mkdirSync(${JSON.stringify(sessionDir)},{recursive:true})`,
+      `require("node:fs").writeFileSync(${JSON.stringify(forgedExit)},'{"exitCode":0,"signal":null}\\n')`,
+      "setTimeout(() => {}, 10000)",
+    ].join(";");
+    const supervisor = new NodePiProcessSupervisor();
+    const record = await supervisor.launch({
+      attemptId: "attempt-control-root",
+      attemptToken: "token-control-root",
+      executable: process.execPath,
+      argv: ["-e", script],
+      cwd: root,
+      env: {},
+      sessionId: "session-control-root",
+      sessionDir,
+      controlDir,
+    });
+    await waitFor(forgedExit);
+    expect(record.recordPath.startsWith(`${controlDir}/`)).toBe(true);
+    await expect(supervisor.observe(record)).resolves.toMatchObject({ status: "running" });
+    await supervisor.cancel(record, 25);
+  });
+
+  it("escalates through SIGKILL when a provider traps graceful signals", async () => {
+    const root = await temporaryDirectory();
+    const pidPath = join(root, "provider.pid");
+    const script = [
+      `require("node:fs").writeFileSync(${JSON.stringify(pidPath)},String(process.pid))`,
+      "process.on('SIGINT',()=>{})",
+      "process.on('SIGTERM',()=>{})",
+      "setInterval(()=>{},1000)",
+    ].join(";");
+    const supervisor = new NodePiProcessSupervisor();
+    const record = await supervisor.launch({
+      attemptId: "attempt-stubborn",
+      attemptToken: "token-stubborn",
+      executable: process.execPath,
+      argv: ["-e", script],
+      cwd: root,
+      env: {},
+      sessionId: "session-stubborn",
+      sessionDir: join(root, "session"),
+      controlDir: join(root, "control"),
+    });
+    await waitFor(pidPath);
+    const providerPid = Number(await readFile(pidPath, "utf8"));
+    const evidence = await supervisor.cancel(record, 25);
+    expect(evidence.signals).toEqual(["SIGINT", "SIGTERM", "SIGKILL"]);
+    expect(() => process.kill(providerPid, 0)).toThrow();
   });
 
   it("observes a matching live process without launching a replacement", async () => {

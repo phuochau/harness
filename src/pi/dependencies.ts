@@ -82,11 +82,9 @@ interface LoadedProjectConfiguration {
   readonly runtime: ManagedPiRuntimeBundle;
   readonly runtimeVersion: string;
   readonly packageRoot: string;
-}
-
-interface RuntimeMetadata {
-  readonly runtimeVersion: string;
-  readonly packageRoot: string;
+  readonly packageName: string;
+  readonly packageVersion: string;
+  readonly transportHash: `sha256:${string}`;
 }
 
 function artifactPaths(workflow: CompiledWorkflow): ArtifactPaths {
@@ -125,11 +123,22 @@ async function loadProjectConfiguration(
     : [];
   const project = await readDeclarativeProject(cwd);
   const packageRoot = await findPackageRoot(import.meta.url, "pi-multi-agent-harness");
+  const packageManifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8")) as {
+    name?: unknown;
+    version?: unknown;
+  };
+  if (
+    packageManifest.name !== "pi-multi-agent-harness" ||
+    typeof packageManifest.version !== "string"
+  ) throw new Error("invalid harness package identity");
   const runtime = await createManagedPiRuntime({
     profiles: project.profiles,
     runtimeVersion: project.lock.harnessVersion,
     packageRoot,
   });
+  const transportHash = sha256(
+    await readFile(join(packageRoot, "dist/pi/worker-transport-extension.js")),
+  );
   return {
     workflow: compileWorkflow({ workflow: workflowDocument, environment, profiles: runtime.profiles }),
     commands: environment.commands,
@@ -137,6 +146,9 @@ async function loadProjectConfiguration(
     runtime,
     runtimeVersion: project.lock.harnessVersion,
     packageRoot,
+    packageName: packageManifest.name,
+    packageVersion: packageManifest.version,
+    transportHash,
   };
 }
 
@@ -218,7 +230,6 @@ class ProjectCommandBackend implements HarnessCommandBackend {
     private readonly context: ExtensionContext,
     private readonly configuration?: LoadedProjectConfiguration,
     private readonly configurationError?: string,
-    private readonly runtimeMetadata?: RuntimeMetadata,
   ) {}
 
   public async snapshot() {
@@ -338,6 +349,13 @@ class ProjectCommandBackend implements HarnessCommandBackend {
       });
       await writeResolvedRunConfig(initialized.paths.resolvedConfig, {
         schemaVersion: 1,
+        runtime: {
+          harnessVersion: this.configuration.runtimeVersion,
+          packageName: this.configuration.packageName,
+          packageVersion: this.configuration.packageVersion,
+          packageRoot: this.configuration.packageRoot,
+          transportHash: this.configuration.transportHash,
+        },
         workflow: this.configuration.workflow,
         commands: this.configuration.commands,
       });
@@ -361,7 +379,7 @@ class ProjectCommandBackend implements HarnessCommandBackend {
   }
 
   public async resume(): Promise<void> {
-    if (this.runtimeMetadata === undefined || this.active !== undefined) return;
+    if (this.active !== undefined) return;
     const repository = await GitRepository.open(this.cwd);
     const inspection = await repository.inspect();
     const runRoot = join(inspection.commonDir, "harness", "runs");
@@ -397,8 +415,13 @@ class ProjectCommandBackend implements HarnessCommandBackend {
     if (selected === undefined) return;
     const runtime = await createManagedPiRuntimeFromResolved({
       profiles: selected.config.workflow.profiles,
-      runtimeVersion: this.runtimeMetadata.runtimeVersion,
-      packageRoot: this.runtimeMetadata.packageRoot,
+      runtimeVersion: selected.config.runtime.harnessVersion,
+      packageRoot: selected.config.runtime.packageRoot,
+      expectedPackage: {
+        name: selected.config.runtime.packageName,
+        version: selected.config.runtime.packageVersion,
+        transportHash: selected.config.runtime.transportHash,
+      },
     });
     this.active = await composeProductionRun({
       initialized: { repository, paths: selected.paths, manifest: selected.manifest },
@@ -426,22 +449,11 @@ export function createPiExtensionDependencies(
     async create(context) {
       let configuration: LoadedProjectConfiguration | undefined;
       let configurationError: string | undefined;
-      let runtimeMetadata: RuntimeMetadata | undefined;
       try {
         configuration = await loadProjectConfiguration(context.cwd);
-        runtimeMetadata = configuration;
       } catch (error) {
         configurationError =
           error instanceof Error ? error.message : String(error);
-        try {
-          const project = await readDeclarativeProject(context.cwd);
-          runtimeMetadata = {
-            runtimeVersion: project.lock.harnessVersion,
-            packageRoot: await findPackageRoot(import.meta.url, "pi-multi-agent-harness"),
-          };
-        } catch {
-          // A project whose lock cannot be trusted cannot materialize a frozen runtime.
-        }
       }
       const controller = sessionController(pi, context);
       await controller.recoverPending();
@@ -452,7 +464,6 @@ export function createPiExtensionDependencies(
         context,
         configuration,
         configurationError,
-        runtimeMetadata,
       );
       await backend.resume();
       const sessionFile = context.sessionManager.getSessionFile();

@@ -21,6 +21,13 @@ it("persists an immutable compiled workflow and command snapshot", async () => {
   const path = join(root, "run", "resolved-config.json");
   const value = {
     schemaVersion: 1 as const,
+    runtime: {
+      harnessVersion: "0.1.0",
+      packageName: "pi-multi-agent-harness",
+      packageVersion: "0.1.0",
+      packageRoot: process.cwd(),
+      transportHash: `sha256:${"b".repeat(64)}` as const,
+    },
     workflow: compileWorkflow(fixtureCompileInput()),
     commands: { task_verify: ["npm", "test"] },
   };
@@ -40,6 +47,13 @@ it("rejects a compiled workflow whose revision no longer matches its content", a
   const workflow = compileWorkflow(fixtureCompileInput());
   await writeFile(path, JSON.stringify({
     schemaVersion: 1,
+    runtime: {
+      harnessVersion: "0.1.0",
+      packageName: "pi-multi-agent-harness",
+      packageVersion: "0.1.0",
+      packageRoot: process.cwd(),
+      transportHash: `sha256:${"b".repeat(64)}`,
+    },
     workflow: { ...workflow, name: "tampered" },
     commands: {},
   }));

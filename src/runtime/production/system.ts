@@ -247,6 +247,7 @@ export async function composeProductionRun(
             profiles: workflow.profiles,
             attempts,
             records,
+            processRoot: join(initialized.paths.root, "processes"),
           })
     );
     const registry = createProductionActionRegistry({
@@ -384,6 +385,7 @@ export async function createStandaloneProductionEffects(input: {
           profiles: input.workflow.profiles,
           attempts,
           records,
+          processRoot: join(paths.root, "processes"),
         })
   );
   const planningSealer = new ProductionPlanningArtifactSealer(

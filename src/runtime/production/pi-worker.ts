@@ -1,10 +1,12 @@
 import { lstat, readFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { EffectIntent, ReconcileResult } from "../../actions/types.js";
 import type { ResolvedProfile, ResolvedProfiles } from "../../config/profiles.js";
 import type { WorkerAssignment } from "../../core/assignment.js";
 import { validateWorkerResult, type WorkerResult } from "../../contracts/worker-result.js";
 import type { ProfileFamily } from "../../contracts/profiles.js";
 import type { LifecycleWorktreeBinding } from "../../git/worktrees.js";
+import { sha256 } from "../../shared/sha256.js";
 import type { PiProcessRecord } from "../pi-process/types.js";
 import {
   PiWorkerRuntime,
@@ -58,6 +60,7 @@ export interface ProductionPiWorkerRuntimeOptions {
   readonly profiles: ResolvedProfiles;
   readonly attempts: ProductionWorkerAttemptPort;
   readonly records: DurableRecordStore;
+  readonly processRoot: string;
 }
 
 function record(value: unknown): value is Record<string, any> {
@@ -79,9 +82,14 @@ function resolvedProfile(
   return profile;
 }
 
+function attemptControlDir(processRoot: string, attemptId: string): string {
+  return join(processRoot, sha256(attemptId).slice("sha256:".length));
+}
+
 function parsePrepared(
   value: PreparedWorkerAttempt,
   profiles: ResolvedProfiles,
+  processRoot: string,
 ): PersistedPreparedPiAttempt {
   if (
     !record(value) || value.schemaVersion !== 1 ||
@@ -98,7 +106,9 @@ function parsePrepared(
     parsed.binding.commit !== parsed.assignment.commit ||
     parsed.launch.attemptId !== parsed.attemptId ||
     parsed.launch.cwd !== parsed.binding.path ||
-    !parsed.resultPath.startsWith(`${parsed.binding.path}/.harness-output/`)
+    parsed.launch.controlDir !== attemptControlDir(processRoot, parsed.attemptId) ||
+    !parsed.resultPath.startsWith(`${parsed.binding.path}/.harness-output/`) ||
+    parsed.launch.controlDir.startsWith(`${parsed.binding.path}/`)
   ) throw new Error("persisted Pi worker attempt identity mismatch");
   return parsed;
 }
@@ -131,7 +141,10 @@ function validateProcessRecord(
     typeof value.pid !== "number" || typeof value.startIdentity !== "string" ||
     typeof value.executable !== "string" || typeof value.argvHash !== "string" ||
     typeof value.eventsPath !== "string" || typeof value.stderrPath !== "string" ||
-    typeof value.recordPath !== "string" || typeof value.startedAt !== "string"
+    typeof value.recordPath !== "string" || typeof value.startedAt !== "string" ||
+    value.recordPath !== join(prepared.launch.controlDir ?? prepared.launch.sessionDir, "process.json") ||
+    value.eventsPath !== join(prepared.launch.controlDir ?? prepared.launch.sessionDir, "events.jsonl") ||
+    value.stderrPath !== join(prepared.launch.controlDir ?? prepared.launch.sessionDir, "stderr.log")
   ) throw new Error("invalid or mismatched Pi process record");
   return value as PiProcessRecord;
 }
@@ -157,6 +170,10 @@ export class ProductionPiWorkerRuntime implements ProductionWorkerRuntime {
   ): Promise<PreparedWorkerAttempt> {
     const { assignment, binding } = await this.options.attempts.prepare(intent);
     const prepared = await this.options.runtime.prepare(assignment);
+    const launch = {
+      ...prepared.launch,
+      controlDir: attemptControlDir(this.options.processRoot, prepared.attemptId),
+    };
     await this.options.attempts.stagePrompt(binding, prepared.prompt);
     return structuredClone({
       schemaVersion: 1,
@@ -170,7 +187,7 @@ export class ProductionPiWorkerRuntime implements ProductionWorkerRuntime {
       prompt: prepared.prompt,
       resultPath: prepared.resultPath,
       attemptId: prepared.attemptId,
-      launch: prepared.launch,
+      launch,
     }) as unknown as PreparedWorkerAttempt;
   }
 
@@ -180,12 +197,13 @@ export class ProductionPiWorkerRuntime implements ProductionWorkerRuntime {
     const durable = await this.options.records.getPiProcess(prepared.attemptId);
     if (durable !== undefined) return validateProcessRecord(durable, prepared);
     try {
-      const info = await lstat(`${prepared.launch.sessionDir}/process.json`);
+      const processPath = `${prepared.launch.controlDir ?? prepared.launch.sessionDir}/process.json`;
+      const info = await lstat(processPath);
       if (info.isSymbolicLink() || !info.isFile() || info.size > 1024 * 1024) {
         throw new Error("Pi process recovery record is not a bounded regular file");
       }
       const recovered = validateProcessRecord(
-        JSON.parse(await readFile(`${prepared.launch.sessionDir}/process.json`, "utf8")),
+        JSON.parse(await readFile(processPath, "utf8")),
         prepared,
       );
       return this.options.records.putPiProcess(recovered);
@@ -258,7 +276,7 @@ export class ProductionPiWorkerRuntime implements ProductionWorkerRuntime {
     persisted: PreparedWorkerAttempt,
     _intent: EffectIntent<ProductionWorkerKind, ProductionWorkerInput>,
   ): Promise<WorkerResult> {
-    const value = parsePrepared(persisted, this.options.profiles);
+    const value = parsePrepared(persisted, this.options.profiles, this.options.processRoot);
     const prepared = runtimePrepared(value, this.options.profiles);
     const existing = await this.processRecord(value);
     if (existing !== undefined) {
@@ -296,7 +314,7 @@ export class ProductionPiWorkerRuntime implements ProductionWorkerRuntime {
     persisted: PreparedWorkerAttempt,
     _intent: EffectIntent<ProductionWorkerKind, ProductionWorkerInput>,
   ): Promise<ReconcileResult<WorkerResult>> {
-    const value = parsePrepared(persisted, this.options.profiles);
+    const value = parsePrepared(persisted, this.options.profiles, this.options.processRoot);
     const process = await this.processRecord(value);
     if (process === undefined) return { status: "not_found" };
     const prepared = runtimePrepared(value, this.options.profiles);
@@ -314,7 +332,7 @@ export class ProductionPiWorkerRuntime implements ProductionWorkerRuntime {
     persisted: PreparedWorkerAttempt,
     output: WorkerResult,
   ): Promise<void> {
-    const value = parsePrepared(persisted, this.options.profiles);
+    const value = parsePrepared(persisted, this.options.profiles, this.options.processRoot);
     if (output.outcome === "blocked" || output.outcome === "failed") {
       await this.options.attempts.abort(value.binding);
     } else {
@@ -326,7 +344,7 @@ export class ProductionPiWorkerRuntime implements ProductionWorkerRuntime {
     persisted: PreparedWorkerAttempt,
     _intent: EffectIntent<ProductionWorkerKind, ProductionWorkerInput>,
   ): Promise<void> {
-    const value = parsePrepared(persisted, this.options.profiles);
+    const value = parsePrepared(persisted, this.options.profiles, this.options.processRoot);
     const process = await this.processRecord(value);
     if (process !== undefined) {
       const observation = await this.options.runtime.observe({

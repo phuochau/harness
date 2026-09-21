@@ -1,5 +1,5 @@
 import { link, lstat, mkdir, open, readFile, unlink } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, isAbsolute } from "node:path";
 import type { CompiledWorkflow } from "../config/compile.js";
 import { contentRevision } from "../config/hash.js";
 import { canonicalJson } from "../shared/canonical-json.js";
@@ -7,6 +7,13 @@ import { deepFreeze } from "../shared/deep-freeze.js";
 
 export interface ResolvedRunConfig {
   readonly schemaVersion: 1;
+  readonly runtime: {
+    readonly harnessVersion: string;
+    readonly packageName: string;
+    readonly packageVersion: string;
+    readonly packageRoot: string;
+    readonly transportHash: `sha256:${string}`;
+  };
   readonly workflow: CompiledWorkflow;
   readonly commands: Readonly<Record<string, readonly string[]>>;
 }
@@ -18,11 +25,29 @@ function record(value: unknown): value is Record<string, unknown> {
 }
 
 export function validateResolvedRunConfig(value: unknown): ResolvedRunConfig {
-  if (!record(value) || value.schemaVersion !== 1 || !record(value.workflow) || !record(value.commands)) {
+  if (
+    !record(value) || value.schemaVersion !== 1 || !record(value.runtime) ||
+    !record(value.workflow) || !record(value.commands)
+  ) {
     throw new Error("invalid resolved run configuration");
   }
-  if (canonicalJson(Object.keys(value).sort()) !== canonicalJson(["commands", "schemaVersion", "workflow"])) {
+  if (
+    canonicalJson(Object.keys(value).sort()) !==
+      canonicalJson(["commands", "runtime", "schemaVersion", "workflow"])
+  ) {
     throw new Error("resolved run configuration has unknown or missing fields");
+  }
+  const runtime = value.runtime;
+  if (
+    canonicalJson(Object.keys(runtime).sort()) !==
+      canonicalJson(["harnessVersion", "packageName", "packageRoot", "packageVersion", "transportHash"]) ||
+    typeof runtime.harnessVersion !== "string" || runtime.harnessVersion.length === 0 ||
+    runtime.packageName !== "pi-multi-agent-harness" ||
+    typeof runtime.packageVersion !== "string" || runtime.packageVersion.length === 0 ||
+    typeof runtime.packageRoot !== "string" || !isAbsolute(runtime.packageRoot) ||
+    typeof runtime.transportHash !== "string" || !digest.test(runtime.transportHash)
+  ) {
+    throw new Error("invalid resolved runtime identity");
   }
   const workflow = value.workflow;
   if (

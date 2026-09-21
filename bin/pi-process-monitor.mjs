@@ -11,6 +11,27 @@ if (!launchPath) throw new Error("missing durable launch path");
 const launch = JSON.parse(readFileSync(launchPath, "utf8"));
 const token = process.env.PI_HARNESS_ATTEMPT_TOKEN;
 if (!token) throw new Error("missing attempt token");
+// The monitor owns escalation. Group signals normally reach both processes;
+// direct-signal fallbacks are forwarded to the provider while the monitor
+// remains alive to persist its exit receipt.
+let child;
+const pendingSignals = [];
+function forward(signal) {
+  if (child === undefined) {
+    pendingSignals.push(signal);
+    return;
+  }
+  try {
+    child.kill(signal);
+  } catch (error) {
+    if (error?.code !== "ESRCH") throw error;
+  }
+}
+process.on("SIGINT", () => forward("SIGINT"));
+process.on("SIGTERM", () => forward("SIGTERM"));
+// SIGUSR2 is the private fallback for a logical SIGKILL when the operating
+// system refuses a process-group signal.
+process.on("SIGUSR2", () => forward("SIGKILL"));
 
 async function identity(pid) {
   if (process.platform === "linux") {
@@ -73,17 +94,20 @@ durableCreate(launch.recordPath, {
   startedAt: new Date().toISOString(),
 });
 
-const child = spawn(launch.executable, launch.argv, {
+const childEnvironment = { ...process.env };
+delete childEnvironment.PI_HARNESS_ATTEMPT_TOKEN;
+child = spawn(launch.executable, launch.argv, {
   cwd: launch.cwd,
-  env: process.env,
+  env: childEnvironment,
   shell: false,
   detached: false,
   stdio: ["pipe", "inherit", "ignore"],
 });
+for (const signal of pendingSignals.splice(0)) forward(signal);
 const input = readFileSync(launch.stdinPath);
 child.stdin.end(input);
 const result = await new Promise((resolve, reject) => {
-  child.once("error", reject);
+  child.once("error", () => resolve({ exitCode: 1, signal: null }));
   child.once("close", (exitCode, signal) => resolve({ exitCode, signal }));
 });
 durableCreate(launch.exitPath, result);

@@ -122,11 +122,29 @@ function assertMatchingRecord(record: PiProcessRecord, spec: PiLaunchSpec): void
 }
 
 function defaultSignalProcess(pid: number, signal: NodeJS.Signals): void {
+  if (signal !== "SIGKILL") {
+    try {
+      // The monitor forwards graceful signals exactly once to its provider.
+      process.kill(pid, signal);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+    }
+    return;
+  }
   try {
     process.kill(-pid, signal);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
-    process.kill(pid, signal);
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ESRCH" && code !== "EPERM") throw error;
+    try {
+      // SIGUSR2 asks the monitor to force-kill its provider while retaining
+      // ownership of the exit receipt.
+      process.kill(pid, "SIGUSR2");
+    } catch (fallbackError) {
+      if ((fallbackError as NodeJS.ErrnoException).code !== "ESRCH") {
+        throw fallbackError;
+      }
+    }
   }
 }
 
@@ -157,6 +175,7 @@ async function processExitFromFile(
     const value: unknown = JSON.parse(await readFile(path, "utf8"));
     if (
       typeof value !== "object" || value === null || Array.isArray(value) ||
+      Object.keys(value).sort().join(",") !== "exitCode,signal" ||
       !Object.prototype.hasOwnProperty.call(value, "exitCode") ||
       !Object.prototype.hasOwnProperty.call(value, "signal") ||
       ((value as { exitCode?: unknown }).exitCode !== null &&
@@ -203,12 +222,16 @@ export class NodePiProcessSupervisor implements PiProcessSupervisor {
   }
 
   public async launch(spec: PiLaunchSpec): Promise<PiProcessRecord> {
-    await mkdir(spec.sessionDir, { recursive: true, mode: 0o700 });
-    const eventsPath = join(spec.sessionDir, "events.jsonl");
-    const stderrPath = join(spec.sessionDir, "stderr.log");
-    const recordPath = join(spec.sessionDir, "process.json");
-    const launchPath = join(spec.sessionDir, "launch.json");
-    const stdinPath = join(spec.sessionDir, "stdin.bin");
+    const controlDir = spec.controlDir ?? spec.sessionDir;
+    await Promise.all([
+      mkdir(spec.sessionDir, { recursive: true, mode: 0o700 }),
+      mkdir(controlDir, { recursive: true, mode: 0o700 }),
+    ]);
+    const eventsPath = join(controlDir, "events.jsonl");
+    const stderrPath = join(controlDir, "stderr.log");
+    const recordPath = join(controlDir, "process.json");
+    const launchPath = join(controlDir, "launch.json");
+    const stdinPath = join(controlDir, "stdin.bin");
     const monitorPath = fileURLToPath(
       new URL("../../../bin/pi-process-monitor.mjs", import.meta.url),
     );
@@ -223,14 +246,14 @@ export class NodePiProcessSupervisor implements PiProcessSupervisor {
       eventsPath,
       stderrPath,
       recordPath,
-      exitPath: join(spec.sessionDir, "exit.json"),
+      exitPath: join(controlDir, "exit.json"),
       stdinPath,
     };
     await Promise.all([
       open(eventsPath, "a", 0o600).then((file) => file.close()),
       open(stderrPath, "a", 0o600).then((file) => file.close()),
     ]);
-    await durableCreate(join(spec.sessionDir, "session.json"), {
+    await durableCreate(join(controlDir, "session.json"), {
         schemaVersion: 1,
         attemptId: spec.attemptId,
         attemptToken: spec.attemptToken,
@@ -240,13 +263,13 @@ export class NodePiProcessSupervisor implements PiProcessSupervisor {
     const launchCreated = await durableCreate(launchPath, launchIntent);
     if (!launchCreated) {
       const existing = await readProcessRecord(recordPath);
-      if (existing === undefined) {
-        throw new Error(
-          `indeterminate durable launch for attempt ${spec.attemptId}; refusing duplicate spawn`,
-        );
+      if (existing !== undefined) {
+        assertMatchingRecord(existing, spec);
+        return existing;
       }
-      assertMatchingRecord(existing, spec);
-      return existing;
+      // A monitor claims process.json before it starts the provider. Replaying
+      // an unclaimed launch is safe: concurrent monitors race that atomic
+      // claim and only the winner can spawn a provider.
     }
     const events = await open(eventsPath, "a", 0o600);
     const child = spawn(process.execPath, [monitorPath, launchPath], {
@@ -265,7 +288,7 @@ export class NodePiProcessSupervisor implements PiProcessSupervisor {
       child.once("close", (exitCode, signal) => {
         void (async () => {
           await events.close();
-          const persisted = await processExitFromFile(spec.sessionDir);
+          const persisted = await processExitFromFile(controlDir);
           const result = persisted ?? { exitCode, signal };
           this.owned.delete(spec.attemptId);
           resolve({ ...result, terminal: await terminalFromFile(eventsPath) });
@@ -282,7 +305,11 @@ export class NodePiProcessSupervisor implements PiProcessSupervisor {
         throw new Error(`Pi process monitor did not persist identity for attempt ${spec.attemptId}`);
       }
       assertMatchingRecord(record, spec);
-      if (record.pid !== pid) throw new Error("Pi process monitor pid does not match spawned pid");
+      if (record.pid !== pid) {
+        // This monitor lost the durable claim to an earlier/replayed monitor.
+        // It exits before spawning a provider, so return the winning record.
+        return record;
+      }
       this.owned.set(record.attemptId, { child, exit });
       return record;
     } catch (error) {
@@ -304,13 +331,6 @@ export class NodePiProcessSupervisor implements PiProcessSupervisor {
     ) {
       return { status: "exited", exit: await owned.exit };
     }
-    const persistedExit = await processExitFromFile(record.sessionDir);
-    if (persistedExit !== undefined) {
-      return {
-        status: "exited",
-        exit: { ...persistedExit, terminal: await terminalFromFile(record.eventsPath) },
-      };
-    }
     const observed = await this.identity.inspect(record);
     if (observed !== undefined) {
       const evidence = identityMismatchEvidence(observed, record);
@@ -318,7 +338,21 @@ export class NodePiProcessSupervisor implements PiProcessSupervisor {
         if (observed.stopped === true) this.signalProcess(record.pid, "SIGCONT");
         return { status: "running", record };
       }
+      const persistedExit = await processExitFromFile(dirname(record.recordPath));
+      if (persistedExit !== undefined) {
+        return {
+          status: "exited",
+          exit: { ...persistedExit, terminal: await terminalFromFile(record.eventsPath) },
+        };
+      }
       return { status: "identity_mismatch", evidence };
+    }
+    const persistedExit = await processExitFromFile(dirname(record.recordPath));
+    if (persistedExit !== undefined) {
+      return {
+        status: "exited",
+        exit: { ...persistedExit, terminal: await terminalFromFile(record.eventsPath) },
+      };
     }
     return { status: "missing" };
   }
@@ -364,6 +398,21 @@ export class NodePiProcessSupervisor implements PiProcessSupervisor {
       this.signalProcess(record.pid, signal);
       sent.push(signal);
       if (signal !== "SIGKILL") await this.sleep(graceMs);
+    }
+    if (sent.includes("SIGKILL")) {
+      let terminated = false;
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const observed = await this.identity.inspect(record);
+        if (
+          observed === undefined ||
+          identityMismatchEvidence(observed, record).length > 0
+        ) {
+          terminated = true;
+          break;
+        }
+        await this.sleep(25);
+      }
+      if (!terminated) throw new Error("Pi process survived SIGKILL escalation");
     }
     const exit = owned === undefined ? null : await owned.exit;
     return { attemptId: record.attemptId, signals: sent, exit };

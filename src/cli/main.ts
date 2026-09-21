@@ -25,7 +25,7 @@ import { createWorkflowLifecycle } from "../core/workflow-lifecycle.js";
 import { managedRuntimePaths } from "../runtime/managed/paths.js";
 import { authCommand, runInteractive } from "./auth.js";
 import { findPackageRoot } from "./package-root.js";
-import { readDeclarativeProject, readTrustedHarnessLock } from "./trusted-project-reader.js";
+import { readDeclarativeProject } from "./trusted-project-reader.js";
 import { buildManagedEnvironment } from "../runtime/managed/environment.js";
 import { projectLocalSubscriptionCredentials } from "../runtime/managed/credentials.js";
 import type { ResolvedProfile } from "../config/profiles.js";
@@ -547,15 +547,19 @@ export async function main(
     .description("Reconcile a run using installed production action adapters")
     .action(async (runId: string, path: string | undefined) => {
       const root = path ?? ".";
-      const lock = await readTrustedHarnessLock(root);
       const runPaths = await resolveRunPaths(root, runId);
       const frozen = await readResolvedRunConfig(runPaths.resolvedConfig);
       const managed = await (
         dependencies.createManagedRuntimeFromResolved ?? createManagedPiRuntimeFromResolved
       )({
         profiles: frozen.workflow.profiles,
-        runtimeVersion: lock.harnessVersion,
-        packageRoot: await findPackageRoot(import.meta.url, "pi-multi-agent-harness"),
+        runtimeVersion: frozen.runtime.harnessVersion,
+        packageRoot: frozen.runtime.packageRoot,
+        expectedPackage: {
+          name: frozen.runtime.packageName,
+          version: frozen.runtime.packageVersion,
+          transportHash: frozen.runtime.transportHash,
+        },
       });
       let production: Awaited<ReturnType<typeof createStandaloneProductionEffects>> | undefined;
       try {
