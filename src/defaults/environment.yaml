@@ -1,0 +1,10 @@
+schema: harness/environment/v1
+commands:
+  task_verify: __TASK_VERIFY__
+  full_verify: __FULL_VERIFY__
+pi_packages:
+  - id: harness
+    dependency: pi-multi-agent-harness
+    scope: project
+    resources:
+      extensions: [dist/pi/extension.js]

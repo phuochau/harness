@@ -1,0 +1,86 @@
+schema: harness/v1
+name: mixed-workers
+task_model:
+  source: stages.tasks.outputs.graph
+  complete_when: { stage: record_task_done }
+stages:
+  - id: specify
+    uses: spec-kit.specify
+    runner: pi
+    model_profile: chatgpt-planning
+  - id: plan
+    uses: spec-kit.plan
+    runner: pi
+    model_profile: chatgpt-planning
+    needs: [{ stage: specify, scope: all }]
+  - id: approve_plan
+    uses: human.approval
+    needs: [{ stage: plan, scope: all }]
+  - id: tasks
+    uses: spec-kit.tasks
+    runner: pi
+    model_profile: chatgpt-planning
+    needs: [{ stage: approve_plan, scope: all }]
+    produces:
+      tasks: specs/feature/tasks.md
+      graph: specs/feature/task-graph.json
+  - id: implement
+    uses: worker.execute
+    runner: { prefer: [devin, codex, claude] }
+    needs: [{ stage: tasks, scope: all }]
+    foreach: { source: stages.tasks.outputs.graph, key: task.id }
+    gate: task.dependencies_done
+    isolation: worktree
+    profile: disciplined-engineer
+    retry: { max_attempts: 3, max_elapsed_seconds: 86400 }
+  - id: review
+    uses: worker.review
+    runner: { prefer: [codex, claude, devin] }
+    needs: [{ stage: implement, scope: same-item }]
+    foreach: { source: stages.tasks.outputs.graph, key: task.id }
+    policies: { require_different_worker_kind: true, scope: task }
+    retry: { max_attempts: 3, max_elapsed_seconds: 86400 }
+    on_failure:
+      changes_requested: { retry_stage: implement }
+  - id: verify
+    uses: command.run
+    needs: [{ stage: review, scope: same-item }]
+    foreach: { source: stages.tasks.outputs.graph, key: task.id }
+    with: { argv: "${commands.task_verify}" }
+    retry: { max_attempts: 3, max_elapsed_seconds: 86400 }
+    on_failure:
+      verification_failed: { retry_stage: implement }
+  - id: integrate
+    uses: git.integrate
+    needs: [{ stage: verify, scope: same-item }]
+    foreach: { source: stages.tasks.outputs.graph, key: task.id }
+  - id: post_integrate_verify
+    uses: command.run
+    needs: [{ stage: integrate, scope: same-item }]
+    foreach: { source: stages.tasks.outputs.graph, key: task.id }
+    with: { argv: "${commands.task_verify}" }
+    retry: { max_attempts: 3, max_elapsed_seconds: 86400 }
+    on_failure:
+      verification_failed: { retry_stage: implement }
+  - id: record_task_done
+    uses: git.project-task-status
+    needs: [{ stage: post_integrate_verify, scope: same-item }]
+    foreach: { source: stages.tasks.outputs.graph, key: task.id }
+  - id: final_verify
+    uses: command.run
+    needs: [{ stage: record_task_done, scope: all }]
+    with: { argv: "${commands.full_verify}" }
+  - id: final_review
+    uses: worker.review
+    runner: { prefer: [codex, claude, devin] }
+    needs: [{ stage: final_verify, scope: all }]
+    policies: { scope: final_diff }
+    on_failure:
+      changes_requested: { block: final_review_remediation_required }
+  - id: push
+    uses: git.push
+    needs: [{ stage: final_review, scope: all }]
+  - id: final_pr
+    uses: github.pull-request
+    needs: [{ stage: push, scope: all }]
+
