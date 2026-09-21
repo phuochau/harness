@@ -17,6 +17,14 @@ import {
 } from "../../src/controller/command-source.js";
 import { reduceEvent } from "../../src/core/reducer.js";
 import { initialRunState, type RunState } from "../../src/core/state.js";
+import type {
+  ReviewSelection,
+} from "../../src/core/review-policy.js";
+import type {
+  WorkerKind,
+  WorkerProfile,
+  WorkerSelection,
+} from "../../src/core/routing.js";
 import { Journal, type EventInput } from "../../src/state/journal.js";
 import { RunLease, type LeaseHandle } from "../../src/state/lease.js";
 import { resolveRunPaths } from "../../src/state/paths.js";
@@ -391,4 +399,52 @@ export async function runConcurrentWakeupRace(): Promise<{
     queue.enqueue(command("operator", "c")),
   ]);
   return { maxConcurrentTransactions, launchIntentCount };
+}
+
+interface RouteFixtureOverrides {
+  readonly unavailable?: readonly WorkerKind[];
+  readonly unauthenticated?: readonly WorkerKind[];
+  readonly requirements?: readonly string[];
+  readonly capabilities?: Partial<Record<WorkerKind, readonly string[]>>;
+  readonly preference?: readonly WorkerKind[];
+}
+
+function workerProfiles(
+  overrides: RouteFixtureOverrides,
+): Record<WorkerKind, WorkerProfile> {
+  const unauthenticated = new Set(overrides.unauthenticated ?? []);
+  const make = (kind: WorkerKind): WorkerProfile => ({
+    kind,
+    authenticated: !unauthenticated.has(kind),
+    available: true,
+    capabilities: new Set(
+      overrides.capabilities?.[kind] ?? ["sandbox", "superpowers"],
+    ),
+    concurrencyLimit: 2,
+    active: 0,
+  });
+  return { codex: make("codex"), devin: make("devin"), claude: make("claude") };
+}
+
+export function routeFixture(
+  overrides: RouteFixtureOverrides = {},
+): WorkerSelection {
+  return {
+    preference: overrides.preference ?? ["devin", "codex", "claude"],
+    profiles: workerProfiles(overrides),
+    requirements: new Set(overrides.requirements ?? []),
+    unavailable: new Set(overrides.unavailable ?? []),
+  };
+}
+
+export function reviewFixture(
+  overrides: RouteFixtureOverrides & { implementationWorker?: WorkerKind } = {},
+): ReviewSelection {
+  return {
+    ...routeFixture({
+      ...overrides,
+      preference: overrides.preference ?? ["codex", "claude", "devin"],
+    }),
+    implementationWorker: overrides.implementationWorker ?? "devin",
+  };
 }
