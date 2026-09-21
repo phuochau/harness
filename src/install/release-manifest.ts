@@ -1,0 +1,24 @@
+import type { TrustedSource } from "./types.js";
+
+export interface ReleaseManifestEntry {
+  readonly id: string;
+  readonly source: TrustedSource;
+}
+
+export const releaseManifest: readonly ReleaseManifestEntry[] = [
+  { id: "pi-multi-agent-harness", source: { kind: "npm", identity: "pi-multi-agent-harness", version: "0.1.0", integrity: "package-release:pi-multi-agent-harness@0.1.0" } },
+  { id: "pi-coding-agent", source: { kind: "npm", identity: "@earendil-works/pi-coding-agent", version: "0.86.1", integrity: "package-lock:@earendil-works/pi-coding-agent@0.86.1" } },
+  { id: "typebox", source: { kind: "npm", identity: "typebox", version: "1.3.34", integrity: "package-lock:typebox@1.3.34" } },
+  { id: "spec-kit", source: { kind: "signed-artifact", identity: "specify", version: "0.8.7", integrity: "version-output:specify-0.8.7" } },
+  { id: "superpowers", source: { kind: "git", identity: "https://github.com/obra/superpowers.git", version: "6.4.1", integrity: "release-tag:6.4.1" } },
+  { id: "herdr", source: { kind: "git", identity: "https://github.com/herdrdev/herdr.git", version: "0.9.1", integrity: "release-tag:v0.9.1" } },
+  { id: "herdr-codex", source: { kind: "git", identity: "https://github.com/herdrdev/herdr.git", version: "0.9.1", integrity: "integration:codex:v0.9.1" } },
+  { id: "herdr-devin", source: { kind: "git", identity: "https://github.com/herdrdev/herdr.git", version: "0.9.1", integrity: "integration:devin:v0.9.1" } },
+  { id: "herdr-claude", source: { kind: "git", identity: "https://github.com/herdrdev/herdr.git", version: "0.9.1", integrity: "integration:claude:v0.9.1" } },
+  { id: "herdr-shell", source: { kind: "git", identity: "https://github.com/herdrdev/herdr.git", version: "0.9.1", integrity: "integration:shell:v0.9.1" } },
+  { id: "codex", source: { kind: "signed-artifact", identity: "codex", version: "0.155.1", integrity: "version-output:codex-cli-0.155.1" } },
+  { id: "devin", source: { kind: "signed-artifact", identity: "devin", version: "3000.10.31", integrity: "version-output:devin-3000.10.31" } },
+  { id: "claude", source: { kind: "signed-artifact", identity: "claude", version: "2.1.234", integrity: "version-output:claude-2.1.234" } },
+  { id: "git", source: { kind: "formula", identity: "git", version: "system", integrity: "version-probe:git" } },
+  { id: "github-cli", source: { kind: "formula", identity: "gh", version: "system", integrity: "version-probe:gh" } },
+] as const;
