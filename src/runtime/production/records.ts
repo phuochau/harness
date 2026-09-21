@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { canonicalJson } from "../../shared/canonical-json.js";
 import { deepFreeze } from "../../shared/deep-freeze.js";
 import { sha256 } from "../../shared/sha256.js";
+import type { PiProcessRecord } from "../pi-process/types.js";
 
 export class DurableRecordCollision extends Error {}
 
@@ -113,5 +114,21 @@ export class DurableRecordStore {
     } finally {
       await directory.close();
     }
+  }
+
+  public getPiProcess(attemptId: string): Promise<PiProcessRecord | undefined> {
+    return this.get<PiProcessRecord>("pi-process", attemptId);
+  }
+
+  public listPiProcesses(): Promise<readonly PiProcessRecord[]> {
+    return this.list<PiProcessRecord>("pi-process");
+  }
+
+  public putPiProcess(record: PiProcessRecord): Promise<PiProcessRecord> {
+    return this.put("pi-process", record.attemptId, record);
+  }
+
+  public removePiProcess(attemptId: string): Promise<void> {
+    return this.remove("pi-process", attemptId);
   }
 }

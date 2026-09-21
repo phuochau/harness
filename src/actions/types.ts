@@ -1,5 +1,6 @@
 import type { JsonValue } from "../contracts/common.js";
 import type { RecoveryClass } from "../contracts/events.js";
+import type { PiProcessSupervisor } from "../runtime/pi-process/types.js";
 
 export type { RecoveryClass };
 
@@ -95,6 +96,7 @@ export interface ActionContext {
   readonly approvals: ApprovalStore;
   readonly clock: Clock;
   readonly signal: AbortSignal;
+  readonly piProcesses?: PiProcessSupervisor;
 }
 
 export interface ActionDependencies {
@@ -103,6 +105,7 @@ export interface ActionDependencies {
   readonly approvals: ApprovalStore;
   readonly clock: Clock;
   readonly signal: AbortSignal;
+  readonly piProcesses?: PiProcessSupervisor;
 }
 
 export interface ActionHandler<

@@ -1,6 +1,10 @@
 import type { EffectIntent } from "../../actions/types.js";
 import type { JsonValue } from "../../contracts/common.js";
 import type { DurableRecordStore } from "./records.js";
+import type {
+  PiProcessObservation,
+  PiProcessSupervisor,
+} from "../pi-process/types.js";
 
 interface CleanupFailureRecord {
   readonly schemaVersion: 1;
@@ -68,4 +72,15 @@ export async function recoverCleanupFailures(
     );
     await records.remove("worker-abort-failure", record.intent.idempotencyKey);
   }
+}
+
+export async function recoverPiProcesses(
+  records: DurableRecordStore,
+  supervisor: PiProcessSupervisor,
+): Promise<readonly PiProcessObservation[]> {
+  const observations: PiProcessObservation[] = [];
+  for (const record of await records.listPiProcesses()) {
+    observations.push(await supervisor.observe(record));
+  }
+  return observations;
 }
