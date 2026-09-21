@@ -559,6 +559,7 @@ export async function main(
           name: frozen.runtime.packageName,
           version: frozen.runtime.packageVersion,
           transportHash: frozen.runtime.transportHash,
+          runtimeHash: frozen.runtime.runtimeHash,
         },
       });
       let production: Awaited<ReturnType<typeof createStandaloneProductionEffects>> | undefined;

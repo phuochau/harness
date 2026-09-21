@@ -13,6 +13,7 @@ export interface ResolvedRunConfig {
     readonly packageVersion: string;
     readonly packageRoot: string;
     readonly transportHash: `sha256:${string}`;
+    readonly runtimeHash: `sha256:${string}`;
   };
   readonly workflow: CompiledWorkflow;
   readonly commands: Readonly<Record<string, readonly string[]>>;
@@ -40,12 +41,13 @@ export function validateResolvedRunConfig(value: unknown): ResolvedRunConfig {
   const runtime = value.runtime;
   if (
     canonicalJson(Object.keys(runtime).sort()) !==
-      canonicalJson(["harnessVersion", "packageName", "packageRoot", "packageVersion", "transportHash"]) ||
+      canonicalJson(["harnessVersion", "packageName", "packageRoot", "packageVersion", "runtimeHash", "transportHash"]) ||
     typeof runtime.harnessVersion !== "string" || runtime.harnessVersion.length === 0 ||
     runtime.packageName !== "pi-multi-agent-harness" ||
     typeof runtime.packageVersion !== "string" || runtime.packageVersion.length === 0 ||
     typeof runtime.packageRoot !== "string" || !isAbsolute(runtime.packageRoot) ||
-    typeof runtime.transportHash !== "string" || !digest.test(runtime.transportHash)
+    typeof runtime.transportHash !== "string" || !digest.test(runtime.transportHash) ||
+    typeof runtime.runtimeHash !== "string" || !digest.test(runtime.runtimeHash)
   ) {
     throw new Error("invalid resolved runtime identity");
   }

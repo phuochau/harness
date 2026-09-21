@@ -68,6 +68,7 @@ it("runs standalone recovery with scheduling disabled for an existing durable ru
       packageVersion: "0.1.0",
       packageRoot: process.cwd(),
       transportHash: `sha256:${"b".repeat(64)}`,
+      runtimeHash: `sha256:${"c".repeat(64)}`,
     },
     workflow,
     commands: environment.commands,
@@ -127,6 +128,7 @@ it("runs standalone recovery with scheduling disabled for an existing durable ru
         name: "pi-multi-agent-harness",
         version: "0.1.0",
         transportHash: `sha256:${"b".repeat(64)}`,
+        runtimeHash: `sha256:${"c".repeat(64)}`,
       });
       return managed;
     },

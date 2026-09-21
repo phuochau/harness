@@ -141,8 +141,10 @@ function validateProcessRecord(
     typeof value.pid !== "number" || typeof value.startIdentity !== "string" ||
     typeof value.executable !== "string" || typeof value.argvHash !== "string" ||
     typeof value.eventsPath !== "string" || typeof value.stderrPath !== "string" ||
-    typeof value.recordPath !== "string" || typeof value.startedAt !== "string" ||
+    typeof value.recordPath !== "string" || typeof value.providerPath !== "string" ||
+    typeof value.receiptPublicKey !== "string" || typeof value.startedAt !== "string" ||
     value.recordPath !== join(prepared.launch.controlDir ?? prepared.launch.sessionDir, "process.json") ||
+    value.providerPath !== join(prepared.launch.controlDir ?? prepared.launch.sessionDir, "provider.json") ||
     value.eventsPath !== join(prepared.launch.controlDir ?? prepared.launch.sessionDir, "events.jsonl") ||
     value.stderrPath !== join(prepared.launch.controlDir ?? prepared.launch.sessionDir, "stderr.log")
   ) throw new Error("invalid or mismatched Pi process record");

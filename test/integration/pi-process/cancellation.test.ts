@@ -11,14 +11,15 @@ describe("Pi process cancellation", () => {
     expect(fixture.signals).toEqual(["SIGINT", "SIGTERM", "SIGKILL"]);
   });
 
-  it("stops escalation as soon as the process disappears", async () => {
+  it("fails closed when the monitor disappears without provider identity", async () => {
     const fixture = supervisorFixture();
     fixture.identity.inspect = async () => {
       if (fixture.signals.length > 0) return undefined;
       return fixture.identity.observed;
     };
-    const evidence = await fixture.supervisor.cancel(processRecord(), 0);
-    expect(evidence.signals).toEqual(["SIGINT"]);
+    await expect(fixture.supervisor.cancel(processRecord(), 0)).rejects.toThrow(
+      "cannot verify cancellation after Pi monitor loss",
+    );
     expect(fixture.signals).toEqual(["SIGINT"]);
   });
 });

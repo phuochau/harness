@@ -12,7 +12,20 @@ export interface PiProcessRecord {
   readonly eventsPath: string;
   readonly stderrPath: string;
   readonly recordPath: string;
+  readonly providerPath: string;
+  readonly receiptPublicKey: string;
   readonly startedAt: string;
+}
+
+export interface PiProviderProcessRecord {
+  readonly schemaVersion: 1;
+  readonly attemptId: string;
+  readonly pid: number;
+  readonly processGroupId: number;
+  readonly startIdentity: string;
+  readonly executable: string;
+  readonly attemptToken: string;
+  readonly signature: string;
 }
 
 export interface PiLaunchSpec {

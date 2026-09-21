@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ProfileDocument } from "../../contracts/profiles.js";
 import { resolveProfiles, type LockedProfileResources, type ResolvedProfiles } from "../../config/profiles.js";
 import { NodeProcessRunner } from "../../git/process.js";
@@ -33,12 +34,29 @@ export interface ManagedPiRuntimeBaseInput {
   readonly expectedPackage?: {
     readonly name: string;
     readonly version: string;
-    readonly transportHash?: `sha256:${string}`;
+    readonly transportHash: `sha256:${string}`;
+    readonly runtimeHash: `sha256:${string}`;
   };
+}
+
+export async function managedRuntimeHash(packageRoot: string): Promise<`sha256:${string}`> {
+  const paths = [
+    join(packageRoot, "bin", "pi-process-monitor.mjs"),
+    join(packageRoot, "dist", "runtime", "pi-process", "process.js"),
+    join(packageRoot, "dist", "runtime", "pi-process", "identity.js"),
+    join(packageRoot, "dist", "runtime", "production", "pi-worker.js"),
+  ];
+  const content = await Promise.all(paths.map((path) => readFile(path)));
+  return sha256(Buffer.concat(content.flatMap((value) => [value, Buffer.from([0])])));
 }
 
 async function assertPackageIdentity(input: ManagedPiRuntimeBaseInput): Promise<void> {
   if (input.expectedPackage === undefined) return;
+  const currentRoot = await realpath(fileURLToPath(new URL("../../../", import.meta.url)));
+  const expectedRoot = await realpath(input.packageRoot);
+  if (currentRoot !== expectedRoot) {
+    throw new Error("recovery must run from the frozen harness package root");
+  }
   const value = JSON.parse(await readFile(join(input.packageRoot, "package.json"), "utf8")) as {
     name?: unknown;
     version?: unknown;
@@ -49,13 +67,14 @@ async function assertPackageIdentity(input: ManagedPiRuntimeBaseInput): Promise<
   ) {
     throw new Error("frozen harness package identity is unavailable");
   }
-  if (input.expectedPackage.transportHash !== undefined) {
-    const transport = await readFile(
-      join(input.packageRoot, "dist", "pi", "worker-transport-extension.js"),
-    );
-    if (sha256(transport) !== input.expectedPackage.transportHash) {
-      throw new Error("frozen harness transport identity is unavailable");
-    }
+  const transport = await readFile(
+    join(input.packageRoot, "dist", "pi", "worker-transport-extension.js"),
+  );
+  if (sha256(transport) !== input.expectedPackage.transportHash) {
+    throw new Error("frozen harness transport identity is unavailable");
+  }
+  if (await managedRuntimeHash(input.packageRoot) !== input.expectedPackage.runtimeHash) {
+    throw new Error("frozen harness runtime identity is unavailable");
   }
 }
 

@@ -92,6 +92,7 @@ async function fixture() {
     eventsPath: join(controlDir, "events.jsonl"),
     stderrPath: join(controlDir, "stderr.log"),
     recordPath: join(controlDir, "process.json"),
+    providerPath: join(controlDir, "provider.json"),
   });
   const prepared = {
     attemptId: process.attemptId,

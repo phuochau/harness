@@ -33,9 +33,11 @@ class FakeSupervisor implements PiProcessSupervisor {
       eventsPath: join(spec.sessionDir, "events.jsonl"),
       stderrPath: join(spec.sessionDir, "stderr.log"),
       recordPath: join(spec.sessionDir, "process.json"),
+      providerPath: join(spec.sessionDir, "provider.json"),
+      receiptPublicKey: "fixture-public-key",
       startedAt: new Date(0).toISOString(),
     };
-    return this.record;
+    return this.record!;
   }
 
   public async observe(record: PiProcessRecord) {

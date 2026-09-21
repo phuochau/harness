@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn, execFile } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, createPublicKey, randomUUID, sign as cryptoSign } from "node:crypto";
 import { closeSync, fsyncSync, linkSync, openSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { promisify } from "node:util";
@@ -11,6 +11,10 @@ if (!launchPath) throw new Error("missing durable launch path");
 const launch = JSON.parse(readFileSync(launchPath, "utf8"));
 const token = process.env.PI_HARNESS_ATTEMPT_TOKEN;
 if (!token) throw new Error("missing attempt token");
+const receiptPrivateKey = readFileSync(0, "utf8");
+if (!receiptPrivateKey) throw new Error("missing receipt signing key");
+const receiptPublicKey = createPublicKey(receiptPrivateKey)
+  .export({ type: "spki", format: "pem" }).toString();
 // The monitor owns escalation. Group signals normally reach both processes;
 // direct-signal fallbacks are forwarded to the provider while the monitor
 // remains alive to persist its exit receipt.
@@ -76,6 +80,17 @@ function durableCreate(path, value) {
   }
 }
 
+function signed(payload) {
+  return {
+    ...payload,
+    signature: cryptoSign(
+      null,
+      Buffer.from(JSON.stringify(payload)),
+      receiptPrivateKey,
+    ).toString("base64"),
+  };
+}
+
 const observed = await identity(process.pid);
 durableCreate(launch.recordPath, {
   schemaVersion: 1,
@@ -91,11 +106,15 @@ durableCreate(launch.recordPath, {
   eventsPath: launch.eventsPath,
   stderrPath: launch.stderrPath,
   recordPath: launch.recordPath,
+  providerPath: launch.providerPath,
+  receiptPublicKey,
   startedAt: new Date().toISOString(),
 });
 
 const childEnvironment = { ...process.env };
 delete childEnvironment.PI_HARNESS_ATTEMPT_TOKEN;
+const providerToken = randomUUID();
+childEnvironment.PI_HARNESS_PROVIDER_TOKEN = providerToken;
 child = spawn(launch.executable, launch.argv, {
   cwd: launch.cwd,
   env: childEnvironment,
@@ -104,13 +123,28 @@ child = spawn(launch.executable, launch.argv, {
   stdio: ["pipe", "inherit", "ignore"],
 });
 for (const signal of pendingSignals.splice(0)) forward(signal);
+if (child.pid !== undefined) {
+  const providerIdentity = await identity(child.pid);
+  const providerPayload = {
+    schemaVersion: 1,
+    attemptId: launch.attemptId,
+    pid: child.pid,
+    processGroupId: process.pid,
+    startIdentity: sha256(
+      `${child.pid}\0${providerIdentity.start}\0${providerIdentity.executable}\0${providerToken}`,
+    ),
+    executable: providerIdentity.executable,
+    attemptToken: providerToken,
+  };
+  durableCreate(launch.providerPath, signed(providerPayload));
+}
 const input = readFileSync(launch.stdinPath);
 child.stdin.end(input);
 const result = await new Promise((resolve, reject) => {
   child.once("error", () => resolve({ exitCode: 1, signal: null }));
   child.once("close", (exitCode, signal) => resolve({ exitCode, signal }));
 });
-durableCreate(launch.exitPath, result);
+durableCreate(launch.exitPath, signed({ schemaVersion: 1, ...result }));
 await new Promise((resolve) => process.stdout.write(
   `${JSON.stringify({ type: "process_exit", ...result })}\n`,
   resolve,

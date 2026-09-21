@@ -36,6 +36,7 @@ import { NodeProcessRunner } from "../git/process.js";
 import {
   createManagedPiRuntime,
   createManagedPiRuntimeFromResolved,
+  managedRuntimeHash,
   type ManagedPiRuntimeBundle,
 } from "../runtime/managed/factory.js";
 import { findPackageRoot } from "../cli/package-root.js";
@@ -85,6 +86,7 @@ interface LoadedProjectConfiguration {
   readonly packageName: string;
   readonly packageVersion: string;
   readonly transportHash: `sha256:${string}`;
+  readonly runtimeHash: `sha256:${string}`;
 }
 
 function artifactPaths(workflow: CompiledWorkflow): ArtifactPaths {
@@ -139,6 +141,7 @@ async function loadProjectConfiguration(
   const transportHash = sha256(
     await readFile(join(packageRoot, "dist/pi/worker-transport-extension.js")),
   );
+  const runtimeHash = await managedRuntimeHash(packageRoot);
   return {
     workflow: compileWorkflow({ workflow: workflowDocument, environment, profiles: runtime.profiles }),
     commands: environment.commands,
@@ -149,6 +152,7 @@ async function loadProjectConfiguration(
     packageName: packageManifest.name,
     packageVersion: packageManifest.version,
     transportHash,
+    runtimeHash,
   };
 }
 
@@ -355,6 +359,7 @@ class ProjectCommandBackend implements HarnessCommandBackend {
           packageVersion: this.configuration.packageVersion,
           packageRoot: this.configuration.packageRoot,
           transportHash: this.configuration.transportHash,
+          runtimeHash: this.configuration.runtimeHash,
         },
         workflow: this.configuration.workflow,
         commands: this.configuration.commands,
@@ -421,6 +426,7 @@ class ProjectCommandBackend implements HarnessCommandBackend {
         name: selected.config.runtime.packageName,
         version: selected.config.runtime.packageVersion,
         transportHash: selected.config.runtime.transportHash,
+        runtimeHash: selected.config.runtime.runtimeHash,
       },
     });
     this.active = await composeProductionRun({

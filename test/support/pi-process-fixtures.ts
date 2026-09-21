@@ -27,6 +27,8 @@ export function processRecord(
     eventsPath: join(sessionDir, "events.jsonl"),
     stderrPath: join(sessionDir, "stderr.log"),
     recordPath: join(sessionDir, "process.json"),
+    providerPath: join(sessionDir, "provider.json"),
+    receiptPublicKey: "fixture-public-key",
     startedAt: "2026-09-21T00:00:00.000Z",
     ...overrides,
   };
@@ -41,6 +43,10 @@ export class FakeProcessIdentity implements ProcessIdentityPort {
   }
 
   public async inspect(): Promise<LiveProcessIdentity | undefined> {
+    return this.observed;
+  }
+
+  public async inspectPid(): Promise<LiveProcessIdentity | undefined> {
     return this.observed;
   }
 }

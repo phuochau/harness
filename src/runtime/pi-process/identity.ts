@@ -21,6 +21,7 @@ export interface ProcessIdentityPort {
     attemptToken: string,
   ): Promise<LiveProcessIdentity>;
   inspect(record: PiProcessRecord): Promise<LiveProcessIdentity | undefined>;
+  inspectPid(pid: number, attemptToken: string): Promise<LiveProcessIdentity | undefined>;
 }
 
 export function identityMismatchEvidence(
@@ -50,8 +51,12 @@ interface RawLiveIdentity {
   readonly attemptToken: string;
 }
 
-function tokenFromEnvironment(environment: string, separator: string | RegExp): string {
-  const prefix = "PI_HARNESS_ATTEMPT_TOKEN=";
+function tokenFromEnvironment(
+  environment: string,
+  separator: string | RegExp,
+  variable: "PI_HARNESS_ATTEMPT_TOKEN" | "PI_HARNESS_PROVIDER_TOKEN",
+): string {
+  const prefix = `${variable}=`;
   const entry = environment.split(separator).find((item) => item.startsWith(prefix));
   if (entry === undefined || entry.length === prefix.length) {
     throw new Error("live process is missing its attempt token");
@@ -59,7 +64,10 @@ function tokenFromEnvironment(environment: string, separator: string | RegExp): 
   return entry.slice(prefix.length);
 }
 
-async function linuxIdentity(pid: number): Promise<RawLiveIdentity> {
+async function linuxIdentity(
+  pid: number,
+  variable: "PI_HARNESS_ATTEMPT_TOKEN" | "PI_HARNESS_PROVIDER_TOKEN",
+): Promise<RawLiveIdentity> {
   const [stat, executable, environment] = await Promise.all([
     readFile(`/proc/${pid}/stat`, "utf8"),
     realpath(`/proc/${pid}/exe`),
@@ -75,11 +83,14 @@ async function linuxIdentity(pid: number): Promise<RawLiveIdentity> {
     start: startTime,
     executable,
     stopped: fields[0] === "T" || fields[0] === "t",
-    attemptToken: tokenFromEnvironment(environment, "\0"),
+    attemptToken: tokenFromEnvironment(environment, "\0", variable),
   };
 }
 
-async function darwinIdentity(pid: number): Promise<RawLiveIdentity> {
+async function darwinIdentity(
+  pid: number,
+  variable: "PI_HARNESS_ATTEMPT_TOKEN" | "PI_HARNESS_PROVIDER_TOKEN",
+): Promise<RawLiveIdentity> {
   const [{ stdout: start }, { stdout: executable }, { stdout: state }, { stdout: environment }] = await Promise.all([
     execFileAsync("/bin/ps", ["-p", String(pid), "-o", "lstart="]),
     execFileAsync("/bin/ps", ["-p", String(pid), "-o", "comm="]),
@@ -93,13 +104,16 @@ async function darwinIdentity(pid: number): Promise<RawLiveIdentity> {
     start: marker,
     executable: await normalizedExecutable(command),
     stopped: state.trim().startsWith("T"),
-    attemptToken: tokenFromEnvironment(environment, /\s+/),
+    attemptToken: tokenFromEnvironment(environment, /\s+/, variable),
   };
 }
 
-async function liveIdentity(pid: number): Promise<RawLiveIdentity> {
-  if (process.platform === "linux") return linuxIdentity(pid);
-  if (process.platform === "darwin") return darwinIdentity(pid);
+async function liveIdentity(
+  pid: number,
+  variable: "PI_HARNESS_ATTEMPT_TOKEN" | "PI_HARNESS_PROVIDER_TOKEN",
+): Promise<RawLiveIdentity> {
+  if (process.platform === "linux") return linuxIdentity(pid, variable);
+  if (process.platform === "darwin") return darwinIdentity(pid, variable);
   throw new Error(`unsupported process identity platform: ${process.platform}`);
 }
 
@@ -113,12 +127,41 @@ function computeStartIdentity(
 }
 
 export class SystemProcessIdentity implements ProcessIdentityPort {
+  private async inspectWithVariable(
+    pid: number,
+    variable: "PI_HARNESS_ATTEMPT_TOKEN" | "PI_HARNESS_PROVIDER_TOKEN",
+  ): Promise<LiveProcessIdentity | undefined> {
+    try {
+      const observed = await liveIdentity(pid, variable);
+      return {
+        pid,
+        executable: observed.executable,
+        attemptToken: observed.attemptToken,
+        stopped: observed.stopped,
+        startIdentity: computeStartIdentity(
+          pid,
+          observed.start,
+          observed.executable,
+          observed.attemptToken,
+        ),
+      };
+    } catch (error) {
+      const code: unknown = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "ESRCH" || code === "EINVAL" || code === 1) {
+        return undefined;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      if (/process .* is missing|No such process/i.test(message)) return undefined;
+      throw error;
+    }
+  }
+
   public async capture(
     pid: number,
     executable: string,
     attemptToken: string,
   ): Promise<LiveProcessIdentity> {
-    const observed = await liveIdentity(pid);
+    const observed = await liveIdentity(pid, "PI_HARNESS_ATTEMPT_TOKEN");
     const expectedExecutable = await normalizedExecutable(executable);
     if (observed.executable !== expectedExecutable) {
       throw new Error(
@@ -143,28 +186,13 @@ export class SystemProcessIdentity implements ProcessIdentityPort {
   }
 
   public async inspect(record: PiProcessRecord): Promise<LiveProcessIdentity | undefined> {
-    try {
-      const observed = await liveIdentity(record.pid);
-      return {
-        pid: record.pid,
-        executable: observed.executable,
-        attemptToken: observed.attemptToken,
-        stopped: observed.stopped,
-        startIdentity: computeStartIdentity(
-          record.pid,
-          observed.start,
-          observed.executable,
-          observed.attemptToken,
-        ),
-      };
-    } catch (error) {
-      const code: unknown = (error as NodeJS.ErrnoException).code;
-      if (code === "ENOENT" || code === "ESRCH" || code === "EINVAL" || code === 1) {
-        return undefined;
-      }
-      const message = error instanceof Error ? error.message : String(error);
-      if (/process .* is missing|No such process/i.test(message)) return undefined;
-      throw error;
-    }
+    return this.inspectWithVariable(record.pid, "PI_HARNESS_ATTEMPT_TOKEN");
+  }
+
+  public async inspectPid(
+    pid: number,
+    _attemptToken: string,
+  ): Promise<LiveProcessIdentity | undefined> {
+    return this.inspectWithVariable(pid, "PI_HARNESS_PROVIDER_TOKEN");
   }
 }

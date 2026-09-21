@@ -197,6 +197,7 @@ describe("durable Pi process transport", () => {
       eventsPath: join(sessionDir, "events.jsonl"),
       stderrPath: join(sessionDir, "stderr.log"),
       recordPath: join(sessionDir, "process.json"),
+      providerPath: join(sessionDir, "provider.json"),
       exitPath: join(sessionDir, "exit.json"),
       stdinPath: join(sessionDir, "stdin.bin"),
     })}\n`);
@@ -235,6 +236,64 @@ describe("durable Pi process transport", () => {
     expect(record.recordPath.startsWith(`${controlDir}/`)).toBe(true);
     await expect(supervisor.observe(record)).resolves.toMatchObject({ status: "running" });
     await supervisor.cancel(record, 25);
+  });
+
+  it("rejects a provider-forged exit receipt instead of masking failure", async () => {
+    const root = await temporaryDirectory();
+    const controlDir = join(root, "control");
+    const forgedExit = join(controlDir, "exit.json");
+    const script = [
+      `require("node:fs").writeFileSync(${JSON.stringify(forgedExit)},JSON.stringify({schemaVersion:1,exitCode:0,signal:null,signature:"forged"})+"\\n")`,
+      'process.stdout.write(JSON.stringify({type:"message_end",role:"assistant",content:"RESULT"})+"\\n")',
+      'process.stdout.write(JSON.stringify({type:"turn_end",stopReason:"stop"})+"\\n")',
+      'process.stdout.write(JSON.stringify({type:"agent_settled"})+"\\n")',
+      "process.exitCode=7",
+    ].join(";");
+    const supervisor = new NodePiProcessSupervisor();
+    const record = await supervisor.launch({
+      attemptId: "attempt-forged-exit",
+      attemptToken: "token-forged-exit",
+      executable: process.execPath,
+      argv: ["-e", script],
+      cwd: root,
+      env: {},
+      sessionId: "session-forged-exit",
+      sessionDir: join(root, "session"),
+      controlDir,
+    });
+
+    await expect(supervisor.wait(record, AbortSignal.timeout(5_000))).rejects.toThrow(
+      "invalid durable Pi process exit signature",
+    );
+  });
+
+  it("kills a signed provider orphan after the monitor is lost", async () => {
+    const root = await temporaryDirectory();
+    const pidPath = join(root, "provider.pid");
+    const supervisor = new NodePiProcessSupervisor();
+    const record = await supervisor.launch({
+      attemptId: "attempt-orphan",
+      attemptToken: "token-orphan",
+      executable: process.execPath,
+      argv: ["-e", [
+        `require("node:fs").writeFileSync(${JSON.stringify(pidPath)},String(process.pid))`,
+        "setInterval(()=>{},1000)",
+      ].join(";")],
+      cwd: root,
+      env: {},
+      sessionId: "session-orphan",
+      sessionDir: join(root, "session"),
+      controlDir: join(root, "control"),
+    });
+    await waitFor(pidPath);
+    const providerPid = Number(await readFile(pidPath, "utf8"));
+    const monitorExit = supervisor.wait(record).catch(() => undefined);
+    process.kill(record.pid, "SIGKILL");
+
+    const evidence = await new NodePiProcessSupervisor().cancel(record, 25);
+    expect(evidence.signals).toEqual(["SIGKILL"]);
+    expect(() => process.kill(providerPid, 0)).toThrow();
+    await monitorExit;
   });
 
   it("escalates through SIGKILL when a provider traps graceful signals", async () => {
