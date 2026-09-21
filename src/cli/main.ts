@@ -34,7 +34,9 @@ function npmVersion(packageName: string, stdout: string): string | undefined {
   }
 }
 
-function executableCapabilities(project: DeclarativeProject): readonly ExecutableCapability[] {
+export function executableCapabilities(
+  project: DeclarativeProject,
+): readonly ExecutableCapability[] {
   const result: ExecutableCapability[] = [
     { id: "node", command: process.execPath, versionArgs: ["--version"], parseVersion: semver },
     { id: "git", command: "git", versionArgs: ["--version"], parseVersion: semver },
@@ -107,6 +109,26 @@ function executableCapabilities(project: DeclarativeProject): readonly Executabl
         ...(authConfig === undefined ? {} : { auth: authConfig }),
       });
     }
+  }
+  const herdrTargets = new Set<string>();
+  if (project.workflow.stages.some((stage) => stage.runner === "pi")) {
+    herdrTargets.add("pi");
+  }
+  for (const stage of project.workflow.stages) {
+    if (typeof stage.runner !== "object") continue;
+    stage.runner.prefer.forEach((worker) => herdrTargets.add(worker));
+  }
+  for (const target of herdrTargets) {
+    result.push({
+      id: `herdr-integration:${target}`,
+      command: "herdr",
+      versionArgs: ["integration", "status"],
+      expectedVersion: "current",
+      parseVersion: (stdout) =>
+        new RegExp(`^${target}: current(?:\\s|$)`, "m").test(stdout)
+          ? "current"
+          : undefined,
+    });
   }
   return result;
 }

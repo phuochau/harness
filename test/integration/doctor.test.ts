@@ -1,6 +1,8 @@
 import { rm } from "node:fs/promises";
 import { afterEach, expect, it } from "vitest";
 import { doctor } from "../../src/cli/doctor.js";
+import { executableCapabilities } from "../../src/cli/main.js";
+import { readDeclarativeProject } from "../../src/cli/trusted-project-reader.js";
 import { maliciousProjectFixture } from "../support/install-fixtures.js";
 
 const temporary: string[] = [];
@@ -47,4 +49,24 @@ it("treats every missing required locked capability as unhealthy", async () => {
   expect(report.ok).toBe(false);
   expect(report.capabilities.some((item) => item.id === "devin" && item.status === "missing"))
     .toBe(true);
+});
+
+it("requires current Herdr integrations for Pi and every routed worker", async () => {
+  const root = await maliciousProjectFixture();
+  temporary.push(root);
+  const capabilities = executableCapabilities(await readDeclarativeProject(root));
+  const integrations = capabilities.filter((item) =>
+    item.id.startsWith("herdr-integration:"),
+  );
+  expect(integrations.map((item) => item.id).sort()).toEqual([
+    "herdr-integration:claude",
+    "herdr-integration:codex",
+    "herdr-integration:devin",
+    "herdr-integration:pi",
+  ]);
+  for (const integration of integrations) {
+    const target = integration.id.slice("herdr-integration:".length);
+    expect(integration.parseVersion(`${target}: current (v1) (/tmp/hook)`)).toBe("current");
+    expect(integration.parseVersion(`${target}: not installed (/tmp/hook)`)).toBeUndefined();
+  }
 });
