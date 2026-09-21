@@ -199,7 +199,7 @@ export function createWorkflowLifecycle(): WorkflowLifecycle {
         const value = record(output, "task finalization output");
         const taskId = string(value, "taskId");
         if (bound.taskId !== taskId) throw new Error("task finalization identity mismatch");
-        const semanticHash = bound.input.tasksSemanticHash;
+        const semanticHash = value.tasksSemanticHash ?? bound.input.tasksSemanticHash;
         if (typeof semanticHash !== "string" || !/^sha256:[0-9a-f]{64}$/.test(semanticHash)) {
           throw new Error("task finalization requires tasksSemanticHash");
         }

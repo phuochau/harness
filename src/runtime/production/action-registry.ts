@@ -83,6 +83,9 @@ export function createProductionActionRegistry(
     handler: new CommandAction(),
     binder: {
       bind: (intent) => binders.command(intent),
+      mapOutput: (input, output) => input.expectedCommit === undefined
+        ? output
+        : { ...output, commit: input.expectedCommit },
       afterCompleted: (input) => binders.afterCommand(input as BoundCommandInput),
     },
     recovery: "non_retryable",

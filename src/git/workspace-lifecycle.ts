@@ -86,6 +86,7 @@ function matchesOwnedPath(path: string, pattern: string): boolean {
 
 export class WorktreeLifecycle {
   private readonly process = new NodeProcessRunner();
+  private persistence: Promise<void> = Promise.resolve();
 
   private constructor(
     private readonly repository: GitRepository,
@@ -117,13 +118,17 @@ export class WorktreeLifecycle {
   }
 
   private async persistRegistry(): Promise<void> {
-    const path = join(this.workspaceRoot, "registry.json");
-    const temporary = `${path}.tmp`;
-    await writeFile(temporary, `${JSON.stringify(this.registry.list(), null, 2)}\n`, {
-      encoding: "utf8",
-      mode: 0o600,
+    const operation = this.persistence.then(async () => {
+      const path = join(this.workspaceRoot, "registry.json");
+      const temporary = `${path}.tmp-${process.pid}-${crypto.randomUUID()}`;
+      await writeFile(temporary, `${JSON.stringify(this.registry.list(), null, 2)}\n`, {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+      await rename(temporary, path);
     });
-    await rename(temporary, path);
+    this.persistence = operation.catch(() => undefined);
+    await operation;
   }
 
   private async gitAt(
@@ -327,7 +332,7 @@ export class WorktreeLifecycle {
   public async patchIdForRange(base: string, head: string): Promise<string> {
     const diff = await this.process.runBytes(
       "git",
-      ["-C", this.repository.root, "diff", "--binary", base, head],
+      ["-C", this.repository.root, "diff", "--binary", "--full-index", base, head],
       { shell: false },
     );
     if (diff.exitCode !== 0) throw new WorkspaceInvariantError(diff.stderr);

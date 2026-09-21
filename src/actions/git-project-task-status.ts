@@ -39,6 +39,7 @@ export interface TaskFinalizationOutput {
   readonly targetCommit: string;
   readonly candidateCommit: string;
   readonly taskId: string;
+  readonly tasksSemanticHash: string;
 }
 
 export class TaskFinalizationInvariantError extends Error {}
@@ -78,6 +79,7 @@ function outputFor(intent: ProjectTaskStatusIntent, commit: string): TaskFinaliz
     targetCommit: commit,
     candidateCommit: intent.input.candidateCommit,
     taskId: intent.input.taskId,
+    tasksSemanticHash: intent.input.tasksSemanticHash,
   };
 }
 

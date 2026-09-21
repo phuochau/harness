@@ -8,16 +8,17 @@ export class JournalVerificationObservations implements VerificationObservationS
   public constructor(private readonly journal: Journal) {}
 
   public async get(id: string): Promise<VerificationObservation | undefined> {
+    const matches: VerificationObservation[] = [];
     for (const event of await this.journal.read()) {
       if (
-        event.idempotencyKey !== id ||
+        (event.idempotencyKey !== id && !event.idempotencyKey.endsWith(`:${id}`)) ||
         (event.eventType !== "verification.passed" &&
           event.eventType !== "verification.failed")
       ) continue;
       const payload = event.payload as { commit?: unknown };
       if (typeof payload.commit !== "string") return undefined;
-      return { eventType: event.eventType, commit: payload.commit };
+      matches.push({ eventType: event.eventType, commit: payload.commit });
     }
-    return undefined;
+    return matches.length === 1 ? matches[0] : undefined;
   }
 }

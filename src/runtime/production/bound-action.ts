@@ -10,6 +10,7 @@ import type { DurableRecordStore } from "./records.js";
 
 export interface ProductionInputBinder<K extends string, I, O> {
   bind(intent: EffectIntent<K, Readonly<Record<string, unknown>>>): Promise<I>;
+  mapOutput?(input: I, output: O): O;
   afterCompleted?(
     input: I,
     output: O,
@@ -82,8 +83,11 @@ export class DurableBoundAction<K extends string, I, O>
       await this.options.binder.afterCompleted?.(input, existing, intent);
       return existing;
     }
-    const output = this.options.validateOutput(
+    const rawOutput = this.options.validateOutput(
       await this.options.handler.execute(context, this.delegated(intent, input)),
+    );
+    const output = this.options.validateOutput(
+      this.options.binder.mapOutput?.(input, rawOutput) ?? rawOutput,
     );
     const persisted = this.options.validateOutput(await this.options.records.put(
       "action-completed",
@@ -114,7 +118,10 @@ export class DurableBoundAction<K extends string, I, O>
       this.delegated(intent, input),
     );
     if (result.status !== "observed") return result;
-    const output = this.options.validateOutput(result.output);
+    const rawOutput = this.options.validateOutput(result.output);
+    const output = this.options.validateOutput(
+      this.options.binder.mapOutput?.(input, rawOutput) ?? rawOutput,
+    );
     await this.options.records.put(
       "action-completed",
       intent.idempotencyKey,

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { EffectExecutor } from "../../actions/executor.js";
-import type { ActionDependencies, Clock } from "../../actions/types.js";
+import type { ActionDependencies, Clock, ProcessRunner } from "../../actions/types.js";
 import type { CompiledWorkflow } from "../../config/compile.js";
 import { createWorkflowCommandDeriver, emptyTaskGraph } from "../../core/workflow-engine.js";
 import { createWorkflowLifecycle } from "../../core/workflow-lifecycle.js";
@@ -26,7 +26,10 @@ import { connectInstalledHerdr, type HerdrClient } from "../herdr/client.js";
 import { HerdrRuntime } from "../herdr/runtime.js";
 import { workerAdapters } from "../workers/index.js";
 import { createProductionActionRegistry } from "./action-registry.js";
-import { HerdrProductionWorkerRuntime } from "./herdr-worker.js";
+import {
+  HerdrProductionWorkerRuntime,
+  type ProductionHerdrPort,
+} from "./herdr-worker.js";
 import { JournalVerificationObservations } from "./journal-observations.js";
 import { loadRunTaskGraph, ProductionPlanningArtifactSealer } from "./planning-artifacts.js";
 import { DurableRecordStore } from "./records.js";
@@ -52,6 +55,8 @@ export interface ComposeProductionRunOptions {
   readonly context: ExtensionContext;
   readonly ownerId?: string;
   readonly ensureHerdr?: () => Promise<HerdrClient>;
+  readonly workerHerdr?: ProductionHerdrPort;
+  readonly process?: ProcessRunner;
 }
 
 export interface StandaloneProductionEffects {
@@ -141,7 +146,9 @@ export async function composeProductionRun(
         git,
       ),
     });
-    herdrClient = await (options.ensureHerdr ?? ensureInstalledHerdr)();
+    const herdr = options.workerHerdr ?? new HerdrRuntime(
+      herdrClient = await (options.ensureHerdr ?? ensureInstalledHerdr)(),
+    );
     const records = new DurableRecordStore(initialized.paths.artifacts);
     let system: DurableHarnessSystem | undefined;
     const readState = async () => {
@@ -159,7 +166,7 @@ export async function composeProductionRun(
     });
     const workerRuntime = new HerdrProductionWorkerRuntime({
       adapters: workerAdapters(),
-      herdr: new HerdrRuntime(herdrClient),
+      herdr,
       attempts,
     });
     const registry = createProductionActionRegistry({
@@ -181,7 +188,7 @@ export async function composeProductionRun(
     });
     const abort = new AbortController();
     const dependencies: ActionDependencies = {
-      process: new NodeProcessRunner(),
+      process: options.process ?? new NodeProcessRunner(),
       git,
       approvals: { get: async () => undefined },
       clock: systemClock,

@@ -23,7 +23,13 @@ export class GitEvidence implements EvidenceGit {
     const output = await this.checked(path, [
       "status", "--porcelain=v1", "--untracked-files=all",
     ]);
-    return output === "" ? [] : output.split("\n");
+    return output === ""
+      ? []
+      : output.split("\n").filter((line) => {
+          const changedPath = line.slice(3);
+          return changedPath !== ".harness-output" &&
+            !changedPath.startsWith(".harness-output/");
+        });
   }
 
   public worktreeCommit(path: string): Promise<string> {

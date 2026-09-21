@@ -217,12 +217,30 @@ export class ProductionActionBinders {
 }
 
 export function validateBoundCommand(value: unknown): BoundCommandInput {
-  return record(value, "bound command") as BoundCommandInput;
+  const input = record(value, "bound command");
+  const workspace = record(input.workspace, "verification workspace");
+  if (
+    !Array.isArray(input.argv) ||
+    input.argv.length === 0 ||
+    input.argv.some((item: unknown) => typeof item !== "string") ||
+    typeof input.cwd !== "string" ||
+    typeof input.expectedCommit !== "string" ||
+    typeof workspace.id !== "string" ||
+    typeof workspace.path !== "string" ||
+    typeof workspace.commit !== "string" ||
+    typeof workspace.role !== "string"
+  ) throw new Error("invalid bound command");
+  return input as BoundCommandInput;
 }
 
 export function validateCommandOutput(value: unknown): CommandOutput {
   const output = record(value, "command output");
-  if (typeof output.exitCode !== "number" || typeof output.stdout !== "string" || typeof output.stderr !== "string") {
+  if (
+    typeof output.exitCode !== "number" ||
+    typeof output.stdout !== "string" ||
+    typeof output.stderr !== "string" ||
+    (output.commit !== undefined && typeof output.commit !== "string")
+  ) {
     throw new Error("invalid command output");
   }
   return output as CommandOutput;
@@ -234,29 +252,94 @@ export function validateIntegrationInput(value: unknown): GitIntegrateIntent["in
 }
 
 export function validateIntegrationOutput(value: unknown): IntegrationOutput {
-  return record(value, "integration output") as IntegrationOutput;
+  const output = record(value, "integration output");
+  return {
+    candidateCommit: string(output, "candidateCommit"),
+    candidateRef: string(output, "candidateRef"),
+    expectedRunHead: string(output, "expectedRunHead"),
+    patchId: string(output, "patchId"),
+  };
 }
 
 export function validateFinalizationInput(value: unknown): ProjectTaskStatusIntent["input"] {
-  return record(value, "task finalization input") as ProjectTaskStatusIntent["input"];
+  const input = record(value, "task finalization input");
+  const identity = record(input.integrationIdentity, "integration identity");
+  const tasksSemanticHash = string(input, "tasksSemanticHash");
+  if (!/^sha256:[0-9a-f]{64}$/.test(tasksSemanticHash)) {
+    throw new Error("invalid task semantic hash");
+  }
+  return {
+    runRef: string(input, "runRef"),
+    expectedRunHead: string(input, "expectedRunHead"),
+    candidateCommit: string(input, "candidateCommit"),
+    integrationIdentity: {
+      effectKey: string(identity, "effectKey"),
+      expectedRunHead: string(identity, "expectedRunHead"),
+      change: validateSealed(identity.change),
+    },
+    verificationEventId: string(input, "verificationEventId"),
+    taskId: string(input, "taskId"),
+    tasksPath: string(input, "tasksPath"),
+    tasksSemanticHash,
+  };
 }
 
 export function validateFinalizationOutput(value: unknown): TaskFinalizationOutput {
-  return record(value, "task finalization output") as TaskFinalizationOutput;
+  const output = record(value, "task finalization output");
+  const tasksSemanticHash = string(output, "tasksSemanticHash");
+  if (!/^sha256:[0-9a-f]{64}$/.test(tasksSemanticHash)) {
+    throw new Error("invalid finalization semantic hash");
+  }
+  return {
+    targetCommit: string(output, "targetCommit"),
+    candidateCommit: string(output, "candidateCommit"),
+    taskId: string(output, "taskId"),
+    tasksSemanticHash,
+  };
 }
 
 export function validatePushInput(value: unknown): GitPushInput {
-  return record(value, "push input") as GitPushInput;
+  const input = record(value, "push input");
+  return {
+    cwd: string(input, "cwd"),
+    localRef: string(input, "localRef"),
+    remote: string(input, "remote"),
+    remoteRef: string(input, "remoteRef"),
+    reviewedCommit: string(input, "reviewedCommit"),
+  };
 }
 
 export function validatePushOutput(value: unknown): GitPushOutput {
-  return record(value, "push output") as GitPushOutput;
+  const output = record(value, "push output");
+  return {
+    remote: string(output, "remote"),
+    ref: string(output, "ref"),
+    commit: string(output, "commit"),
+  };
 }
 
 export function validatePullRequestInput(value: unknown): PullRequestInput {
-  return record(value, "pull request input") as PullRequestInput;
+  const input = record(value, "pull request input");
+  const body = input.body;
+  if (body !== undefined && typeof body !== "string") throw new Error("invalid pull request body");
+  return {
+    cwd: string(input, "cwd"),
+    head: string(input, "head"),
+    base: string(input, "base"),
+    title: string(input, "title"),
+    ...(body === undefined ? {} : { body }),
+    reviewedCommit: string(input, "reviewedCommit"),
+  };
 }
 
 export function validatePullRequestOutput(value: unknown): PullRequestOutput {
-  return record(value, "pull request output") as PullRequestOutput;
+  const output = record(value, "pull request output");
+  if (!Number.isInteger(output.number) || output.number < 1) {
+    throw new Error("invalid pull request number");
+  }
+  return {
+    number: output.number,
+    url: string(output, "url"),
+    headRefOid: string(output, "headRefOid"),
+  };
 }

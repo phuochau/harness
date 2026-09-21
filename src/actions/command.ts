@@ -19,6 +19,7 @@ export interface CommandOutput {
   readonly exitCode: number;
   readonly stdout: string;
   readonly stderr: string;
+  readonly commit?: string;
 }
 
 export class CommandInvariantError extends Error {}
@@ -106,4 +107,3 @@ export class CommandAction
       : { status: "not_found" };
   }
 }
-
