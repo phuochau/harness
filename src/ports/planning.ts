@@ -4,6 +4,7 @@ import type {
   ArtifactPaths,
   PlanningStage,
 } from "../speckit/artifacts.js";
+import type { PiProcessRecord } from "../runtime/pi-process/types.js";
 
 export type PlanningCommand =
   | "/speckit.specify"
@@ -27,6 +28,24 @@ export interface PlanningRunReceipt {
   readonly generation: number;
   readonly sessionFile: string;
   readonly requestEntryId: string;
+  readonly profileId?: string;
+  readonly profileHash?: string;
+  readonly sessionId?: string;
+  readonly sessionPath?: string;
+  readonly process?: PiProcessRecord;
+  readonly request?: PlanningRequest;
+}
+
+export interface PlanningAttemptReceipt {
+  readonly profileId: string;
+  readonly profileHash: string;
+  readonly sessionId: string;
+  readonly sessionPath: string;
+  readonly correlationId: string;
+  readonly generation: number;
+  readonly terminalEventHash: `sha256:${string}`;
+  readonly beforeHashes: Readonly<Record<string, string | null>>;
+  readonly afterHashes: Readonly<Record<string, string>>;
 }
 
 export type AcceptedPlanningArtifacts = AcceptedStageArtifacts & {
@@ -39,6 +58,7 @@ export type PlanningObservation =
       readonly status: "completed";
       readonly correlationId: string;
       readonly artifacts: AcceptedPlanningArtifacts;
+      readonly receipt?: PlanningAttemptReceipt;
     }
   | {
       readonly status: "blocked";

@@ -41,6 +41,7 @@ import { GitRepository } from "../../git/repository.js";
 import { initialRunState } from "../../core/state.js";
 import { reduceEvent } from "../../core/reducer.js";
 import type { DurableEffectPort } from "../../durable-composition-root.js";
+import type { PlanningAgent } from "../../ports/planning.js";
 
 export interface ProductionRunSystem extends DurableHarnessSystem {
   readonly graph: () => ValidatedTaskGraph;
@@ -57,6 +58,7 @@ export interface ComposeProductionRunOptions {
   readonly workerRuntime?: ProductionWorkerRuntime;
   readonly piWorkerRuntime?: PiWorkerRuntime;
   readonly process?: ProcessRunner;
+  readonly planningAgent?: PlanningAgent;
 }
 
 export interface StandaloneProductionEffects {
@@ -158,16 +160,16 @@ export async function composeProductionRun(
       new PiSessionModelPort(options.pi, options.context),
       new PiSessionPlanningProfileStore(options.context),
     );
-    const planning = new PlanningAction({
-      root: planningBinding.path,
-      correlation: new PiPlanningCorrelation(planningPort, planningProfile),
-      sealer: new ProductionPlanningArtifactSealer(
-        initialized.manifest,
-        planningBinding,
-        worktrees,
-        git,
-      ),
-    });
+    const planning = options.planningAgent ?? new PlanningAction({
+        root: planningBinding.path,
+        correlation: new PiPlanningCorrelation(planningPort, planningProfile),
+        sealer: new ProductionPlanningArtifactSealer(
+          initialized.manifest,
+          planningBinding,
+          worktrees,
+          git,
+        ),
+      });
     const records = new DurableRecordStore(initialized.paths.artifacts);
     let system: DurableHarnessSystem | undefined;
     const readState = async () => {

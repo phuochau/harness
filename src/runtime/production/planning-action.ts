@@ -23,6 +23,11 @@ export interface PlanningActionOutput {
   readonly sessionFile: string;
   readonly requestEntryId: string;
   readonly command: string;
+  readonly profileId?: string;
+  readonly profileHash?: string;
+  readonly sessionId?: string;
+  readonly sessionPath?: string;
+  readonly terminalEventHash?: `sha256:${string}`;
 }
 
 export interface DurablePlanningActionOptions {
@@ -90,26 +95,40 @@ export class DurablePlanningAction<K extends PlanningActionKind>
 
   private async observe(
     durableReceipt: PlanningRunReceipt,
+    idempotencyKey: string,
   ): Promise<ReconcileResult<PlanningActionOutput>> {
+    const completed = await this.options.records.get<PlanningActionOutput>(
+      "planning-completed",
+      idempotencyKey,
+    );
+    if (completed !== undefined) return { status: "observed", output: completed };
     const observation = await this.options.planning.observe(durableReceipt);
     if (observation.status === "pending") return { status: "not_found" };
     if (observation.status === "blocked") {
       return { status: "indeterminate", evidence: [observation.reason, ...observation.evidence] };
     }
     const stage = stageByKind[this.kind];
+    const output: PlanningActionOutput = {
+      stage,
+      correlationId: observation.correlationId,
+      hashes: observation.artifacts.hashes,
+      sessionFile: durableReceipt.sessionFile,
+      requestEntryId: durableReceipt.requestEntryId,
+      command: commandByStage[stage],
+      ...(observation.artifacts.commit === undefined
+        ? {}
+        : { commit: observation.artifacts.commit }),
+      ...(observation.receipt === undefined ? {} : {
+        profileId: observation.receipt.profileId,
+        profileHash: observation.receipt.profileHash,
+        sessionId: observation.receipt.sessionId,
+        sessionPath: observation.receipt.sessionPath,
+        terminalEventHash: observation.receipt.terminalEventHash,
+      }),
+    };
     return {
       status: "observed",
-      output: {
-        stage,
-        correlationId: observation.correlationId,
-        hashes: observation.artifacts.hashes,
-        sessionFile: durableReceipt.sessionFile,
-        requestEntryId: durableReceipt.requestEntryId,
-        command: commandByStage[stage],
-        ...(observation.artifacts.commit === undefined
-          ? {}
-          : { commit: observation.artifacts.commit }),
-      },
+      output: await this.options.records.put("planning-completed", idempotencyKey, output),
     };
   }
 
@@ -145,7 +164,7 @@ export class DurablePlanningAction<K extends PlanningActionKind>
     }
     const deadline = Date.now() + (this.options.timeoutMs ?? 86_400_000);
     while (true) {
-      const observed = await this.observe(durableReceipt);
+      const observed = await this.observe(durableReceipt, intent.idempotencyKey);
       if (observed.status === "observed") {
         await this.options.afterCompleted?.(observed.output);
         return observed.output;
@@ -164,7 +183,7 @@ export class DurablePlanningAction<K extends PlanningActionKind>
   ): Promise<ReconcileResult<PlanningActionOutput>> {
     const durableReceipt = await this.durableReceipt(intent);
     if (durableReceipt === undefined) return { status: "not_found" };
-    const observed = await this.observe(durableReceipt);
+    const observed = await this.observe(durableReceipt, intent.idempotencyKey);
     if (observed.status === "observed") {
       await this.options.afterCompleted?.(observed.output);
     }

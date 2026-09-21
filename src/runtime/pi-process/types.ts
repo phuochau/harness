@@ -31,6 +31,7 @@ export interface PiTerminalBoundary {
   readonly settled: boolean;
   readonly acceptedStopReason: boolean;
   readonly completeToolResults: boolean;
+  readonly terminalEventHash?: `sha256:${string}`;
   readonly finalAssistantText?: string;
   readonly providerSession?: {
     readonly source: string;

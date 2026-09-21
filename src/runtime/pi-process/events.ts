@@ -115,6 +115,7 @@ export function reducePiEvents(
   let acceptedStopReason = false;
   let finalAssistantText: string | undefined;
   let providerSession: PiTerminalBoundary["providerSession"];
+  let terminalEventHash: `sha256:${string}` | undefined;
 
   for (const record of events) {
     const type = record.event.type;
@@ -122,7 +123,10 @@ export function reducePiEvents(
       unknownEvents.push(record);
       continue;
     }
-    if (type === "agent_settled") settled = true;
+    if (type === "agent_settled") {
+      settled = true;
+      terminalEventHash = record.rawHash;
+    }
     if (type === "turn_end") {
       const reason = messageField(record.event, "stopReason");
       acceptedStopReason = reason === "stop" || reason === "end_turn";
@@ -151,6 +155,7 @@ export function reducePiEvents(
     settled,
     acceptedStopReason,
     completeToolResults: activeTools.size === 0,
+    ...(terminalEventHash === undefined ? {} : { terminalEventHash }),
     ...(finalAssistantText === undefined ? {} : { finalAssistantText }),
     ...(providerSession === undefined ? {} : { providerSession }),
   };

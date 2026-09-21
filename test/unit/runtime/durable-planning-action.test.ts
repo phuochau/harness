@@ -58,5 +58,11 @@ it("persists a Pi planning receipt before waiting for correlated Spec Kit artifa
     status: "observed",
   });
   expect(enqueue).toHaveBeenCalledOnce();
-  expect(observe).toHaveBeenCalledTimes(2);
+  expect(observe).toHaveBeenCalledOnce();
+  await expect(
+    new DurableRecordStore(join(root, "records")).get(
+      "planning-completed",
+      intent.idempotencyKey,
+    ),
+  ).resolves.toMatchObject({ correlationId: "F001-tasks-1" });
 });
