@@ -236,6 +236,18 @@ export function createWorkflowLifecycle(): WorkflowLifecycle {
           : { stage, correlationId, hashes };
         return [
           {
+            eventType: "planning.queued",
+            entityId: bound.jobId,
+            idempotencyKey: `planning-queued:${intent.idempotencyKey}`,
+            payload: {
+              stage,
+              correlationId,
+              sessionFile: string(value, "sessionFile"),
+              requestEntryId: string(value, "requestEntryId"),
+              command: string(value, "command"),
+            },
+          },
+          {
             eventType: "planning.completed",
             entityId: bound.jobId,
             idempotencyKey: `planning-completed:${intent.idempotencyKey}`,

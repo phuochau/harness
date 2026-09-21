@@ -476,6 +476,15 @@ export class WorktreeLifecycle {
     await this.releasePath(binding.path);
   }
 
+  public sealedHead(binding: LifecycleWorktreeBinding): string | undefined {
+    const entry = this.registry.get(binding.path);
+    if (entry === undefined) return undefined;
+    if (entry.binding.id !== binding.id) {
+      throw new WorkspaceInvariantError("registered worktree binding mismatch");
+    }
+    return entry.sealed ? entry.sealedHead : undefined;
+  }
+
   public async cleanupAll(): Promise<void> {
     for (const entry of [...this.registry.list()].reverse()) {
       const { binding } = entry;

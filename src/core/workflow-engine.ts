@@ -124,7 +124,11 @@ export function createWorkflowCommandDeriver(
 
   return (state: RunState, accepted: AcceptedCommandRecord) => {
     const graph = typeof options.graph === "function" ? options.graph() : options.graph;
-    const materialized = materializeJobs(options.workflow, graph);
+    const firstFanOut = options.workflow.stages.findIndex((stage) => stage.foreach !== undefined);
+    const activeWorkflow = graph.order.length === 0 && firstFanOut >= 0
+      ? { ...options.workflow, stages: options.workflow.stages.slice(0, firstFanOut) }
+      : options.workflow;
+    const materialized = materializeJobs(activeWorkflow, graph);
     const prefixEvents: DecisionEventDraft[] = [];
     const forcedRetries = new Set<string>();
     let resuming = false;

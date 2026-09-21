@@ -7,6 +7,8 @@ import {
   renderStatus,
   renderTask,
 } from "./status-view.js";
+import { canonicalJson } from "../shared/canonical-json.js";
+import { sha256 } from "../shared/sha256.js";
 
 export const harnessCommandNames = [
   "harness-run",
@@ -102,7 +104,11 @@ export class HarnessCommandService {
       const preview = await this.backend.previewRun(target);
       ui.notify(renderRunPreview(preview), "info");
       if (!(await ui.confirm("Start harness run?", "Approve the displayed effects"))) return;
-      await this.intent({ operation: "run", ...(target === undefined ? {} : { target }) });
+      await this.intent({
+        operation: "run",
+        approvedPreviewHash: sha256(canonicalJson(preview)),
+        ...(target === undefined ? {} : { target }),
+      });
       return;
     }
     if (command === "harness-pause" || command === "harness-resume") {

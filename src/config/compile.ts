@@ -32,7 +32,7 @@ export interface CompiledStage extends StageDocument {
 export interface CompiledWorkflow {
   readonly schemaVersion: 1;
   readonly name: string;
-  readonly taskModel: WorkflowDocument["task_model"];
+  readonly taskModel?: Exclude<WorkflowDocument["task_model"], undefined>;
   readonly stages: readonly CompiledStage[];
   readonly revision: `sha256:${string}`;
 }
@@ -148,7 +148,7 @@ export function compileWorkflow(input: CompileInput): CompiledWorkflow {
   const normalized = {
     schemaVersion: 1 as const,
     name: document.name,
-    taskModel: document.task_model,
+    ...(document.task_model === undefined ? {} : { taskModel: document.task_model }),
     stages,
   };
   return deepFreeze({ ...normalized, revision: contentRevision(normalized) });

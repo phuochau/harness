@@ -17,6 +17,15 @@ import {
 } from "./commands.js";
 import type { HarnessRuntimeEventSink } from "./events.js";
 import { ControllerEventRouter } from "./events.js";
+import { canonicalJson } from "../shared/canonical-json.js";
+import { sha256 } from "../shared/sha256.js";
+import { GitRepository } from "../git/repository.js";
+import { initializeProductionRun } from "../runtime/production/run.js";
+import {
+  composeProductionRun,
+  type ProductionRunSystem,
+} from "../runtime/production/system.js";
+import type { ArtifactPaths } from "../speckit/artifacts.js";
 
 export interface HarnessSessionDependencies {
   readonly cwd: string;
@@ -51,6 +60,19 @@ interface LoadedProjectConfiguration {
   readonly workflow: CompiledWorkflow;
   readonly commands: Readonly<Record<string, readonly string[]>>;
   readonly permissions: readonly string[];
+}
+
+function artifactPaths(workflow: CompiledWorkflow): ArtifactPaths {
+  const outputs = Object.assign(
+    {},
+    ...workflow.stages.map((stage) => stage.produces ?? {}),
+  ) as Record<string, unknown>;
+  for (const name of ["spec", "plan", "tasks", "graph"] as const) {
+    if (typeof outputs[name] !== "string" || outputs[name].length === 0) {
+      throw new Error(`workflow does not declare ${name} planning artifact`);
+    }
+  }
+  return outputs as unknown as ArtifactPaths;
 }
 
 export function previewEffectKinds(
@@ -150,14 +172,19 @@ function sessionController(
 }
 
 class ProjectCommandBackend implements HarnessCommandBackend {
+  private active: ProductionRunSystem | undefined;
+
   public constructor(
     private readonly cwd: string,
     private readonly controller: HarnessController,
+    private readonly pi: ExtensionAPI,
+    private readonly context: ExtensionContext,
     private readonly configuration?: LoadedProjectConfiguration,
     private readonly configurationError?: string,
   ) {}
 
   public async snapshot() {
+    if (this.active !== undefined) return this.active.readState();
     return {
       project: this.cwd,
       ready: this.configuration !== undefined,
@@ -167,6 +194,7 @@ class ProjectCommandBackend implements HarnessCommandBackend {
   }
 
   public async graph() {
+    if (this.active !== undefined) return this.active.graph().graph;
     return {
       workflow: this.configuration?.workflow.stages.map((stage) => ({
         id: stage.id,
@@ -176,6 +204,10 @@ class ProjectCommandBackend implements HarnessCommandBackend {
   }
 
   public async logs(target?: string) {
+    if (this.active !== undefined) {
+      const state = await this.active.readState();
+      return [JSON.stringify(target === undefined ? state : state.jobs[target] ?? null, null, 2)];
+    }
     return [`No resident logs recorded${target ? ` for ${target}` : ""}`];
   }
 
@@ -186,14 +218,12 @@ class ProjectCommandBackend implements HarnessCommandBackend {
           summary: this.configurationError ?? "Harness is not initialized",
         }
       : {
-          ready: false,
-          summary:
-            `Configuration valid (${this.configuration.workflow.revision}), ` +
-            "but resident production action adapters are not connected in this build",
+          ready: true,
+          summary: `Configuration valid and production runtime available (${this.configuration.workflow.revision})`,
         };
   }
 
-  public async previewRun() {
+  public async previewRun(_target?: string) {
     if (this.configuration === undefined) {
       throw new Error(this.configurationError ?? "Harness is not initialized");
     }
@@ -226,11 +256,57 @@ class ProjectCommandBackend implements HarnessCommandBackend {
       !Array.isArray(command.payload) &&
       command.payload.operation === "run"
     ) {
-      throw new Error(
-        "resident production action adapters are not connected; run was not accepted",
+      if (this.configuration === undefined) {
+        throw new Error(this.configurationError ?? "Harness is not initialized");
+      }
+      if (this.active !== undefined) throw new Error("a harness run is already active");
+      const payload = command.payload as Record<string, unknown>;
+      const preview = await this.previewRun(
+        typeof payload.target === "string" ? payload.target : undefined,
       );
+      const approved = payload.approvedPreviewHash;
+      const expected = sha256(canonicalJson(preview));
+      if (approved !== expected) {
+        throw new Error("run approval does not match the current frozen preview");
+      }
+      const repository = await GitRepository.open(this.cwd);
+      const inspection = await repository.inspect();
+      if (inspection.branch === null) throw new Error("production run requires a branch checkout");
+      const requested = typeof payload.target === "string" ? payload.target : "";
+      const runId = /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(requested)
+        ? requested
+        : `F${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8)}`;
+      const initialized = await initializeProductionRun({
+        root: inspection.root,
+        runId,
+        workflowRevision: this.configuration.workflow.revision,
+        approvedPreviewHash: expected,
+        artifactPaths: artifactPaths(this.configuration.workflow),
+        remote: "origin",
+        baseBranch: inspection.branch,
+      });
+      this.active = await composeProductionRun({
+        initialized,
+        workflow: this.configuration.workflow,
+        artifactPaths: artifactPaths(this.configuration.workflow),
+        commands: this.configuration.commands,
+        pi: this.pi,
+        context: this.context,
+      });
+      await this.active.controller.enqueue(command);
+      return;
     }
-    await this.controller.enqueue(command);
+    await (this.active?.controller ?? this.controller).enqueue(command);
+  }
+
+  public async runtime(command: ControllerCommand): Promise<unknown> {
+    return (this.active?.controller ?? this.controller).enqueue(command);
+  }
+
+  public async dispose(): Promise<void> {
+    const active = this.active;
+    this.active = undefined;
+    await active?.dispose();
   }
 }
 
@@ -252,6 +328,8 @@ export function createPiExtensionDependencies(
       const backend = new ProjectCommandBackend(
         context.cwd,
         controller,
+        pi,
+        context,
         configuration,
         configurationError,
       );
@@ -260,8 +338,9 @@ export function createPiExtensionDependencies(
         cwd: context.cwd,
         ...(sessionFile === undefined ? {} : { sessionFile }),
         commands: new HarnessCommandService(backend),
-        events: new ControllerEventRouter(controller),
+        events: new ControllerEventRouter({ enqueue: (command) => backend.runtime(command) }),
         async dispose() {
+          await backend.dispose();
           await controller.drain();
         },
       };

@@ -20,6 +20,9 @@ export interface PlanningActionOutput {
   readonly correlationId: string;
   readonly hashes: Readonly<Record<string, string>>;
   readonly commit?: string;
+  readonly sessionFile: string;
+  readonly requestEntryId: string;
+  readonly command: string;
 }
 
 export interface DurablePlanningActionOptions {
@@ -30,6 +33,7 @@ export interface DurablePlanningActionOptions {
   readonly planning: PlanningAgent;
   readonly pollMs?: number;
   readonly timeoutMs?: number;
+  readonly afterCompleted?: (output: PlanningActionOutput) => Promise<void>;
 }
 
 const stageByKind: Readonly<Record<PlanningActionKind, PlanningStage>> = {
@@ -99,6 +103,9 @@ export class DurablePlanningAction<K extends PlanningActionKind>
         stage,
         correlationId: observation.correlationId,
         hashes: observation.artifacts.hashes,
+        sessionFile: durableReceipt.sessionFile,
+        requestEntryId: durableReceipt.requestEntryId,
+        command: commandByStage[stage],
         ...(observation.artifacts.commit === undefined
           ? {}
           : { commit: observation.artifacts.commit }),
@@ -139,7 +146,10 @@ export class DurablePlanningAction<K extends PlanningActionKind>
     const deadline = Date.now() + (this.options.timeoutMs ?? 86_400_000);
     while (true) {
       const observed = await this.observe(durableReceipt);
-      if (observed.status === "observed") return observed.output;
+      if (observed.status === "observed") {
+        await this.options.afterCompleted?.(observed.output);
+        return observed.output;
+      }
       if (observed.status === "indeterminate") {
         throw new Error(observed.evidence.join("; "));
       }
@@ -153,8 +163,11 @@ export class DurablePlanningAction<K extends PlanningActionKind>
     intent: EffectIntent<K, PlanningEffectInput>,
   ): Promise<ReconcileResult<PlanningActionOutput>> {
     const durableReceipt = await this.durableReceipt(intent);
-    return durableReceipt === undefined
-      ? { status: "not_found" }
-      : this.observe(durableReceipt);
+    if (durableReceipt === undefined) return { status: "not_found" };
+    const observed = await this.observe(durableReceipt);
+    if (observed.status === "observed") {
+      await this.options.afterCompleted?.(observed.output);
+    }
+    return observed;
   }
 }
