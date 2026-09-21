@@ -31,7 +31,15 @@ export function startAttempt(state: RunState, event: HarnessEvent): void {
     throw new LifecycleError(`attempt sequence mismatch for ${event.entityId}`);
   }
   job.attempt = event.payload.attempt;
+  job.firstAttemptAt ??= event.timestamp;
   job.worker = event.payload.worker;
+  delete job.result;
+  delete job.reviewCommit;
+  delete job.verificationCommit;
+  delete job.candidateCommit;
+  delete job.blocker;
+  delete job.failure;
+  delete job.retryReason;
 }
 
 export function taskIdForJob(jobId: string): string | undefined {

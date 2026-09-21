@@ -443,6 +443,10 @@ export class WorktreeLifecycle {
   ): Promise<void> {
     await this.assertRegisteredIdentity(binding);
     if (!binding.writable) await makeTreeOwnerWritable(binding.path);
+    // Worker evidence is intentionally untracked and confined to this directory.
+    // Remove only that registered, disposable output before asking Git to remove
+    // an otherwise-clean worktree.
+    await rm(join(binding.path, ".harness-output"), { recursive: true, force: true });
     const result = await this.gitAt(this.repository.root, [
       "worktree",
       "remove",

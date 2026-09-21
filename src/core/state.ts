@@ -21,6 +21,7 @@ export type JobStatus =
 export interface JobState {
   state: JobStatus;
   attempt: number;
+  firstAttemptAt?: string;
   worker?: string;
   result?: WorkerResult;
   reviewCommit?: string;
@@ -28,6 +29,7 @@ export interface JobState {
   candidateCommit?: string;
   blocker?: JsonValue;
   failure?: string;
+  retryReason?: "changes_requested" | "verification_failed" | "integration_conflict" | "task_failure";
 }
 
 export interface PendingCommand {

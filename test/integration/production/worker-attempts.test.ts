@@ -8,6 +8,7 @@ import { DurableRecordStore } from "../../../src/runtime/production/records.js";
 import { GitWorkerAttemptPort } from "../../../src/runtime/production/worker-attempts.js";
 import type { RunManifest } from "../../../src/state/run-manifest.js";
 import { createTempGitRepository } from "../../support/git-fixtures.js";
+import { sha256 } from "../../../src/shared/sha256.js";
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -96,6 +97,9 @@ it("binds an implementation attempt to Git, validates it, and persists its seale
   await execa("git", ["add", "src/feature.ts"], { cwd: prepared.binding.path });
   await execa("git", ["commit", "-m", "feat: implement fixture"], { cwd: prepared.binding.path });
   const head = (await execa("git", ["rev-parse", "HEAD"], { cwd: prepared.binding.path })).stdout;
+  await mkdir(join(prepared.binding.path, ".harness-output"), { recursive: true });
+  const evidenceBody = JSON.stringify({ verified: true });
+  await writeFile(join(prepared.binding.path, ".harness-output/result.json"), evidenceBody);
   const evidence = [
     "test-driven-development",
     "systematic-debugging",
@@ -103,7 +107,7 @@ it("binds an implementation attempt to Git, validates it, and persists its seale
   ].map((name) => ({
     kind: `superpower:${name}`,
     path: ".harness-output/result.json",
-    sha256: `sha256:${"5".repeat(64)}` as const,
+    sha256: sha256(evidenceBody),
   }));
   await attempts.accept(prepared.assignment, {
     schemaVersion: 1,

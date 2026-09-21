@@ -1,4 +1,6 @@
 import type { EffectIntent } from "../../actions/types.js";
+import { lstat, readFile, realpath } from "node:fs/promises";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { createAssignment, type WorkerAssignment } from "../../core/assignment.js";
 import { validateEvidence } from "../../core/evidence.js";
 import type { WorkerKind } from "../../core/routing.js";
@@ -20,6 +22,7 @@ import type {
   ProductionWorkerInput,
   ProductionWorkerKind,
 } from "./worker-action.js";
+import { sha256 } from "../../shared/sha256.js";
 
 export interface GitWorkerAttemptOptions {
   readonly manifest: RunManifest;
@@ -82,6 +85,34 @@ function disciplines(role: "implementation" | "review"): readonly string[] {
   return role === "implementation"
     ? ["test-driven-development", "systematic-debugging", "verification-before-completion"]
     : ["requesting-code-review", "verification-before-completion"];
+}
+
+async function validateEvidenceArtifacts(
+  assignment: WorkerAssignment,
+  result: WorkerResult,
+): Promise<void> {
+  if (!("evidence" in result)) return;
+  const evidenceRoot = await realpath(resolve(assignment.worktree.path, ".harness-output"));
+  for (const item of result.evidence) {
+    if (typeof item === "string") throw new Error("structured evidence artifact is required");
+    if (isAbsolute(item.path)) throw new Error(`evidence path must be relative: ${item.path}`);
+    const lexical = relative(
+      resolve(assignment.worktree.path, ".harness-output"),
+      resolve(assignment.worktree.path, item.path),
+    );
+    if (lexical === "" || lexical === ".." || lexical.startsWith(`..${sep}`) || isAbsolute(lexical)) {
+      throw new Error(`evidence path escaped .harness-output: ${item.path}`);
+    }
+    const artifact = await realpath(resolve(assignment.worktree.path, item.path));
+    const confined = relative(evidenceRoot, artifact);
+    if (confined === "" || confined === ".." || confined.startsWith(`..${sep}`) || isAbsolute(confined)) {
+      throw new Error(`evidence artifact escaped .harness-output: ${item.path}`);
+    }
+    const stat = await lstat(artifact);
+    if (!stat.isFile()) throw new Error(`evidence artifact is not a regular file: ${item.path}`);
+    const actual = sha256(await readFile(artifact));
+    if (actual !== item.sha256) throw new Error(`evidence hash mismatch: ${item.path}`);
+  }
 }
 
 export class GitWorkerAttemptPort implements ProductionWorkerAttemptPort {
@@ -229,6 +260,7 @@ export class GitWorkerAttemptPort implements ProductionWorkerAttemptPort {
       throw new Error("worker result assignment hash mismatch");
     }
     if (result.outcome === "blocked" || result.outcome === "failed") return;
+    await validateEvidenceArtifacts(assignment, result);
     await validateEvidence(assignment, result, this.evidence);
     if (assignment.role === "implementation") {
       if (result.outcome !== "completed" || result.role !== "implementation") {

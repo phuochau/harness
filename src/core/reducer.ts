@@ -135,8 +135,9 @@ function observeWorkerResult(state: RunState, event: HarnessEvent): void {
     job.state = "BLOCKED";
     job.blocker = event.payload.blocker;
   } else if (event.payload.outcome === "failed") {
-    job.state = "FAILED";
+    job.state = "RETRY";
     job.failure = event.payload.reason;
+    job.retryReason = "task_failure";
   } else {
     if (job.state !== "RUNNING") {
       throw new ReducerError(`worker result for non-running job ${event.entityId}`);
@@ -231,6 +232,7 @@ function applyEvent(state: RunState, event: HarnessEvent): void {
       break;
     case "review.changes_requested":
       transitionJob(state, event.entityId, "VERIFYING", "RETRY");
+      ensureJob(state, event.entityId).retryReason = "changes_requested";
       break;
     case "verification.passed":
       if (ensureJob(state, event.entityId).state === "RUNNING") {
@@ -240,6 +242,7 @@ function applyEvent(state: RunState, event: HarnessEvent): void {
       break;
     case "verification.failed":
       transitionJob(state, event.entityId, ["RUNNING", "VERIFYING"], "RETRY");
+      ensureJob(state, event.entityId).retryReason = "verification_failed";
       break;
     case "integration.observed":
       if (ensureJob(state, event.entityId).state === "RUNNING") {
@@ -253,6 +256,7 @@ function applyEvent(state: RunState, event: HarnessEvent): void {
       break;
     case "integration.conflicted":
       transitionJob(state, event.entityId, "VERIFYING", "RETRY");
+      ensureJob(state, event.entityId).retryReason = "integration_conflict";
       delete state.integrationPipeline;
       break;
     case "task.finalized":
@@ -307,10 +311,21 @@ function applyEvent(state: RunState, event: HarnessEvent): void {
       transitionJob(state, event.entityId, ["RUNNING", "VERIFYING"], "DONE");
       break;
     }
-    case "job.invalidated":
-      ensureJob(state, event.entityId).state = "RETRY";
+    case "job.invalidated": {
+      const job = ensureJob(state, event.entityId);
+      job.state = "RETRY";
+      delete job.result;
+      delete job.reviewCommit;
+      delete job.verificationCommit;
+      delete job.candidateCommit;
+      delete job.blocker;
+      delete job.failure;
+      delete job.retryReason;
+      const taskId = taskIdForJob(event.entityId);
+      if (taskId !== undefined) delete state.finalizedTasks[taskId];
       delete state.integrationPipeline;
       break;
+    }
     case "job.blocked": {
       const job = ensureJob(state, event.entityId);
       job.state = "BLOCKED";

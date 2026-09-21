@@ -45,10 +45,14 @@ function selectWorker(
   stage: CompiledStage,
   job: MaterializedJob,
   attempt: number,
+  requested?: string,
 ): string {
   if (stage.runner === "pi") return "pi";
   const preference = workerPreference(stage);
   if (preference.length === 0) return "system";
+  if (requested !== undefined && !preference.includes(requested as WorkerKind)) {
+    throw new Error(`worker ${requested} is not declared for ${job.id}`);
+  }
   if (
     stage.uses === "worker.review" &&
     job.taskId !== undefined &&
@@ -56,11 +60,62 @@ function selectWorker(
   ) {
     const implementation = implementationWorker(state, job.taskId);
     const eligible = preference.filter((worker) => worker !== implementation);
-    const reviewer = eligible[(attempt - 1) % eligible.length];
+    if (requested !== undefined && !eligible.includes(requested as WorkerKind)) {
+      throw new Error(`worker ${requested} is not an independent reviewer for ${job.id}`);
+    }
+    const reviewer = requested ?? eligible[(attempt - 1) % eligible.length];
     if (reviewer === undefined) throw new Error(`no independent reviewer for ${job.id}`);
     return reviewer;
   }
-  return preference[(attempt - 1) % preference.length]!;
+  return requested ?? preference[(attempt - 1) % preference.length]!;
+}
+
+function retryBudgetAvailable(
+  state: RunState,
+  stage: CompiledStage,
+  job: MaterializedJob,
+  now: string,
+): boolean {
+  const current = state.jobs[job.id];
+  if (current === undefined || current.attempt === 0) return true;
+  if (stage.retry === undefined || current.attempt >= stage.retry.max_attempts) return false;
+  const started = Date.parse(current.firstAttemptAt ?? now);
+  const currentTime = Date.parse(now);
+  return Number.isFinite(started) && Number.isFinite(currentTime) &&
+    currentTime - started < stage.retry.max_elapsed_seconds * 1_000;
+}
+
+function taskOperatorTarget(
+  target: string,
+  state: RunState,
+  jobs: Readonly<Record<string, MaterializedJob>>,
+  stages: ReadonlyMap<string, CompiledStage>,
+  operation: string,
+): string | undefined {
+  if (state.jobs[target] !== undefined) return target;
+  const candidates = Object.values(jobs)
+    .filter((job) => job.taskId === target)
+    .filter((job) => ["FAILED", "BLOCKED", "RETRY"].includes(state.jobs[job.id]?.state ?? ""))
+    .filter((job) => operation !== "reroute" || typeof stages.get(job.stageId)?.runner === "object");
+  return candidates.at(-1)?.id;
+}
+
+function remediationPath(
+  jobs: Readonly<Record<string, MaterializedJob>>,
+  sourceId: string,
+  targetId: string,
+): readonly string[] {
+  const visit = (jobId: string, seen: Set<string>): string[] | undefined => {
+    if (jobId === targetId) return [jobId];
+    if (seen.has(jobId)) return undefined;
+    seen.add(jobId);
+    for (const dependency of jobs[jobId]?.dependsOn ?? []) {
+      const path = visit(dependency, new Set(seen));
+      if (path !== undefined) return [...path, jobId];
+    }
+    return undefined;
+  };
+  return visit(sourceId, new Set()) ?? [];
 }
 
 function recoveryFor(stage: CompiledStage): EffectIntent["recovery"] {
@@ -131,6 +186,8 @@ export function createWorkflowCommandDeriver(
     const materialized = materializeJobs(activeWorkflow, graph);
     const prefixEvents: DecisionEventDraft[] = [];
     const forcedRetries = new Set<string>();
+    const forcedWorkers = new Map<string, string>();
+    const suppressed = new Set<string>();
     let resuming = false;
     if (
       accepted.command.source === "operator" &&
@@ -174,14 +231,21 @@ export function createWorkflowCommandDeriver(
           return { events: prefixEvents, effects: [] };
         }
         if (operation === "retry" || operation === "reroute") {
-          const job = state.jobs[target];
+          const resolvedTarget = taskOperatorTarget(
+            target,
+            state,
+            materialized.jobs,
+            stages,
+            operation,
+          );
+          const job = resolvedTarget === undefined ? undefined : state.jobs[resolvedTarget];
           if (job === undefined || !["FAILED", "BLOCKED", "RETRY"].includes(job.state)) {
             throw new Error(`${operation} requires a failed or blocked job target`);
           }
           if (job.state !== "RETRY") {
             prefixEvents.push({
               eventType: "job.invalidated",
-              entityId: target,
+              entityId: resolvedTarget!,
               idempotencyKey: `retry:${accepted.command.idempotencyKey}`,
               payload: {
                 supersededGeneration: Math.max(1, job.attempt),
@@ -189,21 +253,117 @@ export function createWorkflowCommandDeriver(
               },
             });
           }
-          forcedRetries.add(target);
+          forcedRetries.add(resolvedTarget!);
+          if (operation === "reroute") {
+            const worker = argumentsValue.worker;
+            if (typeof worker !== "string") throw new Error("reroute requires a worker");
+            forcedWorkers.set(resolvedTarget!, worker);
+          }
         }
       }
     }
     if (state.operator.paused && !resuming) {
       return { events: prefixEvents, effects: [] };
     }
+    for (const job of Object.values(materialized.jobs)) {
+      const current = state.jobs[job.id];
+      if (current?.state !== "RETRY" || current.retryReason === undefined) continue;
+      const stage = stages.get(job.stageId)!;
+      const policy = current.retryReason === "changes_requested"
+        ? stage.on_failure?.changes_requested
+        : current.retryReason === "verification_failed"
+          ? stage.on_failure?.verification_failed
+          : undefined;
+      if (policy !== undefined && "block" in policy) {
+        prefixEvents.push({
+          eventType: "job.blocked",
+          entityId: job.id,
+          idempotencyKey: `policy-block:${job.id}:${current.attempt}`,
+          payload: {
+            reason: policy.block,
+            evidence: [current.retryReason],
+            suggestedChange: "Resolve the remediation explicitly, then retry the job.",
+          },
+        });
+        suppressed.add(job.id);
+        continue;
+      }
+      if (policy === undefined || !("retry_stage" in policy)) continue;
+      if (!retryBudgetAvailable(state, stage, job, accepted.acceptedAt)) {
+        prefixEvents.push({
+          eventType: "job.failed",
+          entityId: job.id,
+          idempotencyKey: `retry-exhausted:${job.id}:${current.attempt}`,
+          payload: { reason: "retry budget exhausted" },
+        });
+        suppressed.add(job.id);
+        continue;
+      }
+      const targetId = job.taskId === undefined
+        ? policy.retry_stage
+        : `${policy.retry_stage}:${job.taskId}`;
+      const path = remediationPath(materialized.jobs, job.id, targetId);
+      if (path.length === 0) throw new Error(`invalid remediation path ${targetId} -> ${job.id}`);
+      const targetJob = materialized.jobs[targetId]!;
+      const targetStage = stages.get(targetJob.stageId)!;
+      if (!retryBudgetAvailable(state, targetStage, targetJob, accepted.acceptedAt)) {
+        prefixEvents.push({
+          eventType: "job.failed",
+          entityId: job.id,
+          idempotencyKey: `remediation-exhausted:${job.id}:${current.attempt}`,
+          payload: { reason: `remediation stage ${targetId} exhausted its retry budget` },
+        });
+        suppressed.add(job.id);
+        continue;
+      }
+      for (const pathId of path) {
+        if (pathId === job.id) {
+          suppressed.add(pathId);
+          continue;
+        }
+        const pathState = state.jobs[pathId];
+        if (pathState !== undefined && pathState.state !== "PENDING") {
+          prefixEvents.push({
+            eventType: "job.invalidated",
+            entityId: pathId,
+            idempotencyKey: `remediate:${job.id}:${current.attempt}:${pathId}`,
+            payload: {
+              supersededGeneration: Math.max(1, pathState.attempt),
+              reason: `${current.retryReason} at ${job.id}`,
+            },
+          });
+        }
+        if (pathId === targetId) forcedRetries.add(pathId);
+        else suppressed.add(pathId);
+      }
+    }
+    const budgetFailures = new Set<string>();
     const ready = Object.values(materialized.jobs).filter((job) => {
       const status = state.jobs[job.id]?.state ?? "PENDING";
       const stage = stages.get(job.stageId)!;
-      return (
+      const eligible = (
+        !suppressed.has(job.id) &&
         (status === "PENDING" || status === "RETRY" || forcedRetries.has(job.id)) &&
         dependenciesDone(state, job) &&
         taskDependenciesDone(state, graph, job, stage)
       );
+      if (
+        eligible &&
+        (status === "RETRY" || forcedRetries.has(job.id)) &&
+        !retryBudgetAvailable(state, stage, job, accepted.acceptedAt)
+      ) {
+        if (!budgetFailures.has(job.id)) {
+          prefixEvents.push({
+            eventType: "job.failed",
+            entityId: job.id,
+            idempotencyKey: `retry-exhausted:${job.id}:${state.jobs[job.id]?.attempt ?? 0}`,
+            payload: { reason: "retry budget exhausted" },
+          });
+          budgetFailures.add(job.id);
+        }
+        return false;
+      }
+      return eligible;
     });
 
     const activeImplementation = runningImplementation(
@@ -244,7 +404,7 @@ export function createWorkflowCommandDeriver(
       occupiedLanes.add(laneKey);
       const current = state.jobs[job.id];
       const attempt = (current?.attempt ?? 0) + 1;
-      const worker = selectWorker(state, stage, job, attempt);
+      const worker = selectWorker(state, stage, job, attempt, forcedWorkers.get(job.id));
       if (current === undefined || current.state === "PENDING") {
         events.push({
           eventType: "job.ready",
@@ -264,7 +424,10 @@ export function createWorkflowCommandDeriver(
           eventType: "worker.routed",
           entityId: job.id,
           idempotencyKey: `route:${job.id}:${attempt}`,
-          payload: { worker, reason: "workflow preference" },
+          payload: {
+            worker,
+            reason: forcedWorkers.has(job.id) ? "operator reroute" : "workflow preference",
+          },
         });
       }
       effects.push({

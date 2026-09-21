@@ -123,9 +123,19 @@ it("drives a correlated Pi planning stage through the resident durable controlle
         data,
       });
     };
+    const interactiveModel = { provider: "anthropic", id: "interactive" };
+    const planningModel = { provider: "openai-codex", id: "gpt-5.6-codex" };
+    let selectedModel = interactiveModel;
+    let thinkingLevel = "medium";
     const planningRoot = join(initialized.paths.workers, "F201", "planning");
     const pi = {
       appendEntry,
+      getThinkingLevel: () => thinkingLevel,
+      setThinkingLevel(level: string) { thinkingLevel = level; },
+      async setModel(model: typeof interactiveModel) {
+        selectedModel = model;
+        return true;
+      },
       sendUserMessage(message: string) {
         mkdirSync(join(planningRoot, "specs/feature"), { recursive: true });
         writeFileSync(join(planningRoot, artifacts.spec), "# Spec\n\n- FR-001: Fixture\n");
@@ -143,7 +153,21 @@ it("drives a correlated Pi planning stage through the resident durable controlle
       artifactPaths: artifacts,
       commands: {},
       pi: pi as any,
-      context: { sessionManager, isIdle: () => true } as any,
+      context: {
+        sessionManager,
+        isIdle: () => true,
+        get model() { return selectedModel; },
+        get thinkingLevel() { return thinkingLevel; },
+        scopedModels: [],
+        modelRegistry: {
+          getAvailable: () => [planningModel],
+          hasConfiguredAuth: (model: typeof planningModel) => model === planningModel,
+          find: (provider: string, id: string) =>
+            [interactiveModel, planningModel].find(
+              (model) => model.provider === provider && model.id === id,
+            ),
+        },
+      } as any,
       ensureHerdr: async () => ({
         request: async () => ({ workspaces: [] }),
         subscribe: () => () => undefined,
