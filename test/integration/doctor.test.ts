@@ -70,3 +70,42 @@ it("requires current Herdr integrations for Pi and every routed worker", async (
     expect(integration.parseVersion(`${target}: not installed (/tmp/hook)`)).toBeUndefined();
   }
 });
+
+it("requires the locked Superpowers version in Pi and every supported worker", async () => {
+  const root = await maliciousProjectFixture();
+  temporary.push(root);
+  const capabilities = executableCapabilities(await readDeclarativeProject(root));
+  const probes = Object.fromEntries(
+    capabilities
+      .filter((item) => item.id.startsWith("superpowers:"))
+      .map((item) => [item.id, item]),
+  );
+
+  expect(Object.keys(probes).sort()).toEqual([
+    "superpowers:claude",
+    "superpowers:codex",
+    "superpowers:devin",
+    "superpowers:pi",
+  ]);
+  expect(probes["superpowers:pi"]?.parseVersion(
+    "  /opt/pi-harness/superpowers/6.4.1\n",
+  )).toBe("6.4.1");
+  expect(probes["superpowers:pi"]?.parseVersion(
+    "  C:\\pi-harness\\superpowers\\6.4.1\n",
+  )).toBe("6.4.1");
+  expect(probes["superpowers:pi"]?.parseVersion(
+    "  /opt/pi-harness/superpowers/6.4.10\n",
+  )).toBeUndefined();
+  expect(probes["superpowers:devin"]?.parseVersion(
+    "superpowers v6.4.1 enabled\n",
+  )).toBe("6.4.1");
+  expect(probes["superpowers:devin"]?.parseVersion(
+    "superpowers v6.4.10 enabled\n",
+  )).toBeUndefined();
+  expect(probes["superpowers:claude"]?.parseVersion(JSON.stringify([
+    { id: "superpowers@superpowers-dev", version: "6.4.1", enabled: true },
+  ]))).toBe("6.4.1");
+  expect(probes["superpowers:claude"]?.parseVersion(JSON.stringify([
+    { id: "superpowers@superpowers-dev", version: "6.4.1", enabled: false },
+  ]))).toBeUndefined();
+});

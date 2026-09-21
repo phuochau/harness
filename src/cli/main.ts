@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { bootstrap } from "./bootstrap.js";
 import { parseArgvJson } from "./command-detection.js";
@@ -130,6 +131,85 @@ export function executableCapabilities(
           : undefined,
     });
   }
+  const superpowersVersion = project.lock.dependencies.find(
+    (dependency) => dependency.id === "superpowers",
+  )?.version;
+  if (superpowersVersion !== undefined) {
+    const codexPlugin = join(
+      process.env.CODEX_HOME ?? join(homedir(), ".codex"),
+      "plugins",
+      "cache",
+      "superpowers-dev",
+      "superpowers",
+      superpowersVersion,
+      ".codex-plugin",
+      "plugin.json",
+    );
+    const probes: readonly ExecutableCapability[] = [
+      {
+        id: "superpowers:pi",
+        command: "pi",
+        versionArgs: ["list", "--no-approve"],
+        expectedVersion: superpowersVersion,
+        parseVersion: (stdout) =>
+          new RegExp(
+            `[\\\\/]superpowers[\\\\/]${superpowersVersion.replace(/\./g, "\\.")}(?:[\\\\/]|\\s|$)`,
+          ).test(stdout)
+            ? superpowersVersion
+            : undefined,
+      },
+      {
+        id: "superpowers:codex",
+        command: process.execPath,
+        versionArgs: [
+          "--input-type=module",
+          "--eval",
+          `import { readFile } from "node:fs/promises"; const value = JSON.parse(await readFile(${JSON.stringify(codexPlugin)}, "utf8")); if (value.version !== ${JSON.stringify(superpowersVersion)}) process.exit(1); console.log(value.version);`,
+        ],
+        expectedVersion: superpowersVersion,
+        parseVersion: (stdout) => stdout.trim() || undefined,
+      },
+      {
+        id: "superpowers:devin",
+        command: "devin",
+        versionArgs: ["plugins", "list"],
+        expectedVersion: superpowersVersion,
+        parseVersion: (stdout) =>
+          new RegExp(`superpowers\\s+v${superpowersVersion.replace(/\./g, "\\.")}(?:\\s|$)`).test(stdout)
+            ? superpowersVersion
+            : undefined,
+      },
+      {
+        id: "superpowers:claude",
+        command: "claude",
+        versionArgs: ["plugin", "list", "--json"],
+        expectedVersion: superpowersVersion,
+        parseVersion: (stdout) => {
+          try {
+            const plugins = JSON.parse(stdout) as readonly {
+              id?: unknown;
+              version?: unknown;
+              enabled?: unknown;
+            }[];
+            return plugins.some(
+              (plugin) =>
+                plugin.id === "superpowers@superpowers-dev" &&
+                plugin.version === superpowersVersion &&
+                plugin.enabled === true,
+            )
+              ? superpowersVersion
+              : undefined;
+          } catch {
+            return undefined;
+          }
+        },
+      },
+    ];
+    const requiredAgents = new Set([...herdrTargets, "codex", "devin", "claude"]);
+    result.push(...probes.filter((probe) =>
+      requiredAgents.has(probe.id.slice("superpowers:".length)),
+    ));
+  }
   return result;
 }
 
@@ -146,6 +226,25 @@ async function defaultProbe(
   for (const requirement of project.environment.pi_packages) {
     const result = byId[`pi-package:${requirement.id}`];
     if (result !== undefined) byId[requirement.dependency] = result;
+  }
+  const superpowers = project.lock.dependencies.find(
+    (dependency) => dependency.id === "superpowers",
+  );
+  if (superpowers !== undefined) {
+    const required = Object.values(byId).filter((result) =>
+      result.id.startsWith("superpowers:"),
+    );
+    byId.superpowers = required.length > 0 && required.every(
+      (result) => result.status === "present" && result.version === superpowers.version,
+    )
+      ? { id: "superpowers", status: "present", version: superpowers.version }
+      : {
+          id: "superpowers",
+          status: "unverifiable",
+          evidence: required
+            .filter((result) => result.status !== "present")
+            .map((result) => `${result.id}:${result.status}`),
+        };
   }
   const planningAuth = byId["auth:pi-coding-agent"];
   byId["planning-profile:chatgpt"] = {
