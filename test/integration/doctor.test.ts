@@ -77,35 +77,35 @@ it("requires the locked Superpowers version in Pi and every supported worker", a
   const capabilities = executableCapabilities(await readDeclarativeProject(root));
   const probes = Object.fromEntries(
     capabilities
-      .filter((item) => item.id.startsWith("superpowers:"))
+      .filter((item) => item.id.startsWith("agent-plugin:superpowers-"))
       .map((item) => [item.id, item]),
   );
 
   expect(Object.keys(probes).sort()).toEqual([
-    "superpowers:claude",
-    "superpowers:codex",
-    "superpowers:devin",
-    "superpowers:pi",
+    "agent-plugin:superpowers-claude",
+    "agent-plugin:superpowers-codex",
+    "agent-plugin:superpowers-devin",
+    "agent-plugin:superpowers-pi",
   ]);
-  expect(probes["superpowers:pi"]?.parseVersion(
+  expect(probes["agent-plugin:superpowers-pi"]?.parseVersion(
     "  /opt/pi-harness/superpowers/6.4.1\n",
   )).toBe("6.4.1");
-  expect(probes["superpowers:pi"]?.parseVersion(
+  expect(probes["agent-plugin:superpowers-pi"]?.parseVersion(
     "  C:\\pi-harness\\superpowers\\6.4.1\n",
   )).toBe("6.4.1");
-  expect(probes["superpowers:pi"]?.parseVersion(
+  expect(probes["agent-plugin:superpowers-pi"]?.parseVersion(
     "  /opt/pi-harness/superpowers/6.4.10\n",
   )).toBeUndefined();
-  expect(probes["superpowers:devin"]?.parseVersion(
+  expect(probes["agent-plugin:superpowers-devin"]?.parseVersion(
     "superpowers v6.4.1 enabled\n",
   )).toBe("6.4.1");
-  expect(probes["superpowers:devin"]?.parseVersion(
+  expect(probes["agent-plugin:superpowers-devin"]?.parseVersion(
     "superpowers v6.4.10 enabled\n",
   )).toBeUndefined();
-  expect(probes["superpowers:claude"]?.parseVersion(JSON.stringify([
+  expect(probes["agent-plugin:superpowers-claude"]?.parseVersion(JSON.stringify([
     { id: "superpowers@superpowers-dev", version: "6.4.1", enabled: true },
   ]))).toBe("6.4.1");
-  expect(probes["superpowers:claude"]?.parseVersion(JSON.stringify([
+  expect(probes["agent-plugin:superpowers-claude"]?.parseVersion(JSON.stringify([
     { id: "superpowers@superpowers-dev", version: "6.4.1", enabled: false },
   ]))).toBeUndefined();
 });
