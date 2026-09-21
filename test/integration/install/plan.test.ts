@@ -88,3 +88,38 @@ it("orders dependencies and skips exact versions already present", () => {
     ["child", "automatic"],
   ]);
 });
+
+it("blocks unsafe observed state and unexpected project package entries", () => {
+  const plan = createInstallPlan(
+    piLock,
+    {
+      byId: {
+        "pi-multi-agent-harness": {
+          id: "pi-multi-agent-harness",
+          status: "wrong_source",
+        },
+        "pi-package:unexpected:opaque": {
+          id: "pi-package:unexpected:opaque",
+          status: "unexpected",
+        },
+      },
+    },
+    effectivePolicy(builtInBaseline(), undefined, {}),
+  );
+  expect(plan.steps.every((step) => step.mode === "manual" && step.blocking)).toBe(true);
+});
+
+it("requires explicit repair before replacing disabled Pi resource filters", () => {
+  const report = {
+    byId: {
+      "pi-multi-agent-harness": {
+        id: "pi-multi-agent-harness",
+        status: "disabled" as const,
+      },
+    },
+  };
+  const policy = effectivePolicy(builtInBaseline(), undefined, {});
+  expect(createInstallPlan(piLock, report, policy).steps[0]?.mode).toBe("manual");
+  expect(createInstallPlan(piLock, report, policy, { repair: true }).steps[0]?.mode)
+    .toBe("automatic");
+});

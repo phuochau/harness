@@ -107,6 +107,7 @@ export function createInstallPlan(
   lock: HarnessLock,
   report: CapabilityReport,
   policy: EffectivePolicy,
+  options: { readonly repair?: boolean } = {},
 ): InstallPlan {
   const warnings: string[] = [];
   const steps: InstallStep[] = [];
@@ -119,6 +120,24 @@ export function createInstallPlan(
         mode: "skipped",
         blocking: false,
         reason: `exact version ${dependency.version} is present`,
+      });
+      continue;
+    }
+
+    if (
+      observed !== undefined &&
+      (
+        ["unverifiable", "wrong_source", "unexpected", "policy_violation", "missing_auth"].includes(
+          observed.status,
+        ) ||
+        (observed.status === "disabled" && options.repair !== true)
+      )
+    ) {
+      steps.push({
+        id: dependency.id,
+        mode: "manual",
+        blocking: true,
+        reason: `current capability state ${observed.status} is unsafe to replace automatically`,
       });
       continue;
     }
@@ -155,6 +174,23 @@ export function createInstallPlan(
       expectedVersion: dependency.version,
       probeAfter: dependency.id,
     });
+  }
+
+  const dependencyIds = new Set(lock.dependencies.map((item) => item.id));
+  for (const result of Object.values(report.byId).sort((left, right) =>
+    left.id.localeCompare(right.id),
+  )) {
+    if (
+      !dependencyIds.has(result.id) &&
+      (result.status === "unexpected" || result.status === "policy_violation")
+    ) {
+      steps.push({
+        id: result.id,
+        mode: "manual",
+        blocking: true,
+        reason: `probe reported ${result.status}; automatic installation is disabled`,
+      });
+    }
   }
 
   const body = {

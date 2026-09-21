@@ -117,6 +117,31 @@ it("writes a partial failed receipt when post-install verification fails", async
   expect(await readFile(join(root, "receipts.jsonl"), "utf8")).toContain('"status":"failed"');
 });
 
+it("requires the isolated resource loader check after the inert post-probe", async () => {
+  const root = await mkdtemp(join(tmpdir(), "harness-install-"));
+  temporary.push(root);
+  const process = new FakeProcessRunner();
+  process.queue({ exitCode: 0, stdout: "", stderr: "" });
+  const plan = automaticPlan();
+  const receipts = new ReceiptStore(join(root, "receipts.jsonl"));
+  await expect(
+    executeInstallPlan(
+      plan,
+      { approved: true, planHash: plan.planHash },
+      {
+        root,
+        process,
+        probe: async () => ({ id: "tool", status: "present", version: "1.2.3" }),
+        receipts,
+        verifySource: async () => true,
+        verifyLoaded: async () => false,
+      },
+    ),
+  ).rejects.toBeInstanceOf(InstallVerificationError);
+  expect(await readFile(join(root, "receipts.jsonl"), "utf8"))
+    .toContain("isolated loader verification failed");
+});
+
 it("requires approval of the exact content-addressed plan", async () => {
   const root = await mkdtemp(join(tmpdir(), "harness-install-"));
   temporary.push(root);
