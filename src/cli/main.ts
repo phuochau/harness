@@ -9,6 +9,7 @@ import { builtInBaseline } from "../install/baseline-policy.js";
 import { probeEnvironment } from "../install/probes.js";
 import { ReceiptStore } from "../install/receipts.js";
 import type { CapabilityReport, ExecutableCapability } from "../install/types.js";
+import type { TrustedSource } from "../install/types.js";
 import { NodeProcessRunner } from "../git/process.js";
 import type { DeclarativeProject } from "./trusted-project-reader.js";
 import { connectInstalledHerdr } from "../runtime/herdr/client.js";
@@ -103,22 +104,45 @@ async function defaultProbe(
   return { byId };
 }
 
-async function verifyNpmIntegrity(
+async function npmRegistryIntegrity(
   processRunner: NodeProcessRunner,
-  source: { kind: string; identity: string; version: string; integrity: string },
-): Promise<boolean> {
-  if (source.kind !== "npm" || !source.integrity.startsWith("sha512-")) return false;
+  source: { identity: string; version: string },
+): Promise<string | undefined> {
   const result = await processRunner.run(
     "npm",
     ["view", `${source.identity}@${source.version}`, "dist.integrity", "--json"],
     { shell: false, timeoutMs: 30_000 },
   );
-  if (result.exitCode !== 0) return false;
+  if (result.exitCode !== 0) return undefined;
   try {
-    return JSON.parse(result.stdout) === source.integrity;
+    const parsed: unknown = JSON.parse(result.stdout);
+    return typeof parsed === "string" ? parsed : undefined;
   } catch {
-    return result.stdout.trim() === source.integrity;
+    const value = result.stdout.trim();
+    return value === "" ? undefined : value;
   }
+}
+
+async function resolveRegistrySource(
+  processRunner: NodeProcessRunner,
+  source: TrustedSource,
+): Promise<TrustedSource> {
+  if (source.kind !== "npm" || source.integrity !== "npm-registry:dist.integrity") {
+    return source;
+  }
+  const integrity = await npmRegistryIntegrity(processRunner, source);
+  if (integrity === undefined || !integrity.startsWith("sha512-")) {
+    throw new Error(`npm registry did not return a sha512 integrity for ${source.identity}`);
+  }
+  return { ...source, integrity };
+}
+
+async function verifyNpmIntegrity(
+  processRunner: NodeProcessRunner,
+  source: { kind: string; identity: string; version: string; integrity: string },
+): Promise<boolean> {
+  if (source.kind !== "npm" || !source.integrity.startsWith("sha512-")) return false;
+  return await npmRegistryIntegrity(processRunner, source) === source.integrity;
 }
 
 async function verifyPiResourcesInChild(
@@ -211,6 +235,7 @@ export async function main(argv: readonly string[]): Promise<number> {
         {
           baseline: builtInBaseline(),
           probe: (project) => defaultProbe(project, processRunner),
+          resolveSource: (source) => resolveRegistrySource(processRunner, source),
           presenter: {
             async show(plan) {
               process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);

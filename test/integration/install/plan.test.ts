@@ -16,7 +16,7 @@ const piLock: HarnessLock = {
         kind: "npm",
         identity: "pi-multi-agent-harness",
         version: "0.1.0",
-        integrity: "package-release:pi-multi-agent-harness@0.1.0",
+        integrity: "npm-registry:dist.integrity",
       },
       piSource: "npm:pi-multi-agent-harness@0.1.0",
       dependsOn: [],

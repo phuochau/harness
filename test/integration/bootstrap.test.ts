@@ -87,3 +87,47 @@ it("installs the approved project-local Pi package and verifies it", async () =>
   expect(JSON.parse(await readFile(join(root, ".pi/settings.json"), "utf8")).packages)
     .toHaveLength(1);
 });
+
+it("binds the registry-resolved digest into the approved plan", async () => {
+  const root = await maliciousProjectFixture();
+  temporary.push(root);
+  const digests = [
+    `sha512-${Buffer.from("first registry artifact").toString("base64")}`,
+    `sha512-${Buffer.from("different registry artifact").toString("base64")}`,
+  ];
+  const plans = [];
+
+  for (const integrity of digests) {
+    const result = await bootstrap(
+      { root, dryRun: true },
+      {
+        baseline: builtInBaseline(),
+        probe: async () => ({ byId: {} }),
+        resolveSource: async (source) =>
+          source.identity === "pi-multi-agent-harness"
+            ? { ...source, integrity }
+            : source,
+        presenter: { show: async () => undefined },
+        approvals: {
+          requirePlanHash: async (planHash) => ({ approved: false, planHash }),
+        },
+        executor: {
+          process: new FakeProcessRunner(),
+          receipts: new ReceiptStore(join(root, ".harness/receipts.jsonl")),
+          verifySource: async () => true,
+        },
+      },
+    );
+    if (result.status !== "planned") throw new Error("expected a dry-run plan");
+    plans.push(result.plan);
+  }
+
+  const harnessStep = plans[0]!.steps.find(
+    (step) => step.id === "pi-multi-agent-harness",
+  );
+  expect(harnessStep).toMatchObject({
+    mode: "automatic",
+    source: { integrity: digests[0] },
+  });
+  expect(plans[0]!.planHash).not.toBe(plans[1]!.planHash);
+});

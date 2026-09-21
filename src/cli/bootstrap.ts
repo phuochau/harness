@@ -5,7 +5,12 @@ import { mergePiPackageSettings } from "../install/pi-settings.js";
 import { createInstallPlan, type AutomaticInstallStep, type InstallPlan } from "../install/plan.js";
 import { effectivePolicy } from "../install/policy.js";
 import type { ReceiptStore } from "../install/receipts.js";
-import type { CapabilityReport, ProbeResult, TrustPolicy } from "../install/types.js";
+import type {
+  CapabilityReport,
+  ProbeResult,
+  TrustedSource,
+  TrustPolicy,
+} from "../install/types.js";
 import { doctor, type DoctorReport } from "./doctor.js";
 import {
   assertLauncherMatchesLock,
@@ -24,6 +29,7 @@ export interface BootstrapDependencies {
   readonly baseline: TrustPolicy;
   readonly machinePolicy?: TrustPolicy;
   readonly probe: (project: DeclarativeProject) => Promise<CapabilityReport>;
+  readonly resolveSource?: (source: TrustedSource) => Promise<TrustedSource>;
   readonly presenter: { show(plan: InstallPlan): Promise<void> };
   readonly approvals: {
     requirePlanHash(planHash: string, yes: boolean): Promise<InstallApproval>;
@@ -102,12 +108,35 @@ export async function bootstrap(
   const project = await readDeclarativeProject(options.root);
   assertLauncherMatchesLock(project.lock);
   const initialReport = await dependencies.probe(project);
+  const resolvedDependencies = await Promise.all(
+    project.lock.dependencies.map(async (dependency) => {
+      if (dependency.source.kind === "manual" || dependencies.resolveSource === undefined) {
+        return dependency;
+      }
+      const declared: TrustedSource = {
+        kind: dependency.source.kind,
+        identity: dependency.source.identity,
+        version: dependency.source.version,
+        integrity: dependency.source.integrity,
+      };
+      const resolved = await dependencies.resolveSource(declared);
+      if (
+        resolved.kind !== declared.kind ||
+        resolved.identity !== declared.identity ||
+        resolved.version !== declared.version
+      ) {
+        throw new Error(`resolved source identity drift for ${dependency.id}`);
+      }
+      return { ...dependency, source: resolved };
+    }),
+  );
+  const resolvedLock = { ...project.lock, dependencies: resolvedDependencies };
   const policy = effectivePolicy(
     dependencies.baseline,
     dependencies.machinePolicy,
     project.projectPolicy,
   );
-  const plan = createInstallPlan(project.lock, initialReport, policy, {
+  const plan = createInstallPlan(resolvedLock, initialReport, policy, {
     repair: options.repair === true,
   });
   await dependencies.presenter.show(plan);

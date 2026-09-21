@@ -1,0 +1,134 @@
+# Workflow DSL
+
+Every initialized project has an editable `.harness/workflow.yaml`. The file is
+validated, compiled, and content-addressed before a run.
+
+```yaml
+schema: harness/v1
+name: spec-kit-multi-agent
+task_model:
+  source: stages.tasks.outputs.graph
+  complete_when: { stage: record_task_done }
+stages:
+  - id: specify
+    uses: spec-kit.specify
+    runner: pi
+    model_profile: chatgpt-planning
+
+  - id: plan
+    uses: spec-kit.plan
+    runner: pi
+    model_profile: chatgpt-planning
+    needs: [{ stage: specify, scope: all }]
+
+  - id: approve_plan
+    uses: human.approval
+    needs: [{ stage: plan, scope: all }]
+
+  - id: tasks
+    uses: spec-kit.tasks
+    runner: pi
+    model_profile: chatgpt-planning
+    needs: [{ stage: approve_plan, scope: all }]
+    produces:
+      tasks: specs/feature/tasks.md
+      graph: specs/feature/task-graph.json
+
+  - id: implement
+    uses: worker.execute
+    runner: { prefer: [devin, codex, claude] }
+    needs: [{ stage: tasks, scope: all }]
+    foreach: { source: stages.tasks.outputs.graph, key: task.id }
+    gate: task.dependencies_done
+    isolation: worktree
+    profile: disciplined-engineer
+    retry: { max_attempts: 3, max_elapsed_seconds: 86400 }
+
+  - id: review
+    uses: worker.review
+    runner: { prefer: [codex, claude, devin] }
+    needs: [{ stage: implement, scope: same-item }]
+    foreach: { source: stages.tasks.outputs.graph, key: task.id }
+    policies: { require_different_worker_kind: true, scope: task }
+    retry: { max_attempts: 3, max_elapsed_seconds: 86400 }
+    on_failure:
+      changes_requested: { retry_stage: implement }
+
+  - id: verify
+    uses: command.run
+    needs: [{ stage: review, scope: same-item }]
+    foreach: { source: stages.tasks.outputs.graph, key: task.id }
+    with: { argv: "${commands.task_verify}" }
+    retry: { max_attempts: 3, max_elapsed_seconds: 86400 }
+    on_failure:
+      verification_failed: { retry_stage: implement }
+
+  - id: integrate
+    uses: git.integrate
+    needs: [{ stage: verify, scope: same-item }]
+    foreach: { source: stages.tasks.outputs.graph, key: task.id }
+
+  - id: post_integrate_verify
+    uses: command.run
+    needs: [{ stage: integrate, scope: same-item }]
+    foreach: { source: stages.tasks.outputs.graph, key: task.id }
+    with: { argv: "${commands.task_verify}" }
+    retry: { max_attempts: 3, max_elapsed_seconds: 86400 }
+    on_failure:
+      verification_failed: { retry_stage: implement }
+
+  - id: record_task_done
+    uses: git.project-task-status
+    needs: [{ stage: post_integrate_verify, scope: same-item }]
+    foreach: { source: stages.tasks.outputs.graph, key: task.id }
+
+  - id: final_verify
+    uses: command.run
+    needs: [{ stage: record_task_done, scope: all }]
+    with: { argv: "${commands.full_verify}" }
+
+  - id: final_review
+    uses: worker.review
+    runner: { prefer: [codex, claude, devin] }
+    needs: [{ stage: final_verify, scope: all }]
+    policies: { scope: final_diff }
+    on_failure:
+      changes_requested: { block: final_review_remediation_required }
+
+  - id: push
+    uses: git.push
+    needs: [{ stage: final_review, scope: all }]
+
+  - id: final_pr
+    uses: github.pull-request
+    needs: [{ stage: push, scope: all }]
+```
+
+This is the complete generated default. The canonical packaged copy is
+`src/defaults/workflow.yaml`.
+
+## Joins and fan-out
+
+- `foreach` materializes one keyed job per task.
+- `scope: same-item` joins exactly the same task key and is valid only when both
+  stages use the same fan-out source and key.
+- `scope: all` is a barrier over every upstream materialized job.
+- `gate: task.dependencies_done` enforces the task DAG in addition to stage
+  dependencies.
+- Two parallel-eligible, unordered tasks may not claim overlapping owned paths.
+
+The accepted task graph is a canonical projection of `tasks.md`, bound to its
+semantic hash and acceptance references. The controller—not a worker—derives
+and validates it.
+
+## Actions and recovery
+
+Actions declare one recovery class:
+
+- `idempotent`: safe to retry after a definitive not-found reconciliation.
+- `reconcilable`: inspect external identity first; execute only if absent.
+- `non_retryable`: an unknown result becomes a blocker.
+
+Workflow command values are argv arrays from `environment.yaml`; they are never
+shell strings. Changing worker preference, retry budgets, review policy, or
+commands changes the compiled workflow revision and therefore the run identity.

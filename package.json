@@ -28,17 +28,23 @@
     ]
   },
   "scripts": {
+    "prepack": "npm run build",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "check:phase1": "npm run typecheck && npm run build && vitest run test/unit/contracts test/unit/config test/unit/graph test/integration/package-smoke.test.ts",
     "check:phase2": "npm run check:phase1 && vitest run test/unit/state test/unit/core test/integration/controller-race.test.ts test/e2e/fake-controller.test.ts",
     "check:phase3": "npm run check:phase2 && vitest run test/integration/git test/integration/herdr test/contract",
-    "check:phase4": "npm run check:phase3 && vitest run test/integration/speckit test/integration/pi-loader.test.ts test/integration/pi-residency.test.ts test/integration/init.test.ts test/unit/pi-commands.test.ts"
+    "check:phase4": "npm run check:phase3 && vitest run test/integration/speckit test/integration/pi-loader.test.ts test/integration/pi-residency.test.ts test/integration/init.test.ts test/unit/pi-commands.test.ts",
+    "verify": "npm run typecheck && npm run build && vitest run && npm pack --dry-run --json",
+    "compat:herdr": "HARNESS_COMPAT_HERDR=1 vitest run test/integration/herdr/compat-smoke.test.ts",
+    "compat:speckit": "HARNESS_COMPAT_SPECKIT=1 vitest run test/integration/speckit/preset.test.ts",
+    "compat:pi": "HARNESS_COMPAT_PI=1 vitest run test/integration/pi-loader.test.ts",
+    "e2e:real": "HARNESS_E2E_REAL=1 vitest run test/e2e/real-smoke.test.ts"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*",
-    "typebox": "*"
+    "@earendil-works/pi-coding-agent": "0.86.1",
+    "typebox": "1.3.34"
   },
   "dependencies": {
     "ajv": "8.20.0",

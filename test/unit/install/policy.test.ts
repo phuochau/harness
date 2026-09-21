@@ -7,7 +7,7 @@ const harness: TrustedSource = {
   kind: "npm",
   identity: "pi-multi-agent-harness",
   version: "0.1.0",
-  integrity: "package-release:pi-multi-agent-harness@0.1.0",
+  integrity: "npm-registry:dist.integrity",
 };
 
 it("allows exact release-manifest sources without an external machine policy", () => {
@@ -21,6 +21,16 @@ it("allows exact release-manifest sources without an external machine policy", (
       integrity: "sha512-x",
     }),
   ).toBe(false);
+});
+
+it("allows a registry-resolved digest only for the exact declared npm identity and version", () => {
+  const policy = effectivePolicy(builtInBaseline(), undefined, {});
+  expect(policy.allows({ ...harness, integrity: `sha512-${"a".repeat(88)}` })).toBe(true);
+  expect(policy.allows({
+    ...harness,
+    version: "0.1.1",
+    integrity: `sha512-${"a".repeat(88)}`,
+  })).toBe(false);
 });
 
 it("lets machine and project policy narrow but never broaden the baseline", () => {

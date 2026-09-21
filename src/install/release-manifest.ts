@@ -6,9 +6,9 @@ export interface ReleaseManifestEntry {
 }
 
 export const releaseManifest: readonly ReleaseManifestEntry[] = [
-  { id: "pi-multi-agent-harness", source: { kind: "npm", identity: "pi-multi-agent-harness", version: "0.1.0", integrity: "package-release:pi-multi-agent-harness@0.1.0" } },
-  { id: "pi-coding-agent", source: { kind: "npm", identity: "@earendil-works/pi-coding-agent", version: "0.86.1", integrity: "package-lock:@earendil-works/pi-coding-agent@0.86.1" } },
-  { id: "typebox", source: { kind: "npm", identity: "typebox", version: "1.3.34", integrity: "package-lock:typebox@1.3.34" } },
+  { id: "pi-multi-agent-harness", source: { kind: "npm", identity: "pi-multi-agent-harness", version: "0.1.0", integrity: "npm-registry:dist.integrity" } },
+  { id: "pi-coding-agent", source: { kind: "npm", identity: "@earendil-works/pi-coding-agent", version: "0.86.1", integrity: "sha512-vZBuNfJnruxZyemZ3O05V0S/Ylze08ahFTIQ1Mik++gVdOevPl89gt/Uv0U97BPAJaj9cj6Vf9rcIgKtUrd0BA==" } },
+  { id: "typebox", source: { kind: "npm", identity: "typebox", version: "1.3.34", integrity: "sha512-wbnzrXXDW8xEFHDZZs2jo1MkhaYlKAY4FRhpBc1+2LF1fZVBGCXGdLEhA/Z/NBbgzJMFfeM8m7elKPa/+KxaUQ==" } },
   { id: "spec-kit", source: { kind: "signed-artifact", identity: "specify", version: "0.8.7", integrity: "version-output:specify-0.8.7" } },
   { id: "superpowers", source: { kind: "git", identity: "https://github.com/obra/superpowers.git", version: "6.4.1", integrity: "release-tag:6.4.1" } },
   { id: "herdr", source: { kind: "git", identity: "https://github.com/herdrdev/herdr.git", version: "0.9.1", integrity: "release-tag:v0.9.1" } },
