@@ -24,13 +24,21 @@ source maps with embedded source text. The packed-consumer test installs exact
 peer versions, runs `harness --help`, imports the public module, and loads the
 extension through Pi's real resource loader.
 
-The subscription smoke is intentionally opt-in and must target disposable
-accounts and a disposable GitHub repository. Set `HARNESS_E2E_REAL=1`,
-`HARNESS_E2E_DISPOSABLE=1`, `HARNESS_E2E_GITHUB_REPO=owner/repo`, and
-`HARNESS_E2E_COMMAND` to a JSON argv array for the environment-owned scenario
-driver. The driver performs the real run and prints one JSON object containing
-`runState: "DONE"`, `verified: true`, and the created pull request URL and
-repository. The test executes that argv directly with no shell.
+The deterministic owned E2E always exercises the complete production
+composition using real Git worktrees, parallel/dependent tasks, all three
+worker adapters, evidence validation, verification, integration, push to a
+bare remote, and PR reconciliation. The subscription smoke is intentionally
+opt-in and uses the repository-owned driver—never an arbitrary external
+command—to launch authenticated Codex, Devin, and Claude sessions through the
+installed Herdr transport:
+
+```bash
+HARNESS_E2E_REAL=1 HARNESS_E2E_DISPOSABLE=1 npm run e2e:real
+```
+
+All three CLIs must already be authenticated with disposable development
+accounts. Authentication remains an explicit operator step; the harness never
+captures credentials or silently skips a declared worker.
 
 Publication is blocked unless this smoke passes on the `harness-e2e` runner.
 A skipped test does not satisfy the release gate.

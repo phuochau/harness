@@ -4,6 +4,7 @@ import {
   mkdir,
   open,
   readFile,
+  readdir,
   unlink,
 } from "node:fs/promises";
 import { join } from "node:path";
@@ -39,6 +40,23 @@ export class DurableRecordStore {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
       throw error;
     }
+  }
+
+  public async list<T>(kind: string): Promise<readonly T[]> {
+    const directory = join(this.root, kind);
+    recordPath(this.root, kind, "list");
+    let entries;
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+    return Promise.all(
+      entries
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+        .map((entry) => readRecord(join(directory, entry.name)) as Promise<T>),
+    );
   }
 
   public async put<T>(kind: string, key: string, value: T): Promise<T> {
@@ -78,6 +96,22 @@ export class DurableRecordStore {
       return existing;
     } finally {
       await unlink(temporary).catch(() => undefined);
+    }
+  }
+
+  public async remove(kind: string, key: string): Promise<void> {
+    const path = recordPath(this.root, kind, key);
+    try {
+      await unlink(path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    const directory = await open(join(this.root, kind), "r");
+    try {
+      await directory.sync();
+    } finally {
+      await directory.close();
     }
   }
 }

@@ -51,4 +51,19 @@ export class EffectExecutor {
     }
     return handler.execute(this.contextFor(true), intent);
   }
+
+  public async retryCleanup<I>(intent: EffectIntent<string, I>): Promise<void> {
+    const handler = this.registry.get<string, I, unknown>(intent.action);
+    if (handler.recovery(intent.input) !== intent.recovery) {
+      throw new Error(`recovery mismatch for ${intent.action}`);
+    }
+    const result = await handler.reconcile(this.contextFor(true), intent);
+    if (result.status === "observed") return;
+    if (result.status === "indeterminate") {
+      throw new IndeterminateEffect(intent as EffectIntent, result.evidence);
+    }
+    throw new Error(
+      `completed effect cleanup could not be reconciled: ${intent.idempotencyKey}`,
+    );
+  }
 }

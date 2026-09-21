@@ -10,13 +10,12 @@ implementation, then Codex → Claude → Devin for independent review. Change
 those arrays in `.harness/workflow.yaml` or select one of the generated workflow
 variants—worker order is data, not hard-coded policy.
 
-> **Development status:** the durable core, workflow compiler, worker/action
-> adapters, bootstrap, and compatibility contracts are implemented. The Pi
-> extension does not yet compose those adapters into the resident durable
-> controller. This build therefore previews the complete workflow but refuses
-> `/harness-run` before accepting a run. Standalone `harness recover` also
-> refuses before taking a lease or mutating the journal. Release publication is
-> gated on a real authenticated end-to-end run.
+> **Release status:** the Pi extension now composes the resident durable
+> controller, Spec Kit planning bridge, Herdr workers, isolated worktrees,
+> verification, integration, push, PR creation, auto-resume, and standalone
+> recovery. The deterministic owned E2E runs the complete diamond pipeline.
+> Publication remains gated on the opt-in authenticated Codex/Devin/Claude
+> transport smoke on a disposable machine/account set.
 
 ## Quick start
 
@@ -43,10 +42,10 @@ harness doctor --json .
 harness start .
 ```
 
-Inside the dedicated Pi session, `/harness-run` currently provides a full
-effect preview and then fails closed until resident adapter composition lands.
-Read-only operational commands include `harness status`, `graph`, and
-`explain`; Pi also registers `/harness-status`,
+Inside the dedicated Pi session, `/harness-run <feature-or-run-id>` displays an
+exact effect preview, asks for approval, creates the immutable run, and keeps
+the controller resident across disconnects. Read-only operational commands
+include `harness status`, `graph`, and `explain`; Pi also registers `/harness-status`,
 `/harness-graph`, `/harness-retry`, `/harness-reroute`, `/harness-pause`, and
 the related run commands.
 

@@ -127,8 +127,15 @@ export class ProductionActionBinders {
     if (!Array.isArray(input.argv) || input.argv.some((item: unknown) => typeof item !== "string")) {
       throw new Error("verification command argv is invalid");
     }
+    if (
+      input.probe !== undefined &&
+      (!Array.isArray(input.probe) || input.probe.some((item: unknown) => typeof item !== "string"))
+    ) {
+      throw new Error("verification command probe is invalid");
+    }
     return {
       argv: input.argv,
+      ...(input.probe === undefined ? {} : { probe: input.probe }),
       cwd: workspace.path,
       expectedCommit: commit,
       workspace,

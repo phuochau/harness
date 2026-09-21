@@ -38,15 +38,18 @@ export function createAttemptIdentity(input: AttemptIdentityInput): AttemptIdent
   const body = structuredClone(input);
   const generationHash = sha256(canonicalJson(body));
   const digest = generationHash.slice("sha256:".length, "sha256:".length + 12);
-  const agentName = [
+  const descriptivePrefix = [
     "h",
-    safeFragment(input.runId, 12),
-    safeFragment(input.jobId, 20),
+    safeFragment(input.runId, 8),
+    safeFragment(input.jobId, 12),
     `a${input.attempt}`,
-    digest,
   ]
-    .join("-")
-    .slice(0, 64)
+    .join("-");
+  const suffix = `-${digest}`;
+  const agentName = `${descriptivePrefix
+    .slice(0, 32 - suffix.length)
+    .replace(/-+$/g, "")}${suffix}`
+    .slice(0, 32)
     .replace(/-+$/g, "");
   return deepFreeze({ ...body, agentName, generationHash });
 }
@@ -75,4 +78,3 @@ export function identityMismatchEvidence(
   }
   return evidence;
 }
-

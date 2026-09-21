@@ -100,6 +100,20 @@ function taskOperatorTarget(
   return candidates.at(-1)?.id;
 }
 
+function cancellableWorkerEffects(
+  target: string,
+  state: RunState,
+): readonly EffectIntent<string, JsonValue>[] {
+  return Object.values(state.outstandingEffects).filter((effect) => {
+    if (effect.action !== "worker.execute" && effect.action !== "worker.review") return false;
+    if (typeof effect.input !== "object" || effect.input === null || Array.isArray(effect.input)) {
+      return false;
+    }
+    const input = effect.input as Record<string, JsonValue>;
+    return target === "run" || input.jobId === target || input.taskId === target;
+  });
+}
+
 function remediationPath(
   jobs: Readonly<Record<string, MaterializedJob>>,
   sourceId: string,
@@ -218,17 +232,29 @@ export function createWorkflowCommandDeriver(
         if (operation === "pause") return { events: prefixEvents, effects: [] };
         if (operation === "resume") resuming = true;
         if (operation === "cancel") {
-          prefixEvents.push({
-            eventType: "job.blocked",
-            entityId: target,
-            idempotencyKey: `cancelled:${accepted.command.idempotencyKey}`,
-            payload: {
-              reason: "cancelled by operator",
-              evidence: [accepted.command.idempotencyKey],
-              suggestedChange: "Retry explicitly if the work should continue.",
-            },
-          });
-          return { events: prefixEvents, effects: [] };
+          const active = cancellableWorkerEffects(target, state);
+          if (active.length === 0) {
+            throw new Error("cancel requires a running worker task or run target");
+          }
+          return {
+            events: prefixEvents,
+            effects: active.map((original) => {
+              const input = original.input as Record<string, JsonValue>;
+              return {
+                action: "worker.cancel",
+                idempotencyKey: `worker.cancel:${original.idempotencyKey}:${accepted.command.idempotencyKey}`,
+                recovery: "reconcilable",
+                laneKey: `cancellation:${original.laneKey}`,
+                input: {
+                  entityId: input.jobId,
+                  jobId: input.jobId,
+                  stageId: input.stageId,
+                  worker: input.worker,
+                  originalIntent: original,
+                } as unknown as JsonValue,
+              };
+            }),
+          };
         }
         if (operation === "retry" || operation === "reroute") {
           const resolvedTarget = taskOperatorTarget(

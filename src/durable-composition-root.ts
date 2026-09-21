@@ -29,6 +29,7 @@ export interface DurableHarnessPorts {
   readonly clock: Clock;
   readonly derive: CommandDeriver;
   readonly effects: DurableEffectPort;
+  readonly beforeLeaseRelease?: () => Promise<void>;
   readonly lifecycle?: {
     observed(
       intent: EffectIntent<string, JsonValue>,
@@ -60,6 +61,11 @@ function safeEvidence(error: unknown): readonly string[] {
       .replace(/Bearer\s+[^\s]+/gi, "Bearer [REDACTED]")
       .replace(/\b(token|password|secret|authorization)=\S+/gi, "$1=[REDACTED]"),
   ];
+}
+
+function isDeferredEffect(error: unknown): boolean {
+  return typeof error === "object" && error !== null &&
+    (error as { deferred?: unknown }).deferred === true;
 }
 
 function entityFor(intent: EffectIntent<string, JsonValue>, runId: string): string {
@@ -203,6 +209,10 @@ export function createHarnessSystem(
             ? await ports.effects.runFresh(intent)
             : await ports.effects.recover(intent);
         } catch (error) {
+          // Deferred effects (for example a human approval requested during a
+          // headless recovery) remain outstanding. An interactive controller
+          // can reconcile the same durable intent later without an extra retry.
+          if (isDeferredEffect(error)) return;
           const defaultFailure: DecisionEventDraft = {
             eventType: "job.failed",
             entityId: entityFor(intent, ports.runId),
@@ -326,9 +336,13 @@ export function createHarnessSystem(
     drain,
     async dispose() {
       if (disposed) return;
-      await drain();
-      disposed = true;
-      await ports.lease.release();
+      try {
+        await drain();
+        await ports.beforeLeaseRelease?.();
+      } finally {
+        disposed = true;
+        await ports.lease.release();
+      }
     },
   });
 }

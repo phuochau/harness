@@ -140,3 +140,26 @@ it("maps an indeterminate external outcome to BLOCKED with retained evidence", (
     }),
   ]);
 });
+
+it("maps durable worker cancellation to a retryable operator blocker", () => {
+  const lifecycle = createWorkflowLifecycle();
+  const cancellation = intent("worker.cancel", {
+    entityId: "implement:T001",
+    jobId: "implement:T001",
+    stageId: "implement",
+    worker: "codex",
+    originalIntent: {},
+  });
+  expect(lifecycle.observed(cancellation, {
+    cancelledIntentKey: "worker.execute:implement:T001:1",
+  })).toEqual([
+    expect.objectContaining({
+      eventType: "job.blocked",
+      entityId: "implement:T001",
+      payload: expect.objectContaining({
+        reason: "cancelled by operator",
+        evidence: ["worker.execute:implement:T001:1"],
+      }),
+    }),
+  ]);
+});

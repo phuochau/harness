@@ -183,6 +183,21 @@ export class WorktreeLifecycle {
       await this.assertRegisteredIdentity(binding);
       return binding;
     }
+    const reservedOutput = await this.gitAt(this.repository.root, [
+      "ls-tree",
+      "--name-only",
+      input.commit,
+      "--",
+      ".harness-output",
+    ]);
+    if (reservedOutput.exitCode !== 0) {
+      throw new WorkspaceInvariantError(reservedOutput.stderr.trim());
+    }
+    if (reservedOutput.stdout.trim() !== "") {
+      throw new WorkspaceInvariantError(
+        "commit tracks the reserved harness output path",
+      );
+    }
     await mkdir(dirname(path), { recursive: true });
     const args = input.branch === null
       ? ["worktree", "add", "--detach", path, input.commit]
@@ -207,6 +222,10 @@ export class WorktreeLifecycle {
       artifactPaths: [...(input.artifactPaths ?? [])],
     };
     this.registry.add(binding);
+    await mkdir(join(canonicalPath, ".harness-output"), {
+      recursive: true,
+      mode: 0o700,
+    });
     if (!input.writable) await makeReviewTreeReadOnly(canonicalPath);
     await this.persistRegistry();
     return binding;
@@ -485,6 +504,77 @@ export class WorktreeLifecycle {
     await this.releasePath(binding.path);
   }
 
+  public async quarantineCancelled(binding: LifecycleWorktreeBinding): Promise<void> {
+    const entry = this.registry.get(binding.path);
+    if (binding.role !== "implementation" && binding.role !== "remediation") {
+      if (entry !== undefined) await this.releaseCompleted(binding);
+      return;
+    }
+    if (binding.branch === null || binding.taskId === undefined || binding.attempt === undefined) {
+      throw new WorkspaceInvariantError("cancelled implementation lacks branch identity");
+    }
+    const quarantineBranch = `harness/quarantine/${binding.runId}-${binding.taskId}-attempt-${binding.attempt}`;
+    const quarantineRef = `refs/heads/${quarantineBranch}`;
+    const taskRef = binding.branch.startsWith("refs/")
+      ? binding.branch
+      : `refs/heads/${binding.branch}`;
+    const taskHead = await this.repository.revParseOptional(taskRef);
+    if (entry === undefined) {
+      if (taskHead === undefined || taskHead === binding.baseCommit) return;
+      const quarantinedHead = await this.repository.revParseOptional(quarantineRef);
+      if (quarantinedHead !== undefined && quarantinedHead !== taskHead) {
+        throw new WorkspaceInvariantError("cancelled attempt quarantine ref changed");
+      }
+      if (quarantinedHead === undefined) {
+        await this.checkedAt(this.repository.root, ["update-ref", quarantineRef, taskHead]);
+      }
+      await this.checkedAt(this.repository.root, [
+        "update-ref",
+        taskRef,
+        binding.baseCommit,
+        taskHead,
+      ]);
+      return;
+    }
+    if (entry.binding.id !== binding.id) {
+      throw new WorkspaceInvariantError("registered worktree binding mismatch");
+    }
+    if (entry.binding.role === "quarantine") return;
+    await this.assertRegisteredIdentity(binding);
+    const currentBranch = await this.checkedAt(binding.path, [
+      "branch",
+      "--show-current",
+    ]);
+    if (currentBranch !== quarantineBranch) {
+      const head = await this.checkedAt(binding.path, ["rev-parse", "HEAD"]);
+      const existing = await this.repository.revParseOptional(quarantineRef);
+      if (existing !== undefined && existing !== head) {
+        throw new WorkspaceInvariantError("cancelled attempt quarantine ref changed");
+      }
+      await this.checkedAt(
+        binding.path,
+        existing === undefined
+          ? ["switch", "-c", quarantineBranch]
+          : ["switch", quarantineBranch],
+      );
+    }
+    if (taskHead !== undefined && taskHead !== binding.baseCommit) {
+      await this.checkedAt(this.repository.root, [
+        "update-ref",
+        taskRef,
+        binding.baseCommit,
+        taskHead,
+      ]);
+    }
+    this.registry.replace({
+      ...entry.binding,
+      role: "quarantine",
+      branch: quarantineBranch,
+      commit: await this.checkedAt(binding.path, ["rev-parse", "HEAD"]),
+    });
+    await this.persistRegistry();
+  }
+
   public sealedHead(binding: LifecycleWorktreeBinding): string | undefined {
     const entry = this.registry.get(binding.path);
     if (entry === undefined) return undefined;
@@ -503,6 +593,7 @@ export class WorktreeLifecycle {
       ) {
         continue;
       }
+      if (binding.role === "quarantine") continue;
       try {
         await this.removeRegistered(binding, binding.role === "review" || binding.role === "verification");
       } catch {

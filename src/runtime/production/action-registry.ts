@@ -8,7 +8,7 @@ import type { PlanningAgent } from "../../ports/planning.js";
 import type { RunManifest } from "../../state/run-manifest.js";
 import type { DurableRecordStore } from "./records.js";
 import type { ProductionWorkerRuntime } from "./worker-action.js";
-import { DurableWorkerAction } from "./worker-action.js";
+import { DurableWorkerAction, DurableWorkerCancelAction } from "./worker-action.js";
 import { DurableBoundAction } from "./bound-action.js";
 import {
   ProductionActionBinders,
@@ -78,6 +78,10 @@ export function createProductionActionRegistry(
     records: options.records,
     runtime: options.workerRuntime,
   }));
+  registry.register(new DurableWorkerCancelAction({
+    records: options.records,
+    runtime: options.workerRuntime,
+  }));
   registry.register(new DurableBoundAction({
     records: options.records,
     handler: new CommandAction(),
@@ -88,7 +92,7 @@ export function createProductionActionRegistry(
         : { ...output, commit: input.expectedCommit },
       afterCompleted: (input) => binders.afterCommand(input as BoundCommandInput),
     },
-    recovery: "non_retryable",
+    recovery: (input) => Array.isArray(input.probe) ? "reconcilable" : "non_retryable",
     validateInput: validateBoundCommand,
     validateOutput: validateCommandOutput,
   }));

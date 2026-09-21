@@ -105,6 +105,15 @@ workerContract("codex", () => new CodexAdapter());
 workerContract("devin", () => new DevinAdapter());
 workerContract("claude", () => new ClaudeAdapter());
 
+it("launches Claude as a one-shot headless worker", async () => {
+  const adapter = new ClaudeAdapter();
+  const prepared = await adapter.prepare(createAssignment({
+    ...assignmentFixture(),
+    workerKind: "claude",
+  }));
+  expect(adapter.launchSpec(prepared).args).toContain("--print");
+});
+
 it("models final-diff review as a detached read-only assignment without a task", async () => {
   const base = assignmentFixture();
   const { taskId: _taskId, ...withoutTask } = base;
@@ -132,4 +141,7 @@ it("models final-diff review as a detached read-only assignment without a task",
   expect(assignment).toMatchObject({ scope: "final_diff", frozenBase: "base123" });
   expect(prepared.prompt).toContain("Final diff base: base123");
   expect(prepared.prompt).toContain("no task ID");
+  expect(prepared.prompt).toContain("HARNESS_REVIEW_RESULT_V1");
+  expect(prepared.prompt).toContain("Do not write files");
+  expect(prepared.prompt).not.toContain("Write exactly one schemaVersion 1 JSON result");
 });

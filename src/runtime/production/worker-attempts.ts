@@ -1,6 +1,6 @@
 import type { EffectIntent } from "../../actions/types.js";
-import { lstat, readFile, realpath } from "node:fs/promises";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { lstat, readFile, realpath, writeFile } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { createAssignment, type WorkerAssignment } from "../../core/assignment.js";
 import { validateEvidence } from "../../core/evidence.js";
 import type { WorkerKind } from "../../core/routing.js";
@@ -92,7 +92,12 @@ async function validateEvidenceArtifacts(
   result: WorkerResult,
 ): Promise<void> {
   if (!("evidence" in result)) return;
-  const evidenceRoot = await realpath(resolve(assignment.worktree.path, ".harness-output"));
+  const outputPath = resolve(assignment.worktree.path, ".harness-output");
+  const outputInfo = await lstat(outputPath);
+  if (outputInfo.isSymbolicLink() || !outputInfo.isDirectory()) {
+    throw new Error("harness output directory is not a real directory");
+  }
+  const evidenceRoot = await realpath(outputPath);
   for (const item of result.evidence) {
     if (typeof item === "string") throw new Error("structured evidence artifact is required");
     if (isAbsolute(item.path)) throw new Error(`evidence path must be relative: ${item.path}`);
@@ -251,6 +256,24 @@ export class GitWorkerAttemptPort implements ProductionWorkerAttemptPort {
     };
   }
 
+  public async stagePrompt(
+    binding: LifecycleWorktreeBinding,
+    prompt: string,
+  ): Promise<string> {
+    const relativePath = ".harness-output/assignment.md";
+    const path = join(binding.path, relativePath);
+    try {
+      await writeFile(path, prompt, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const info = await lstat(path);
+      if (info.isSymbolicLink() || !info.isFile() || await readFile(path, "utf8") !== prompt) {
+        throw new Error("persisted worker assignment prompt changed");
+      }
+    }
+    return relativePath;
+  }
+
   public async accept(
     assignment: WorkerAssignment,
     result: WorkerResult,
@@ -278,5 +301,9 @@ export class GitWorkerAttemptPort implements ProductionWorkerAttemptPort {
 
   public release(binding: LifecycleWorktreeBinding): Promise<void> {
     return this.options.worktrees.releaseCompleted(binding);
+  }
+
+  public abort(binding: LifecycleWorktreeBinding): Promise<void> {
+    return this.options.worktrees.quarantineCancelled(binding);
   }
 }

@@ -130,6 +130,7 @@ function completePendingCommand(state: RunState, event: HarnessEvent): void {
 function observeWorkerResult(state: RunState, event: HarnessEvent): void {
   if (event.eventType !== "worker.result_observed") return;
   const job = ensureJob(state, event.entityId);
+  if (job.state === "BLOCKED" && blockerReason(job.blocker) === "cancelled by operator") return;
   job.result = event.payload;
   if (event.payload.outcome === "blocked") {
     job.state = "BLOCKED";
@@ -144,6 +145,18 @@ function observeWorkerResult(state: RunState, event: HarnessEvent): void {
     }
     job.state = "VERIFYING";
   }
+}
+
+function operatorCancelled(state: RunState, jobId: string): boolean {
+  const job = state.jobs[jobId];
+  return job?.state === "BLOCKED" && blockerReason(job.blocker) === "cancelled by operator";
+}
+
+function blockerReason(value: unknown): string | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value) &&
+      typeof (value as { reason?: unknown }).reason === "string"
+    ? (value as { reason: string }).reason
+    : undefined;
 }
 
 function applyOperatorIntent(state: RunState, event: HarnessEvent): void {
@@ -228,9 +241,11 @@ function applyEvent(state: RunState, event: HarnessEvent): void {
       observeWorkerResult(state, event);
       break;
     case "review.approved":
+      if (operatorCancelled(state, event.entityId)) break;
       ensureJob(state, event.entityId).reviewCommit = event.payload.commit;
       break;
     case "review.changes_requested":
+      if (operatorCancelled(state, event.entityId)) break;
       transitionJob(state, event.entityId, "VERIFYING", "RETRY");
       ensureJob(state, event.entityId).retryReason = "changes_requested";
       break;
@@ -300,6 +315,7 @@ function applyEvent(state: RunState, event: HarnessEvent): void {
       applyPlanningEvent(state, event);
       break;
     case "job.done": {
+      if (operatorCancelled(state, event.entityId)) break;
       const taskId = taskIdForJob(event.entityId);
       if (
         taskId &&
@@ -334,6 +350,7 @@ function applyEvent(state: RunState, event: HarnessEvent): void {
       break;
     }
     case "job.failed": {
+      if (operatorCancelled(state, event.entityId)) break;
       const job = ensureJob(state, event.entityId);
       job.state = "FAILED";
       job.failure = event.payload.reason;

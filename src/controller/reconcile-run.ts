@@ -58,6 +58,11 @@ function safeEvidence(error: unknown): string[] {
     .replace(/\b(token|password|secret|authorization)=\S+/gi, "$1=[REDACTED]")];
 }
 
+function isDeferredEffect(error: unknown): boolean {
+  return typeof error === "object" && error !== null &&
+    (error as { deferred?: unknown }).deferred === true;
+}
+
 function eventInput(
   now: Date,
   runId: string,
@@ -197,6 +202,7 @@ export async function recoverRun(
         );
         recoveredEffects += 1;
       } catch (error) {
+        if (isDeferredEffect(error)) continue;
         const evidence = safeEvidence(error);
         await journal.append(
           eventInput(

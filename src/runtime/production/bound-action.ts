@@ -22,9 +22,17 @@ export interface DurableBoundActionOptions<K extends string, I, O> {
   readonly records: DurableRecordStore;
   readonly handler: ActionHandler<K, I, O>;
   readonly binder: ProductionInputBinder<K, I, O>;
-  readonly recovery: RecoveryClass;
+  readonly recovery:
+    | RecoveryClass
+    | ((input: Readonly<Record<string, unknown>>) => RecoveryClass);
   readonly validateInput: (value: unknown) => I;
   readonly validateOutput: (value: unknown) => O;
+}
+
+function safeCleanupMessage(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error))
+    .replace(/Bearer\s+[^\s]+/gi, "Bearer [REDACTED]")
+    .replace(/\b(token|password|secret|authorization)=\S+/gi, "$1=[REDACTED]");
 }
 
 export class DurableBoundAction<K extends string, I, O>
@@ -36,8 +44,10 @@ export class DurableBoundAction<K extends string, I, O>
     this.kind = options.handler.kind;
   }
 
-  public recovery(_input: Readonly<Record<string, unknown>>): RecoveryClass {
-    return this.options.recovery;
+  public recovery(input: Readonly<Record<string, unknown>>): RecoveryClass {
+    return typeof this.options.recovery === "function"
+      ? this.options.recovery(input)
+      : this.options.recovery;
   }
 
   private async bound(
@@ -73,6 +83,28 @@ export class DurableBoundAction<K extends string, I, O>
     return { ...intent, input };
   }
 
+  private async afterCompleted(
+    input: I,
+    output: O,
+    intent: EffectIntent<K, Readonly<Record<string, unknown>>>,
+  ): Promise<void> {
+    try {
+      await this.options.binder.afterCompleted?.(input, output, intent);
+      await this.options.records.remove("action-cleanup-failure", intent.idempotencyKey);
+    } catch (error) {
+      if (
+        await this.options.records.get("action-cleanup-failure", intent.idempotencyKey) ===
+          undefined
+      ) {
+        await this.options.records.put("action-cleanup-failure", intent.idempotencyKey, {
+          schemaVersion: 1,
+          intent,
+          message: safeCleanupMessage(error),
+        });
+      }
+    }
+  }
+
   public async execute(
     context: ActionContext,
     intent: EffectIntent<K, Readonly<Record<string, unknown>>>,
@@ -80,7 +112,7 @@ export class DurableBoundAction<K extends string, I, O>
     const input = await this.bound(intent);
     const existing = await this.completed(intent);
     if (existing !== undefined) {
-      await this.options.binder.afterCompleted?.(input, existing, intent);
+      await this.afterCompleted(input, existing, intent);
       return existing;
     }
     const rawOutput = this.options.validateOutput(
@@ -94,7 +126,7 @@ export class DurableBoundAction<K extends string, I, O>
       intent.idempotencyKey,
       output as unknown as JsonValue,
     ));
-    await this.options.binder.afterCompleted?.(input, persisted, intent);
+    await this.afterCompleted(input, persisted, intent);
     return persisted;
   }
 
@@ -110,7 +142,7 @@ export class DurableBoundAction<K extends string, I, O>
     const input = this.options.validateInput(existingInput);
     const completed = await this.completed(intent);
     if (completed !== undefined) {
-      await this.options.binder.afterCompleted?.(input, completed, intent);
+      await this.afterCompleted(input, completed, intent);
       return { status: "observed", output: completed };
     }
     const result = await this.options.handler.reconcile(
@@ -127,7 +159,7 @@ export class DurableBoundAction<K extends string, I, O>
       intent.idempotencyKey,
       output as unknown as JsonValue,
     );
-    await this.options.binder.afterCompleted?.(input, output, intent);
+    await this.afterCompleted(input, output, intent);
     return { status: "observed", output };
   }
 }

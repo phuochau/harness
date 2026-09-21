@@ -1,7 +1,7 @@
 import fc from "fast-check";
 import { expect, it } from "vitest";
 import { reduceEvent } from "../../../src/core/reducer.js";
-import { initialRunState } from "../../../src/core/state.js";
+import { initialRunState, type RunState } from "../../../src/core/state.js";
 import {
   fixtureCommandProcessedEvent,
   fixtureEventsThroughCommandDecision,
@@ -99,4 +99,60 @@ it("moves effect-backed verification and integration through VERIFYING", () => {
     }),
   );
   expect(verified.jobs["verify:T001"]?.state).toBe("VERIFYING");
+});
+
+it("keeps operator cancellation terminal when a worker settles concurrently", () => {
+  const base = structuredClone(
+    initialRunState("F041", `sha256:${"a".repeat(64)}`),
+  ) as RunState;
+  base.jobs["implement:T001"] = { state: "RUNNING", attempt: 1, worker: "codex" };
+  const cancelled = reduceEvent(base, nextHarnessEvent(base, {
+    eventType: "job.blocked",
+    entityId: "implement:T001",
+    idempotencyKey: "cancelled:T001",
+    payload: {
+      reason: "cancelled by operator",
+      evidence: ["worker.execute:implement:T001:1"],
+      suggestedChange: "Retry explicitly.",
+    },
+  }));
+  const observed = reduceEvent(cancelled, nextHarnessEvent(cancelled, {
+    eventType: "worker.result_observed",
+    entityId: "implement:T001",
+    idempotencyKey: "late-result:T001",
+    payload: {
+      schemaVersion: 1,
+      assignmentHash: `sha256:${"b".repeat(64)}`,
+      role: "implementation",
+      outcome: "completed",
+      commit: "c".repeat(40),
+      evidence: [],
+    },
+  }));
+  const changesRequested = reduceEvent(observed, nextHarnessEvent(observed, {
+    eventType: "review.changes_requested",
+    entityId: "implement:T001",
+    idempotencyKey: "late-review:T001",
+    payload: {
+      commit: "c".repeat(40),
+      reviewer: "codex",
+      findings: ["late review result"],
+    },
+  }));
+  const done = reduceEvent(changesRequested, nextHarnessEvent(changesRequested, {
+    eventType: "job.done",
+    entityId: "implement:T001",
+    idempotencyKey: "late-done:T001",
+    payload: {},
+  }));
+  const failed = reduceEvent(done, nextHarnessEvent(done, {
+    eventType: "job.failed",
+    entityId: "implement:T001",
+    idempotencyKey: "late-failure:T001",
+    payload: { reason: "agent exited" },
+  }));
+  expect(failed.jobs["implement:T001"]).toMatchObject({
+    state: "BLOCKED",
+    blocker: { reason: "cancelled by operator" },
+  });
 });

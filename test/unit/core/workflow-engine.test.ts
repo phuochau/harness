@@ -66,6 +66,60 @@ it("records pause and resume before making new scheduling decisions", () => {
   expect(resumed.effects.length).toBeGreaterThan(0);
 });
 
+it("turns task cancellation into a durable worker cancellation effect", () => {
+  const derive = engine();
+  const state = structuredClone(initialRunState("F030", revision)) as RunState;
+  state.jobs["implement:T001"] = {
+    state: "RUNNING",
+    attempt: 1,
+    worker: "codex",
+  };
+  const original = {
+    action: "worker.execute",
+    idempotencyKey: "worker.execute:implement:T001:1",
+    recovery: "non_retryable" as const,
+    laneKey: "job:implement:T001",
+    input: {
+      entityId: "implement:T001",
+      jobId: "implement:T001",
+      stageId: "implement",
+      taskId: "T001",
+      attempt: 1,
+      worker: "codex",
+    },
+  };
+  state.outstandingEffects[original.idempotencyKey] = original;
+
+  const decision = derive(
+    state,
+    accepted({
+      schemaVersion: 1,
+      source: "operator",
+      kind: "operator_intent",
+      idempotencyKey: "cancel:T001:1",
+      payload: { operation: "cancel", target: "T001", arguments: {} },
+    }),
+  );
+
+  expect(decision.events).toEqual([
+    expect.objectContaining({
+      eventType: "operator.intent",
+      payload: expect.objectContaining({ operation: "cancel", target: "T001" }),
+    }),
+  ]);
+  expect(decision.effects).toEqual([
+    expect.objectContaining({
+      action: "worker.cancel",
+      recovery: "reconcilable",
+      laneKey: "cancellation:job:implement:T001",
+      input: expect.objectContaining({
+        jobId: "implement:T001",
+        originalIntent: original,
+      }),
+    }),
+  ]);
+});
+
 it("turns an explicit retry into a new immutable attempt and fallback route", () => {
   const derive = engine();
   const state = structuredClone(initialRunState("F031", revision)) as RunState;

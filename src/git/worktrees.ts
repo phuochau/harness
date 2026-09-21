@@ -1,4 +1,4 @@
-import { chmod, mkdir, readdir, realpath, stat } from "node:fs/promises";
+import { chmod, lstat, mkdir, readdir, realpath } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 
 export type WorkspaceRole =
@@ -6,7 +6,8 @@ export type WorkspaceRole =
   | "implementation"
   | "review"
   | "verification"
-  | "remediation";
+  | "remediation"
+  | "quarantine";
 
 export interface LifecycleWorktreeBinding {
   readonly id: string;
@@ -74,6 +75,13 @@ export class WorktreeRegistry {
   public remove(path: string): void {
     this.entries.delete(path);
   }
+
+  public replace(binding: LifecycleWorktreeBinding): void {
+    if (!this.entries.has(binding.path)) {
+      throw new Error(`workspace is not registered: ${binding.path}`);
+    }
+    this.entries.set(binding.path, { binding, sealed: false });
+  }
 }
 
 export function workspacePath(
@@ -106,7 +114,8 @@ async function visit(
   path: string,
   operation: (path: string, directory: boolean) => Promise<void>,
 ): Promise<void> {
-  const info = await stat(path);
+  const info = await lstat(path);
+  if (info.isSymbolicLink()) return;
   if (info.isDirectory()) {
     for (const child of await readdir(path)) {
       await visit(join(path, child), operation);
@@ -115,9 +124,19 @@ async function visit(
   await operation(path, info.isDirectory());
 }
 
-export async function makeReviewTreeReadOnly(path: string): Promise<void> {
+async function ensurePrivateOutputDirectory(path: string): Promise<string> {
   const output = join(path, ".harness-output");
   await mkdir(output, { recursive: true, mode: 0o700 });
+  const info = await lstat(output);
+  if (info.isSymbolicLink() || !info.isDirectory()) {
+    throw new Error(`reserved harness output path is not a directory: ${output}`);
+  }
+  await chmod(output, 0o700);
+  return output;
+}
+
+export async function makeReviewTreeReadOnly(path: string): Promise<void> {
+  const output = await ensurePrivateOutputDirectory(path);
   await visit(path, async (entry, directory) => {
     if (entry === output || entry.startsWith(`${output}${sep}`)) return;
     await chmod(entry, directory ? 0o555 : 0o444);

@@ -30,6 +30,9 @@ import { resolveRunPaths } from "../state/paths.js";
 import { readRunManifest } from "../state/run-manifest.js";
 import { Journal } from "../state/journal.js";
 import { replayRunEvents } from "../cli/status.js";
+import { doctor as inspectCapabilities } from "../cli/doctor.js";
+import { defaultProbe } from "../cli/main.js";
+import { NodeProcessRunner } from "../git/process.js";
 
 export interface HarnessSessionDependencies {
   readonly cwd: string;
@@ -216,15 +219,28 @@ class ProjectCommandBackend implements HarnessCommandBackend {
   }
 
   public async doctor() {
-    return this.configuration === undefined
-      ? {
-          ready: false,
-          summary: this.configurationError ?? "Harness is not initialized",
-        }
-      : {
-          ready: true,
-          summary: `Configuration valid and production runtime available (${this.configuration.workflow.revision})`,
-        };
+    if (this.configuration === undefined) {
+      return {
+        ready: false,
+        summary: this.configurationError ?? "Harness is not initialized",
+      };
+    }
+    const process = new NodeProcessRunner();
+    const report = await inspectCapabilities(
+      { root: this.cwd },
+      { probe: (project) => defaultProbe(project, process) },
+    );
+    const unavailable = report.capabilities.filter((capability) => capability.status !== "present");
+    return {
+      ready: report.ok,
+      summary: report.ok
+        ? `All ${report.capabilities.length} declared capabilities are ready.`
+        : [
+            `${unavailable.length} declared capabilities need attention:`,
+            ...unavailable.map((capability) =>
+              `- ${capability.id}: ${capability.status}${capability.repair ? ` — ${capability.repair}` : ""}`),
+          ].join("\n"),
+    };
   }
 
   public async previewRun(_target?: string) {

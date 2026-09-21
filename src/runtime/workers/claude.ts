@@ -1,14 +1,16 @@
 import type { WorkerAssignment } from "../../core/assignment.js";
 import {
   JsonResultWorkerAdapter,
+  assignmentFileLaunchPrompt,
   type WorkerDescriptor,
 } from "./json-result-adapter.js";
 import type { NativeAgentSession } from "./types.js";
 
 function policy(assignment: WorkerAssignment): readonly string[] {
-  return assignment.role === "implementation"
-    ? ["--permission-mode", "acceptEdits"]
-    : ["--permission-mode", "plan"];
+  return [
+    "--permission-mode",
+    assignment.role === "review" ? "plan" : "acceptEdits",
+  ];
 }
 
 const descriptor: WorkerDescriptor = {
@@ -18,7 +20,11 @@ const descriptor: WorkerDescriptor = {
   authArgs: ["auth", "status"],
   nativeResume: true,
   sandbox: false,
-  launchArgs: policy,
+  launchArgs: (prepared) => [
+    "--print",
+    ...policy(prepared.assignment),
+    assignmentFileLaunchPrompt(prepared),
+  ],
   resumeArgs: (assignment, session: NativeAgentSession) => [
     "--resume",
     session.value,
@@ -30,4 +36,3 @@ export class ClaudeAdapter extends JsonResultWorkerAdapter {
   public readonly kind = "claude" as const;
   protected readonly descriptor = descriptor;
 }
-

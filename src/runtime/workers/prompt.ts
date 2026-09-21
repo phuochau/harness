@@ -53,15 +53,29 @@ export function buildWorkerPrompt(
     ...profile.instructions,
     "",
     "Completion protocol:",
-    `- Write exactly one schemaVersion 1 JSON result to ${resultPath}.`,
     `- Copy assignmentHash exactly as ${assignment.assignmentHash}.`,
-    "- Terminal prose, Herdr idle/done state, and an uncommitted working tree are not completion.",
     "- If the spec or architecture is wrong, return outcome=blocked with reason, evidence, and suggestedChange; do not edit planning artifacts.",
   ];
+  if (assignment.role === "implementation") {
+    sections.push(
+      `- Write exactly one schemaVersion 1 JSON result to ${resultPath}.`,
+      "- Every evidence item is {kind,path,sha256}; path must be a regular file below .harness-output and sha256 must equal the file bytes.",
+      "- Keep .harness-output untracked. Never commit evidence artifacts.",
+      "- Terminal prose, Herdr idle/done state, and an uncommitted working tree are not completion.",
+      "- Commit the implementation before reporting completion and leave no changes outside .harness-output.",
+      `- Completed result shape: {"schemaVersion":1,"assignmentHash":"${assignment.assignmentHash}","role":"implementation","outcome":"completed","commit":"<git HEAD>","evidence":[{"kind":"<required kind>","path":".harness-output/<file>","sha256":"sha256:<64 lowercase hex>"}]}.`,
+    );
+  }
   if (assignment.role === "review") {
     sections.push(
+      "- Do not write files. The harness materializes your evidence outside the read-only agent session.",
+      "- End your final response with exactly two protocol lines: an unwrapped line beginning `HARNESS_REVIEW_RESULT_V1 ` followed by compact JSON, then `HARNESS_REVIEW_RESULT_END_V1` on its own line.",
+      "- The envelope is {result,evidence}; result omits its evidence field, while evidence is an array of {kind,content} with one item for every required structured evidence kind.",
+      "- No terminal status or prose counts as completion without a valid matching marker line.",
       "- Review only the assigned immutable commit in this detached read-only worktree.",
       "- Do not implement remediation in the review workspace.",
+      `- Approved marker example: HARNESS_REVIEW_RESULT_V1 {"result":{"schemaVersion":1,"assignmentHash":"${assignment.assignmentHash}","role":"review","outcome":"approved","reviewedCommit":"${assignment.commit}","findings":[]},"evidence":[{"kind":"<required kind>","content":"commands and observations supporting the review"}]}`,
+      `- Changes-requested uses the same envelope with outcome="changes_requested", reviewedCommit="${assignment.commit}", and at least one finding.`,
     );
   }
   if (assignment.scope === "final_diff") {

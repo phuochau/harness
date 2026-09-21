@@ -7,7 +7,16 @@ import type {
 } from "../../actions/types.js";
 
 export interface RunApprovalOutput {
-  readonly approved: true;
+  readonly approved: boolean;
+}
+
+export class RunApprovalPendingError extends Error {
+  public readonly code = "APPROVAL_PENDING";
+  public readonly deferred = true;
+
+  public constructor(public readonly requestId: string) {
+    super(`approval is pending: ${requestId}`);
+  }
 }
 
 export class RunApprovalAction
@@ -20,16 +29,21 @@ export class RunApprovalAction
   }
 
   public async execute(
-    _context: ActionContext,
-    _intent: EffectIntent<"human.approval", Readonly<Record<string, unknown>>>,
+    context: ActionContext,
+    intent: EffectIntent<"human.approval", Readonly<Record<string, unknown>>>,
   ): Promise<RunApprovalOutput> {
-    return { approved: true };
+    const decision = await context.approvals.get(intent.idempotencyKey);
+    if (decision === undefined) throw new RunApprovalPendingError(intent.idempotencyKey);
+    return { approved: decision.approved };
   }
 
   public async reconcile(
-    _context: ActionContext,
-    _intent: EffectIntent<"human.approval", Readonly<Record<string, unknown>>>,
+    context: ActionContext,
+    intent: EffectIntent<"human.approval", Readonly<Record<string, unknown>>>,
   ): Promise<ReconcileResult<RunApprovalOutput>> {
-    return { status: "observed", output: { approved: true } };
+    const decision = await context.approvals.get(intent.idempotencyKey);
+    return decision === undefined
+      ? { status: "not_found" }
+      : { status: "observed", output: { approved: decision.approved } };
   }
 }

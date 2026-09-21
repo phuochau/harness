@@ -11,6 +11,7 @@ import { Journal } from "../../src/state/journal.js";
 import { RunLease } from "../../src/state/lease.js";
 import type { RunPaths } from "../../src/state/types.js";
 import { FakeClock } from "../support/fake-clock.js";
+import { RunApprovalPendingError } from "../../src/runtime/production/run-approval.js";
 
 const temporary: string[] = [];
 afterEach(async () => {
@@ -267,5 +268,82 @@ it("blocks an indeterminate recovery with its evidence", async () => {
   expect(blocked?.payload).toMatchObject({
     evidence: ["worker session outcome is unknown"],
   });
+  await system.dispose();
+});
+
+it("runs owned-resource cleanup while the fenced controller lease is held", async () => {
+  const root = await mkdtemp(join(tmpdir(), "durable-composition-dispose-"));
+  temporary.push(root);
+  const paths = runPaths(root);
+  const lease = await RunLease.acquire(paths, "controller:owner");
+  let cleanupRan = false;
+  const system = createHarnessSystem({
+    runId: "F027",
+    workflowRevision: `sha256:${"e".repeat(64)}`,
+    journal: new Journal(paths),
+    lease,
+    clock: new FakeClock(),
+    derive: () => ({ events: [], effects: [] }),
+    effects: {
+      async runFresh() { return {}; },
+      async recover() { return {}; },
+    },
+    beforeLeaseRelease: async () => {
+      cleanupRan = true;
+      await expect(
+        RunLease.acquire(paths, "controller:replacement"),
+      ).rejects.toThrow(/lease/i);
+    },
+  });
+
+  await system.dispose();
+  expect(cleanupRan).toBe(true);
+  const replacement = await RunLease.acquire(paths, "controller:replacement");
+  await replacement.release();
+});
+
+it("keeps a headless pending approval outstanding for an interactive controller", async () => {
+  const root = await mkdtemp(join(tmpdir(), "durable-composition-approval-"));
+  temporary.push(root);
+  const paths = runPaths(root);
+  const lease = await RunLease.acquire(paths, "controller:headless");
+  const clock = new FakeClock();
+  const journal = new Journal(paths);
+  const intent = {
+    action: "human.approval",
+    idempotencyKey: "human.approval:approve_plan:1",
+    recovery: "reconcilable" as const,
+    laneKey: "job:approve_plan",
+    input: { entityId: "approve_plan", jobId: "approve_plan" },
+  };
+  await journal.append({
+    schemaVersion: 1,
+    timestamp: clock.now().toISOString(),
+    runId: "F028",
+    entityId: "approve_plan",
+    idempotencyKey: "approval-intent:event",
+    eventType: "effect.intent",
+    payload: intent,
+  }, lease);
+  const system = createHarnessSystem({
+    runId: "F028",
+    workflowRevision: `sha256:${"f".repeat(64)}`,
+    journal,
+    lease,
+    clock,
+    derive: () => ({ events: [], effects: [] }),
+    effects: {
+      async runFresh() { throw new Error("not used"); },
+      async recover() { throw new RunApprovalPendingError(intent.idempotencyKey); },
+    },
+  });
+
+  await system.recover();
+  await system.drain();
+  expect(Object.keys((await system.readState()).outstandingEffects)).toEqual([
+    intent.idempotencyKey,
+  ]);
+  expect((await journal.read()).some((event) => event.eventType === "effect.failed"))
+    .toBe(false);
   await system.dispose();
 });

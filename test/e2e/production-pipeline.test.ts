@@ -196,6 +196,8 @@ class SimulatedHerdr implements ProductionHerdrPort {
   public async recoverSubmit() { return { status: "not_found" } as const; }
   public async reconcile() { return { status: "not_found" } as const; }
   public async waitForAgent(): Promise<void> {}
+  public async readAgentTranscript(): Promise<string> { return "simulated worker transcript"; }
+  public async stopAgent(): Promise<void> {}
   public async closeWorkspace(): Promise<void> {}
 }
 

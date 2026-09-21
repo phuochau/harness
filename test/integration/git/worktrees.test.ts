@@ -1,4 +1,4 @@
-import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { expect, it } from "vitest";
 import {
@@ -181,6 +181,78 @@ it("rejects a dirty review worktree", async () => {
   }
 });
 
+it("never follows checkout symlinks while changing review permissions", async () => {
+  const context = await fixture();
+  const external = join(context.workspaceRoot, "external-permissions-target");
+  try {
+    await mkdir(external, { recursive: true, mode: 0o700 });
+    await chmod(external, 0o700);
+    const task = await context.repo.repository.ensureTaskBranch(
+      "F023",
+      "T007",
+      context.run.commit,
+    );
+    const implementation = await context.manager.openImplementation({
+      runId: "F023",
+      taskId: "T007",
+      attempt: 1,
+      branch: task.name,
+      baseCommit: task.baseCommit,
+      ownedPaths: ["external-link"],
+    });
+    await symlink(external, join(implementation.path, "external-link"));
+    const { execa } = await import("execa");
+    await execa("git", ["add", "external-link"], { cwd: implementation.path });
+    await execa("git", ["commit", "-m", "add external symlink"], {
+      cwd: implementation.path,
+    });
+    const head = await context.repo.repository.revParse(task.name);
+    await context.manager.sealImplementation(implementation, head);
+    await context.manager.releaseImplementation(implementation);
+
+    const review = await context.manager.openReview({
+      runId: "F023",
+      taskId: "T007",
+      attempt: 1,
+      commit: head,
+    });
+    expect((await stat(external)).mode & 0o777).toBe(0o700);
+    await context.manager.releaseCompleted(review);
+    expect((await stat(external)).mode & 0o777).toBe(0o700);
+  } finally {
+    await chmod(external, 0o700).catch(() => undefined);
+    await rm(external, { recursive: true, force: true });
+    await context.cleanup();
+  }
+});
+
+it("rejects commits that track the reserved harness output path", async () => {
+  const context = await fixture();
+  const external = join(context.workspaceRoot, "external-output-target");
+  try {
+    await mkdir(external, { recursive: true });
+    await symlink(external, join(context.repo.path, ".harness-output"));
+    const { execa } = await import("execa");
+    await execa("git", ["add", ".harness-output"], { cwd: context.repo.path });
+    await execa("git", ["commit", "-m", "track malicious output symlink"], {
+      cwd: context.repo.path,
+    });
+    const commit = await context.repo.repository.revParse("HEAD");
+
+    await expect(context.manager.openReview({
+      runId: "F023",
+      taskId: "T008",
+      attempt: 1,
+      commit,
+    })).rejects.toThrow(/reserved harness output path/);
+    expect(await context.repo.repository.revParse("HEAD")).toBe(commit);
+  } finally {
+    await rm(join(context.repo.path, ".harness-output"), { force: true });
+    await rm(external, { recursive: true, force: true });
+    await context.cleanup();
+  }
+});
+
 it("refuses to remove an unregistered worktree", async () => {
   const context = await fixture();
   try {
@@ -216,6 +288,49 @@ it("retains an unsealed implementation for operator recovery", async () => {
       implementation.baseCommit,
     );
     await context.manager.releaseImplementation(implementation);
+  } finally {
+    await context.cleanup();
+  }
+});
+
+it("quarantines cancelled implementation changes and frees the task branch for retry", async () => {
+  const context = await fixture();
+  try {
+    const task = await context.repo.repository.ensureTaskBranch(
+      "F023",
+      "T006",
+      context.run.commit,
+    );
+    const implementation = await context.manager.openImplementation({
+      runId: "F023",
+      taskId: "T006",
+      attempt: 1,
+      branch: task.name,
+      baseCommit: task.baseCommit,
+      ownedPaths: ["src/**"],
+    });
+    await mkdir(join(implementation.path, "src"), { recursive: true });
+    await writeFile(join(implementation.path, "src/incomplete.ts"), "incomplete\n", "utf8");
+
+    await context.manager.quarantineCancelled(implementation);
+    const { execa } = await import("execa");
+    expect((await execa("git", ["branch", "--show-current"], {
+      cwd: implementation.path,
+    })).stdout).toBe("harness/quarantine/F023-T006-attempt-1");
+    expect(await context.repo.repository.revParse(task.name)).toBe(task.baseCommit);
+    expect((await execa("git", ["status", "--porcelain", "--untracked-files=all"], {
+      cwd: implementation.path,
+    })).stdout).toContain("src/incomplete.ts");
+
+    const retry = await context.manager.openImplementation({
+      runId: "F023",
+      taskId: "T006",
+      attempt: 2,
+      branch: task.name,
+      baseCommit: task.baseCommit,
+      ownedPaths: ["src/**"],
+    });
+    expect(retry.path).not.toBe(implementation.path);
   } finally {
     await context.cleanup();
   }

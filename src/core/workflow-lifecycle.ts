@@ -81,6 +81,16 @@ export function createWorkflowLifecycle(): WorkflowLifecycle {
   return {
     observed(intent, output) {
       const bound = identity(intent);
+      if (intent.action === "worker.cancel") {
+        const value = record(output, "worker cancellation output");
+        return [blocked(
+          intent,
+          bound.jobId,
+          "cancelled by operator",
+          [string(value, "cancelledIntentKey")],
+          "Retry explicitly if the work should continue.",
+        )];
+      }
       if (intent.action === "worker.execute" || intent.action === "worker.review") {
         let result;
         try {
@@ -288,6 +298,23 @@ export function createWorkflowLifecycle(): WorkflowLifecycle {
           message,
           evidence,
           "Inspect external state, then retry recovery or resolve the effect manually.",
+        )];
+      }
+      if (
+        code === "WORKER_CANCELLED" ||
+        code === "APPROVAL_PENDING" ||
+        intent.action === "worker.cancel"
+      ) {
+        return [blocked(
+          intent,
+          bound.jobId,
+          message,
+          [intent.idempotencyKey],
+          code === "WORKER_CANCELLED"
+            ? "Retry explicitly if the work should continue."
+            : code === "APPROVAL_PENDING"
+              ? "Open the run in interactive Pi and approve or deny the plan."
+            : "Inspect the Herdr agent and retry cancellation.",
         )];
       }
       return [{

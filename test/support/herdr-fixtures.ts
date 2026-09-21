@@ -69,6 +69,14 @@ export interface FakeHerdrClientOptions {
   readonly promptConnectionLost?: boolean;
   readonly missingPane?: boolean;
   readonly foregroundBusy?: boolean;
+  readonly existingWorktreeWorkspace?: boolean;
+  readonly agentStatuses?: readonly string[];
+  readonly transcript?: string;
+  readonly transcriptResult?: WorkerResult;
+  readonly agentExitsDuringLaunch?: boolean;
+  readonly launchedAgent?: Readonly<Record<string, unknown>>;
+  readonly keepAgentAfterCancel?: boolean;
+  readonly agentDisappearsAfterGets?: number;
 }
 
 export class FakeHerdrClient implements HerdrControlClient {
@@ -76,10 +84,15 @@ export class FakeHerdrClient implements HerdrControlClient {
   private readonly listeners = new Set<(event: HerdrEvent) => void>();
   private readonly worktreePath: string;
   private agent: Readonly<Record<string, unknown>> | undefined;
+  private worktreeWorkspaceExists: boolean;
+  private sourceWorkspaceExists = false;
+  private agentStatusIndex = 0;
+  private agentGetCount = 0;
 
   public constructor(private readonly options: FakeHerdrClientOptions = {}) {
     this.worktreePath = options.worktreePath ?? "/repo task worktree";
     this.agent = options.existingAgent;
+    this.worktreeWorkspaceExists = options.existingWorktreeWorkspace ?? true;
   }
 
   public calls(method: string) {
@@ -93,7 +106,18 @@ export class FakeHerdrClient implements HerdrControlClient {
         return {
           type: "workspace_list",
           workspaces: [
-            {
+            ...(this.sourceWorkspaceExists ? [{
+              workspace_id: "w-source",
+              label: "harness source: F023 T001",
+              worktree: {
+                checkout_path: "/repo",
+                repo_key: "repo",
+                repo_name: "repo",
+                repo_root: "/repo",
+                is_linked_worktree: false,
+              },
+            }] : []),
+            ...(this.worktreeWorkspaceExists ? [{
               workspace_id: "w1",
               worktree: {
                 checkout_path: this.worktreePath,
@@ -102,9 +126,24 @@ export class FakeHerdrClient implements HerdrControlClient {
                 repo_root: "/repo",
                 is_linked_worktree: true,
               },
-            },
+            }] : []),
           ],
         };
+      case "workspace.create":
+        this.sourceWorkspaceExists = true;
+        return {
+          type: "workspace_created",
+          workspace: { workspace_id: "w-source" },
+          root_pane: { pane_id: "w-source:p1", workspace_id: "w-source" },
+          tab: { tab_id: "w-source:t1" },
+        };
+      case "workspace.close":
+        if (params.workspace_id === "w-source") this.sourceWorkspaceExists = false;
+        if (params.workspace_id === "w1") {
+          this.worktreeWorkspaceExists = false;
+          this.agent = undefined;
+        }
+        return { type: "ok" };
       case "pane.list":
         return {
           type: "pane_list",
@@ -136,7 +175,7 @@ export class FakeHerdrClient implements HerdrControlClient {
           process_info: {
             pane_id: "w1:p1",
             shell_pid: 123,
-            foreground_process_group_id: null,
+            foreground_process_group_id: this.options.foregroundBusy ? 999 : 123,
             foreground_processes: this.options.foregroundBusy
               ? [{ pid: 999, command: "other" }]
               : [],
@@ -145,7 +184,24 @@ export class FakeHerdrClient implements HerdrControlClient {
       case "agent.list":
         return { type: "agent_list", agents: this.agent ? [this.agent] : [] };
       case "agent.get":
+        this.agentGetCount += 1;
+        if (
+          this.options.agentDisappearsAfterGets !== undefined &&
+          this.agentGetCount > this.options.agentDisappearsAfterGets
+        ) {
+          this.agent = undefined;
+        }
         if (!this.agent) throw Object.assign(new Error("not found"), { code: "not_found" });
+        if (this.options.agentStatuses !== undefined) {
+          const status = this.options.agentStatuses[
+            Math.min(this.agentStatusIndex, this.options.agentStatuses.length - 1)
+          ];
+          this.agentStatusIndex += 1;
+          return {
+            type: "agent_info",
+            agent: { ...this.agent, agent_status: status },
+          };
+        }
         return { type: "agent_info", agent: this.agent };
       case "agent.start":
         this.agent = {
@@ -153,18 +209,36 @@ export class FakeHerdrClient implements HerdrControlClient {
           agent: params.kind,
           pane_id: params.pane_id,
           workspace_id: "w1",
-          agent_status: "idle",
+          agent_status: this.options.agentExitsDuringLaunch ? "working" : "idle",
+          ...(this.options.agentExitsDuringLaunch ? { launch_pending: true } : {}),
+          ...this.options.launchedAgent,
         };
         return { type: "agent_started", agent: this.agent, argv: params.args ?? [] };
       case "agent.prompt":
         if (this.options.promptConnectionLost) throw new Error("connection lost");
         return { type: "agent_prompted", agent: this.agent };
+      case "agent.read":
+      case "pane.read":
+        return { type: "agent_read", read: { text: this.options.transcript ?? "" } };
+      case "pane.send_input":
+        if (this.options.promptConnectionLost) throw new Error("connection lost");
+        return { type: "ok" };
+      case "pane.send_text":
+        if (this.options.promptConnectionLost) throw new Error("connection lost");
+        return { type: "ok" };
       case "agent.send_keys":
-        this.agent = undefined;
+        if (!this.options.keepAgentAfterCancel) this.agent = undefined;
         return { type: "keys_sent" };
       case "agent.wait":
+        if (this.options.agentExitsDuringLaunch) {
+          this.agent = undefined;
+          throw Object.assign(new Error("agent is no longer running"), {
+            code: "agent_not_running",
+          });
+        }
         return { type: "agent_wait", agent: this.agent };
       case "worktree.open":
+        this.worktreeWorkspaceExists = true;
         return {
           type: "worktree_opened",
           already_open: false,
@@ -191,6 +265,11 @@ export class FakeHerdrClient implements HerdrControlClient {
 export function fakeRuntimeEvidence(options: FakeHerdrClientOptions = {}): RuntimeEvidence {
   return {
     worktreeCommit: async () => options.commit ?? "abc123",
+    sourceCheckout: async () => "/repo",
     readResult: async () => options.result,
+    materializeTranscriptResult: async (_path, transcript) =>
+      transcript.includes("HARNESS_REVIEW_RESULT_V1")
+        ? options.transcriptResult
+        : undefined,
   };
 }

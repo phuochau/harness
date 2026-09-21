@@ -238,7 +238,7 @@ export function executableCapabilities(
   return result;
 }
 
-async function defaultProbe(
+export async function defaultProbe(
   project: DeclarativeProject,
   processRunner: NodeProcessRunner,
 ): Promise<CapabilityReport> {

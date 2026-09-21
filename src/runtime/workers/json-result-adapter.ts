@@ -25,11 +25,15 @@ export interface WorkerDescriptor {
   readonly authArgs: readonly string[];
   readonly nativeResume: boolean;
   readonly sandbox: boolean;
-  launchArgs(assignment: WorkerAssignment): readonly string[];
+  launchArgs(prepared: PreparedWorker): readonly string[];
   resumeArgs(
     assignment: WorkerAssignment,
     session: NativeAgentSession,
   ): readonly string[];
+}
+
+export function assignmentFileLaunchPrompt(_prepared: PreparedWorker): string {
+  return "Read .harness-output/assignment.md and execute that harness assignment exactly.";
 }
 
 export abstract class JsonResultWorkerAdapter implements WorkerAdapter {
@@ -110,7 +114,7 @@ export abstract class JsonResultWorkerAdapter implements WorkerAdapter {
     return {
       kind: this.kind,
       cwd: prepared.assignment.worktree.path,
-      args: this.descriptor.launchArgs(prepared.assignment),
+      args: this.descriptor.launchArgs(prepared),
     };
   }
 
@@ -164,4 +168,3 @@ export abstract class JsonResultWorkerAdapter implements WorkerAdapter {
     return parseWorkerResult(raw, assignment);
   }
 }
-

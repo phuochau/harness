@@ -18,6 +18,9 @@ it.each(["codex", "devin", "claude"] as const)(
       kind,
       cwd: prepared.assignment.worktree.path,
     });
+    const launchPrompt = adapter.launchSpec(prepared).args.at(-1)!;
+    expect(launchPrompt).not.toContain("\n");
+    expect(launchPrompt).toContain(".harness-output/assignment.md");
     const session = nativeSessionRef(kind, prepared.assignment);
     const resumed = adapter.resumeSpec(prepared, session);
     expect(resumed).toMatchObject({ status: "supported", session });
@@ -85,4 +88,61 @@ it.each(["codex", "devin", "claude"] as const)(
 
 it("keeps routing priority out of the adapter registry", () => {
   expect([...workerAdapters().keys()].sort()).toEqual(["claude", "codex", "devin"]);
+});
+
+it("uses Codex headless automation without bypassing hook trust", async () => {
+  const adapter = workerAdapters().get("codex")!;
+  const prepared = await adapter.prepare(contractAssignment({ workerKind: "codex" }));
+  const launch = adapter.launchSpec(prepared);
+  expect(launch.args[0]).toBe("exec");
+  expect(launch.args).toEqual(expect.arrayContaining(["--disable", "hooks"]));
+  expect(launch.args).toEqual(expect.arrayContaining([
+    "--config",
+    'approval_policy="never"',
+  ]));
+  expect(launch.args).not.toContain("--ask-for-approval");
+  expect(launch.args).not.toContain("--dangerously-bypass-hook-trust");
+});
+
+it("uses Devin's documented sandboxed headless trust policy", async () => {
+  const adapter = workerAdapters().get("devin")!;
+  const prepared = await adapter.prepare(contractAssignment({ workerKind: "devin" }));
+  const launch = adapter.launchSpec(prepared);
+  expect(launch.args).toEqual(expect.arrayContaining([
+    "--sandbox",
+    "--print",
+    "--respect-workspace-trust",
+    "false",
+  ]));
+  expect(launch.args).not.toEqual(expect.arrayContaining([
+    "dangerous",
+    "bypass",
+  ]));
+});
+
+it.each([
+  ["codex", "read-only"],
+  ["devin", "auto"],
+  ["claude", "plan"],
+] as const)("launches %s reviewers with a non-editing permission policy", async (kind, mode) => {
+  const adapter = workerAdapters().get(kind)!;
+  const prepared = await adapter.prepare(contractAssignment({
+    workerKind: kind,
+    role: "review",
+    implementationWorkerKind: kind === "codex" ? "devin" : "codex",
+    worktree: {
+      ...contractAssignment().worktree,
+      role: "review",
+      branch: null,
+      writable: false,
+    },
+  }));
+  const args = adapter.launchSpec(prepared).args;
+  expect(args).toContain(mode);
+  expect(args).not.toEqual(expect.arrayContaining([
+    "dangerous",
+    "workspace-write",
+    "acceptEdits",
+    "bypassPermissions",
+  ]));
 });

@@ -252,6 +252,53 @@ it("records an indeterminate non-retryable effect as a blocker", async () => {
   );
 });
 
+it("leaves a deferred approval effect outstanding during standalone recovery", async () => {
+  const fixture = await journalFixture();
+  cleanups.push(fixture.cleanup);
+  await fixture.journal.append({
+    schemaVersion: 1,
+    timestamp: "2026-09-21T00:00:00.000Z",
+    runId: "F023",
+    entityId: "run:F023",
+    idempotencyKey: "run:create",
+    eventType: "run.created",
+    payload: { workflowRevision: `sha256:${"a".repeat(64)}` },
+  }, fixture.lease);
+  await fixture.journal.append({
+    schemaVersion: 1,
+    timestamp: "2026-09-21T00:00:01.000Z",
+    runId: "F023",
+    entityId: "integrate:T001",
+    idempotencyKey: "effect:approval:T001",
+    eventType: "effect.intent",
+    payload: {
+      action: "approval.request",
+      idempotencyKey: "effect:approval:T001",
+      recovery: "reconcilable",
+      laneKey: "approval:F023",
+      input: { entityId: "integrate:T001" },
+    },
+  }, fixture.lease);
+  await fixture.lease.release();
+
+  const summary = await recoverRun(
+    { root: fixture.paths.repository, runId: "F023" },
+    {
+      ownerId: "recover:test",
+      effects: {
+        recover: async () => {
+          throw Object.assign(new Error("approval pending"), { deferred: true });
+        },
+      },
+      now: () => new Date("2026-09-21T00:00:02.000Z"),
+    },
+  );
+  const events = await fixture.journal.read();
+  expect(summary).toMatchObject({ recoveredEffects: 0, failedEffects: 0 });
+  expect(events).not.toContainEqual(expect.objectContaining({ eventType: "effect.failed" }));
+  expect(events).not.toContainEqual(expect.objectContaining({ eventType: "job.blocked" }));
+});
+
 it("repairs a torn tail while keeping status and explain read-only", async () => {
   const fixture = await journalFixture();
   cleanups.push(fixture.cleanup);

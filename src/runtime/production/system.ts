@@ -2,7 +2,12 @@ import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { EffectExecutor } from "../../actions/executor.js";
-import type { ActionDependencies, Clock, ProcessRunner } from "../../actions/types.js";
+import type {
+  ActionDependencies,
+  ApprovalStore,
+  Clock,
+  ProcessRunner,
+} from "../../actions/types.js";
 import type { CompiledWorkflow } from "../../config/compile.js";
 import { createWorkflowCommandDeriver, emptyTaskGraph } from "../../core/workflow-engine.js";
 import { createWorkflowLifecycle } from "../../core/workflow-lifecycle.js";
@@ -26,6 +31,7 @@ import { connectInstalledHerdr, type HerdrClient } from "../herdr/client.js";
 import { HerdrRuntime } from "../herdr/runtime.js";
 import { workerAdapters } from "../workers/index.js";
 import { createProductionActionRegistry } from "./action-registry.js";
+import { recoverCleanupFailures } from "./cleanup-recovery.js";
 import {
   HerdrProductionWorkerRuntime,
   type ProductionHerdrPort,
@@ -65,6 +71,48 @@ export interface StandaloneProductionEffects {
 }
 
 const systemClock: Clock = { now: () => new Date() };
+
+interface PersistedApproval {
+  readonly approved: boolean;
+  readonly actor: string;
+  readonly recordedAt: string;
+}
+
+class DurableInteractiveApprovalStore implements ApprovalStore {
+  private readonly prompts = new Map<string, Promise<PersistedApproval>>();
+
+  public constructor(
+    private readonly records: DurableRecordStore,
+    private readonly context?: ExtensionContext,
+    private readonly planPath?: string,
+  ) {}
+
+  public async get(requestId: string): Promise<PersistedApproval | undefined> {
+    const existing = await this.records.get<PersistedApproval>("human-approval", requestId);
+    if (existing !== undefined || this.context?.hasUI !== true) return existing;
+    const pending = this.prompts.get(requestId);
+    if (pending !== undefined) return pending;
+    const prompt = (async () => {
+      const approved = await this.context!.ui.confirm(
+        "Approve Spec Kit plan?",
+        this.planPath === undefined
+          ? "Approve the sealed plan before implementation starts."
+          : `Review ${this.planPath}, then approve implementation.`,
+      );
+      return this.records.put("human-approval", requestId, {
+        approved,
+        actor: "pi-operator",
+        recordedAt: new Date().toISOString(),
+      });
+    })();
+    this.prompts.set(requestId, prompt);
+    try {
+      return await prompt;
+    } finally {
+      this.prompts.delete(requestId);
+    }
+  }
+}
 
 async function installedHerdrRunning(): Promise<boolean> {
   const process = new NodeProcessRunner();
@@ -190,11 +238,20 @@ export async function composeProductionRun(
     const dependencies: ActionDependencies = {
       process: options.process ?? new NodeProcessRunner(),
       git,
-      approvals: { get: async () => undefined },
+      approvals: new DurableInteractiveApprovalStore(
+        records,
+        options.context,
+        initialized.manifest.artifactPaths.plan,
+      ),
       clock: systemClock,
       signal: abort.signal,
     };
     const executor = new EffectExecutor(registry, dependencies);
+    const recoverCleanups = () => recoverCleanupFailures(
+      records,
+      (intent) => executor.retryCleanup(intent),
+      (prepared, intent) => workerRuntime.abort!(prepared, intent as never),
+    );
     const composed = createHarnessSystem({
       runId: initialized.manifest.runId,
       workflowRevision: workflow.revision,
@@ -204,13 +261,28 @@ export async function composeProductionRun(
       derive: createWorkflowCommandDeriver({ workflow, graph: () => currentGraph }),
       effects: executor,
       lifecycle: createWorkflowLifecycle(),
+      beforeLeaseRelease: async () => {
+        await recoverCleanups();
+        await worktrees.cleanupAll();
+      },
     });
     system = composed;
     return Object.freeze({
       controller: composed.controller,
       readState: composed.readState,
-      recover: composed.recover,
-      drain: composed.drain,
+      async recover() {
+        await recoverCleanups();
+        await composed.recover();
+      },
+      async drain() {
+        await composed.drain();
+        await recoverCleanups();
+        // A deferred worker effect stays outstanding until its durable cleanup
+        // succeeds. Reconcile it in the same resident turn so downstream work
+        // cannot race the repaired worktree ownership boundary.
+        await composed.recover();
+        await composed.drain();
+      },
       graph: () => currentGraph,
       async dispose() {
         abort.abort();
@@ -218,7 +290,6 @@ export async function composeProductionRun(
           await composed.dispose();
         } finally {
           herdrClient?.close();
-          await worktrees.cleanupAll();
         }
       },
     });
@@ -274,6 +345,11 @@ export async function createStandaloneProductionEffects(input: {
     readState,
     taskVerification: [input.commands.task_verify ?? []].filter((argv) => argv.length > 0),
   });
+  const workerRuntime = new HerdrProductionWorkerRuntime({
+    adapters: workerAdapters(),
+    herdr: new HerdrRuntime(client),
+    attempts,
+  });
   const registry = createProductionActionRegistry({
     manifest,
     repository,
@@ -292,27 +368,31 @@ export async function createStandaloneProductionEffects(input: {
         evidence: [manifest.runId],
       }),
     },
-    workerRuntime: new HerdrProductionWorkerRuntime({
-      adapters: workerAdapters(),
-      herdr: new HerdrRuntime(client),
-      attempts,
-    }),
+    workerRuntime,
     verificationObservations: new JournalVerificationObservations(journal),
   });
   const abort = new AbortController();
   const executor = new EffectExecutor(registry, {
     process: new NodeProcessRunner(),
     git,
-    approvals: { get: async () => undefined },
+    approvals: new DurableInteractiveApprovalStore(records),
     clock: systemClock,
     signal: abort.signal,
   });
+  await recoverCleanupFailures(
+    records,
+    (intent) => executor.retryCleanup(intent),
+    (prepared, intent) => workerRuntime.abort!(prepared, intent as never),
+  );
   return {
     effects: executor,
     async dispose() {
       abort.abort();
       client.close();
-      await worktrees.cleanupAll();
+      // The recovery command's fenced lease is released by recoverRun before
+      // this transport is disposed. Per-effect cleanup already ran while the
+      // lease was held; a global worktree sweep here could race a newly
+      // acquired resident controller.
     },
   };
 }

@@ -18,7 +18,11 @@ import type {
   SubmitAssignmentIntent,
   WorkspaceHandle,
 } from "../herdr/runtime.js";
-import type { PreparedWorker, WorkerAdapter } from "../workers/types.js";
+import type {
+  HerdrCancellationSpec,
+  PreparedWorker,
+  WorkerAdapter,
+} from "../workers/types.js";
 import type {
   PreparedWorkerAttempt,
   ProductionWorkerInput,
@@ -35,12 +39,17 @@ export interface ProductionWorkerAttemptPort {
   prepare(
     intent: EffectIntent<ProductionWorkerKind, ProductionWorkerInput>,
   ): Promise<PreparedAttemptBinding>;
+  stagePrompt(
+    binding: LifecycleWorktreeBinding,
+    prompt: string,
+  ): Promise<string>;
   accept(
     assignment: WorkerAssignment,
     result: WorkerResult,
     binding: LifecycleWorktreeBinding,
   ): Promise<void>;
   release(binding: LifecycleWorktreeBinding): Promise<void>;
+  abort(binding: LifecycleWorktreeBinding): Promise<void>;
 }
 
 export interface ProductionHerdrPort {
@@ -59,6 +68,8 @@ export interface ProductionHerdrPort {
   ): Promise<ReconcileResult<AssignmentSubmission>>;
   reconcile(intent: WorkerStartIntent): Promise<ReconcileResult<WorkerHandle>>;
   waitForAgent(handle: WorkerHandle, timeoutMs?: number): Promise<void>;
+  readAgentTranscript(agentName: string, paneId?: string, lines?: number): Promise<string>;
+  stopAgent(handle: WorkerHandle, spec: HerdrCancellationSpec): Promise<void>;
   closeWorkspace(workspaceId: string): Promise<void>;
 }
 
@@ -159,7 +170,12 @@ function startIntent(
 function submitIntent(
   value: PersistedPreparedAttempt,
   intent: EffectIntent<ProductionWorkerKind, ProductionWorkerInput>,
+  timeoutMs: number,
 ): SubmitAssignmentIntent {
+  const deliveryMarker = value.args.at(-1);
+  if (deliveryMarker === undefined || deliveryMarker.length === 0) {
+    throw new Error("worker launch specification is missing its delivery marker");
+  }
   return {
     action: "worker.submit",
     idempotencyKey: `${intent.idempotencyKey}:submit`,
@@ -170,6 +186,10 @@ function submitIntent(
       agentName: value.identity.agentName,
       prompt: value.prompt,
       resultPath: value.resultPath,
+      resultTransport: value.assignment.role === "review" ? "transcript" : "file",
+      deliveredAtLaunch: true,
+      deliveryMarker,
+      timeoutMs,
     },
   };
 }
@@ -183,6 +203,7 @@ export class HerdrProductionWorkerRuntime implements ProductionWorkerRuntime {
     const { assignment, binding } = await this.options.attempts.prepare(intent);
     const adapter = adapterFor(this.options.adapters, assignment);
     const prepared = await adapter.prepare(assignment);
+    await this.options.attempts.stagePrompt(binding, prepared.prompt);
     const launch = adapter.launchSpec(prepared);
     if (launch.kind !== assignment.workerKind || launch.cwd !== binding.path) {
       throw new Error("worker launch specification escaped its assignment");
@@ -236,9 +257,25 @@ export class HerdrProductionWorkerRuntime implements ProductionWorkerRuntime {
   ): Promise<WorkerResult> {
     const value = parsePrepared(prepared);
     const handle = await this.options.herdr.startAgent(startIntent(value, intent));
-    await this.options.herdr.submitAssignment(submitIntent(value, intent));
-    await this.options.herdr.waitForAgent(handle, this.options.timeoutMs);
-    return this.collect(value);
+    const submission = await this.options.herdr.submitAssignment(
+      submitIntent(value, intent, this.options.timeoutMs ?? 86_400_000),
+    );
+    try {
+      if (submission.result !== undefined) {
+        const result = validateWorkerResult(submission.result);
+        await this.options.attempts.accept(value.assignment, result, value.binding);
+        return result;
+      }
+      return await this.collect(value);
+    } catch (error) {
+      const transcript = await this.options.herdr
+        .readAgentTranscript(handle.agentName, handle.paneId)
+        .catch((diagnosticError) =>
+          `unavailable (${diagnosticError instanceof Error ? diagnosticError.message : String(diagnosticError)})`);
+      throw new Error(
+        `${error instanceof Error ? error.message : String(error)}; terminal=${transcript}`,
+      );
+    }
   }
 
   public async reconcile(
@@ -246,7 +283,9 @@ export class HerdrProductionWorkerRuntime implements ProductionWorkerRuntime {
     intent: EffectIntent<ProductionWorkerKind, ProductionWorkerInput>,
   ): Promise<ReconcileResult<WorkerResult>> {
     const value = parsePrepared(prepared);
-    const submission = await this.options.herdr.recoverSubmit(submitIntent(value, intent));
+    const submission = await this.options.herdr.recoverSubmit(
+      submitIntent(value, intent, this.options.timeoutMs ?? 86_400_000),
+    );
     if (submission.status === "observed" && submission.output.result !== undefined) {
       const result = validateWorkerResult(submission.output.result);
       await this.options.attempts.accept(value.assignment, result, value.binding);
@@ -280,7 +319,32 @@ export class HerdrProductionWorkerRuntime implements ProductionWorkerRuntime {
   ): Promise<void> {
     const value = parsePrepared(prepared);
     await this.options.herdr.closeWorkspace(value.identity.workspaceId);
-    if (output.outcome === "blocked" || output.outcome === "failed") return;
+    if (output.outcome === "blocked" || output.outcome === "failed") {
+      await this.options.attempts.abort(value.binding);
+      return;
+    }
     await this.options.attempts.release(value.binding);
+  }
+
+  public async abort(
+    prepared: PreparedWorkerAttempt,
+    intent: EffectIntent<ProductionWorkerKind, ProductionWorkerInput>,
+  ): Promise<void> {
+    const value = parsePrepared(prepared);
+    const running = await this.options.herdr.reconcile(startIntent(value, intent));
+    if (running.status === "observed") {
+      const adapter = adapterFor(this.options.adapters, value.assignment);
+      await this.options.herdr.stopAgent(running.output, adapter.cancelSpec({
+        agentName: value.identity.agentName,
+        paneId: value.identity.paneId,
+        workspaceId: value.identity.workspaceId,
+        assignmentHash: value.identity.assignmentHash,
+        attempt: value.identity.attempt,
+      }));
+    } else if (running.status === "indeterminate") {
+      throw new Error(`cannot safely abort worker: ${running.evidence.join("; ")}`);
+    }
+    await this.options.herdr.closeWorkspace(value.identity.workspaceId);
+    await this.options.attempts.abort(value.binding);
   }
 }
