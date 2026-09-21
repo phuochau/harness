@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { generateKeyPairSync, verify as cryptoVerify } from "node:crypto";
+import { createPublicKey, generateKeyPairSync, verify as cryptoVerify } from "node:crypto";
 import { link, lstat, mkdir, open, readFile, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,6 +25,7 @@ const ATTEMPT_TOKEN_ENV = "PI_HARNESS_ATTEMPT_TOKEN";
 export interface PiProcessSupervisorDependencies {
   readonly identity?: ProcessIdentityPort;
   readonly signalProcess?: (pid: number, signal: NodeJS.Signals) => void;
+  readonly inspectProcessGroup?: (processGroupId: number) => boolean;
   readonly sleep?: (milliseconds: number) => Promise<void>;
   readonly now?: () => Date;
 }
@@ -179,6 +180,8 @@ function assertMatchingRecord(record: PiProcessRecord, spec: PiLaunchSpec): void
     record.argvHash !== sha256(JSON.stringify(spec.argv))
     || typeof record.receiptPublicKey !== "string"
     || record.receiptPublicKey.length === 0
+    || (spec.receiptPublicKey !== undefined &&
+      record.receiptPublicKey !== spec.receiptPublicKey)
     || record.providerPath !== join(dirname(record.recordPath), "provider.json")
   ) {
     throw new Error(`durable Pi process record does not match attempt ${spec.attemptId}`);
@@ -223,6 +226,46 @@ function defaultSignalProcess(pid: number, signal: NodeJS.Signals): void {
       }
     }
   }
+}
+
+function defaultInspectProcessGroup(processGroupId: number): boolean {
+  try {
+    process.kill(-processGroupId, 0);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ESRCH") return false;
+    if (code === "EPERM") return true;
+    throw error;
+  }
+}
+
+async function consumeReceiptPrivateKey(spec: PiLaunchSpec): Promise<string> {
+  if ((spec.receiptPrivateKeyPath === undefined) !== (spec.receiptPublicKey === undefined)) {
+    throw new Error("Pi receipt public and private keys must be prepared together");
+  }
+  if (spec.receiptPrivateKeyPath === undefined || spec.receiptPublicKey === undefined) {
+    const { privateKey } = generateKeyPairSync("ed25519");
+    return privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+  }
+  const info = await lstat(spec.receiptPrivateKeyPath);
+  if (info.isSymbolicLink() || !info.isFile() || info.size > 16 * 1024) {
+    throw new Error("Pi receipt private key is not a bounded regular file");
+  }
+  const privateKey = await readFile(spec.receiptPrivateKeyPath, "utf8");
+  const derivedPublicKey = createPublicKey(privateKey)
+    .export({ type: "spki", format: "pem" }).toString();
+  if (derivedPublicKey !== spec.receiptPublicKey) {
+    throw new Error("Pi receipt private key does not match the prepared public key");
+  }
+  await unlink(spec.receiptPrivateKeyPath);
+  const directory = await open(dirname(spec.receiptPrivateKeyPath), "r");
+  try {
+    await directory.sync();
+  } finally {
+    await directory.close();
+  }
+  return privateKey;
 }
 
 async function readEventRecords(eventsPath: string) {
@@ -299,12 +342,14 @@ function abortPromise(signal: AbortSignal): Promise<never> {
 export class NodePiProcessSupervisor implements PiProcessSupervisor {
   private readonly identity: ProcessIdentityPort;
   private readonly signalProcess: (pid: number, signal: NodeJS.Signals) => void;
+  private readonly inspectProcessGroup: (processGroupId: number) => boolean;
   private readonly sleep: (milliseconds: number) => Promise<void>;
   private readonly owned = new Map<string, OwnedProcess>();
 
   public constructor(dependencies: PiProcessSupervisorDependencies = {}) {
     this.identity = dependencies.identity ?? new SystemProcessIdentity();
     this.signalProcess = dependencies.signalProcess ?? defaultSignalProcess;
+    this.inspectProcessGroup = dependencies.inspectProcessGroup ?? defaultInspectProcessGroup;
     this.sleep = dependencies.sleep ?? delay;
   }
 
@@ -337,6 +382,9 @@ export class NodePiProcessSupervisor implements PiProcessSupervisor {
       providerPath,
       exitPath: join(controlDir, "exit.json"),
       stdinPath,
+      ...(spec.receiptPublicKey === undefined
+        ? {}
+        : { receiptPublicKey: spec.receiptPublicKey }),
     };
     await Promise.all([
       open(eventsPath, "a", 0o600).then((file) => file.close()),
@@ -351,7 +399,13 @@ export class NodePiProcessSupervisor implements PiProcessSupervisor {
     await durableCreateBytes(stdinPath, spec.stdin ?? new Uint8Array());
     const launchCreated = await durableCreate(launchPath, launchIntent);
     if (!launchCreated) {
-      const existing = await readProcessRecord(recordPath);
+      let existing = await readProcessRecord(recordPath);
+      if (spec.receiptPrivateKeyPath !== undefined) {
+        for (let attempt = 0; attempt < 100 && existing === undefined; attempt += 1) {
+          await this.sleep(10);
+          existing = await readProcessRecord(recordPath);
+        }
+      }
       if (existing !== undefined) {
         assertMatchingRecord(existing, spec);
         return existing;
@@ -360,9 +414,8 @@ export class NodePiProcessSupervisor implements PiProcessSupervisor {
       // an unclaimed launch is safe: concurrent monitors race that atomic
       // claim and only the winner can spawn a provider.
     }
+    const receiptPrivateKey = await consumeReceiptPrivateKey(spec);
     const events = await open(eventsPath, "a", 0o600);
-    const { privateKey } = generateKeyPairSync("ed25519");
-    const receiptPrivateKey = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
     const child = spawn(process.execPath, [monitorPath, launchPath], {
       cwd: spec.cwd,
       env: { ...spec.env, [ATTEMPT_TOKEN_ENV]: spec.attemptToken },
@@ -535,13 +588,15 @@ export class NodePiProcessSupervisor implements PiProcessSupervisor {
           provider.pid,
           provider.attemptToken,
         );
-        if (providerIdentity === undefined) break;
-        const providerMismatch = providerIdentityMismatchEvidence(providerIdentity, provider);
-        if (providerMismatch.length > 0) {
-          throw new Error(
-            `Refusing to signal provider process: identity mismatch (${providerMismatch.join(", ")})`,
-          );
+        if (providerIdentity !== undefined) {
+          const providerMismatch = providerIdentityMismatchEvidence(providerIdentity, provider);
+          if (providerMismatch.length > 0) {
+            throw new Error(
+              `Refusing to signal provider process: identity mismatch (${providerMismatch.join(", ")})`,
+            );
+          }
         }
+        if (!this.inspectProcessGroup(record.pid)) break;
         this.signalProcess(record.pid, "SIGKILL");
         sent.push("SIGKILL");
         break;
@@ -566,7 +621,8 @@ export class NodePiProcessSupervisor implements PiProcessSupervisor {
           identityMismatchEvidence(observed, record).length > 0;
         const providerGone = provider === undefined || providerIdentity === undefined ||
           providerIdentityMismatchEvidence(providerIdentity, provider).length > 0;
-        if (monitorGone && providerGone) {
+        const processGroupGone = !this.inspectProcessGroup(record.pid);
+        if (monitorGone && providerGone && processGroupGone) {
           terminated = true;
           break;
         }

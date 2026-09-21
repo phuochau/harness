@@ -1,4 +1,5 @@
-import { lstat, readFile } from "node:fs/promises";
+import { createPublicKey, generateKeyPairSync, randomUUID } from "node:crypto";
+import { link, lstat, mkdir, open, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { EffectIntent, ReconcileResult } from "../../actions/types.js";
 import type { ResolvedProfile, ResolvedProfiles } from "../../config/profiles.js";
@@ -86,6 +87,47 @@ function attemptControlDir(processRoot: string, attemptId: string): string {
   return join(processRoot, sha256(attemptId).slice("sha256:".length));
 }
 
+async function prepareReceiptKey(controlDir: string): Promise<{
+  receiptPrivateKeyPath: string;
+  receiptPublicKey: string;
+}> {
+  await mkdir(controlDir, { recursive: true, mode: 0o700 });
+  const receiptPrivateKeyPath = join(controlDir, "receipt-private.pem");
+  const { privateKey: generated } = generateKeyPairSync("ed25519");
+  const generatedKey = generated.export({ type: "pkcs8", format: "pem" }).toString();
+  const temporary = `${receiptPrivateKeyPath}.tmp-${process.pid}-${randomUUID()}`;
+  const file = await open(temporary, "wx", 0o600);
+  try {
+    await file.writeFile(generatedKey, "utf8");
+    await file.sync();
+  } finally {
+    await file.close();
+  }
+  try {
+    try {
+      await link(temporary, receiptPrivateKeyPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+    const directory = await open(controlDir, "r");
+    try {
+      await directory.sync();
+    } finally {
+      await directory.close();
+    }
+  } finally {
+    await unlink(temporary).catch(() => undefined);
+  }
+  const info = await lstat(receiptPrivateKeyPath);
+  if (info.isSymbolicLink() || !info.isFile() || info.size > 16 * 1024) {
+    throw new Error("prepared Pi receipt private key is not a bounded regular file");
+  }
+  const privateKey = await readFile(receiptPrivateKeyPath, "utf8");
+  const receiptPublicKey = createPublicKey(privateKey)
+    .export({ type: "spki", format: "pem" }).toString();
+  return { receiptPrivateKeyPath, receiptPublicKey };
+}
+
 function parsePrepared(
   value: PreparedWorkerAttempt,
   profiles: ResolvedProfiles,
@@ -107,6 +149,12 @@ function parsePrepared(
     parsed.launch.attemptId !== parsed.attemptId ||
     parsed.launch.cwd !== parsed.binding.path ||
     parsed.launch.controlDir !== attemptControlDir(processRoot, parsed.attemptId) ||
+    parsed.launch.receiptPrivateKeyPath !== join(
+      attemptControlDir(processRoot, parsed.attemptId),
+      "receipt-private.pem",
+    ) ||
+    typeof parsed.launch.receiptPublicKey !== "string" ||
+    parsed.launch.receiptPublicKey.length === 0 ||
     !parsed.resultPath.startsWith(`${parsed.binding.path}/.harness-output/`) ||
     parsed.launch.controlDir.startsWith(`${parsed.binding.path}/`)
   ) throw new Error("persisted Pi worker attempt identity mismatch");
@@ -143,6 +191,7 @@ function validateProcessRecord(
     typeof value.eventsPath !== "string" || typeof value.stderrPath !== "string" ||
     typeof value.recordPath !== "string" || typeof value.providerPath !== "string" ||
     typeof value.receiptPublicKey !== "string" || typeof value.startedAt !== "string" ||
+    value.receiptPublicKey !== prepared.launch.receiptPublicKey ||
     value.recordPath !== join(prepared.launch.controlDir ?? prepared.launch.sessionDir, "process.json") ||
     value.providerPath !== join(prepared.launch.controlDir ?? prepared.launch.sessionDir, "provider.json") ||
     value.eventsPath !== join(prepared.launch.controlDir ?? prepared.launch.sessionDir, "events.jsonl") ||
@@ -172,9 +221,12 @@ export class ProductionPiWorkerRuntime implements ProductionWorkerRuntime {
   ): Promise<PreparedWorkerAttempt> {
     const { assignment, binding } = await this.options.attempts.prepare(intent);
     const prepared = await this.options.runtime.prepare(assignment);
+    const controlDir = attemptControlDir(this.options.processRoot, prepared.attemptId);
+    const receiptKey = await prepareReceiptKey(controlDir);
     const launch = {
       ...prepared.launch,
-      controlDir: attemptControlDir(this.options.processRoot, prepared.attemptId),
+      controlDir,
+      ...receiptKey,
     };
     await this.options.attempts.stagePrompt(binding, prepared.prompt);
     return structuredClone({

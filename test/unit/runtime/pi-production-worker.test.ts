@@ -1,4 +1,5 @@
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { createPublicKey } from "node:crypto";
+import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -111,9 +112,16 @@ async function fixture() {
       sessionDir: process.sessionDir,
     },
   };
+  const bindProcess = (value: any): PiProcessRecord => ({
+    ...process,
+    receiptPublicKey: value.launch.receiptPublicKey,
+  });
   const pi = {
     prepare: vi.fn(async () => prepared),
-    launch: vi.fn(async () => ({ attemptId: process.attemptId, process })),
+    launch: vi.fn(async (value: any) => ({
+      attemptId: process.attemptId,
+      process: bindProcess(value),
+    })),
     collect: vi.fn(async () => ({ status: "valid" as const, result })),
     recover: vi.fn(async () => ({
       status: "running" as const,
@@ -136,6 +144,7 @@ async function fixture() {
     result,
     intent,
     process,
+    bindProcess,
     pi,
     attempts,
     records,
@@ -154,7 +163,9 @@ it("launches one durable Pi process and accepts its structured result", async ()
   const prepared = await value.runtime.prepare(value.intent);
   await expect(value.runtime.execute(prepared, value.intent)).resolves.toEqual(value.result);
   expect(value.pi.launch).toHaveBeenCalledOnce();
-  await expect(value.records.getPiProcess(value.process.attemptId)).resolves.toEqual(value.process);
+  await expect(value.records.getPiProcess(value.process.attemptId)).resolves.toEqual(
+    value.bindProcess(prepared),
+  );
   expect(value.attempts.accept).toHaveBeenCalledWith(
     value.assignment,
     value.result,
@@ -167,7 +178,7 @@ it("launches one durable Pi process and accepts its structured result", async ()
 it("reattaches to a durable process without a second launch", async () => {
   const value = await fixture();
   const prepared = await value.runtime.prepare(value.intent);
-  await value.records.putPiProcess(value.process);
+  await value.records.putPiProcess(value.bindProcess(prepared));
   await expect(value.runtime.reconcile(prepared, value.intent)).resolves.toEqual({
     status: "observed",
     output: value.result,
@@ -196,10 +207,34 @@ it("rejects a persisted attempt whose controller directory was redirected", asyn
   expect(value.pi.launch).not.toHaveBeenCalled();
 });
 
+it("binds the receipt public key in controller-owned prepared state", async () => {
+  const value = await fixture();
+  const prepared = await value.runtime.prepare(value.intent) as any;
+  const privateKey = await readFile(prepared.launch.receiptPrivateKeyPath, "utf8");
+  expect(prepared.launch.receiptPrivateKeyPath).toBe(
+    join(prepared.launch.controlDir, "receipt-private.pem"),
+  );
+  expect(createPublicKey(privateKey).export({ type: "spki", format: "pem" }).toString())
+    .toBe(prepared.launch.receiptPublicKey);
+});
+
+it("rejects a recovery record signed under a replacement trust root", async () => {
+  const value = await fixture();
+  const prepared = await value.runtime.prepare(value.intent) as any;
+  await value.records.putPiProcess({
+    ...value.bindProcess(prepared),
+    receiptPublicKey: "attacker-controlled-public-key",
+  });
+  await expect(value.runtime.reconcile(prepared, value.intent)).rejects.toThrow(
+    "invalid or mismatched Pi process record",
+  );
+  expect(value.pi.recover).not.toHaveBeenCalled();
+});
+
 it("does not signal a process that has already completed during cancellation", async () => {
   const value = await fixture();
   const prepared = await value.runtime.prepare(value.intent);
-  await value.records.putPiProcess(value.process);
+  await value.records.putPiProcess(value.bindProcess(prepared));
   (value.pi.observe as any).mockResolvedValueOnce({
     status: "exited",
     exit: {

@@ -15,6 +15,9 @@ const receiptPrivateKey = readFileSync(0, "utf8");
 if (!receiptPrivateKey) throw new Error("missing receipt signing key");
 const receiptPublicKey = createPublicKey(receiptPrivateKey)
   .export({ type: "spki", format: "pem" }).toString();
+if (launch.receiptPublicKey !== undefined && launch.receiptPublicKey !== receiptPublicKey) {
+  throw new Error("receipt signing key does not match durable launch intent");
+}
 // The monitor owns escalation. Group signals normally reach both processes;
 // direct-signal fallbacks are forwarded to the provider while the monitor
 // remains alive to persist its exit receipt.

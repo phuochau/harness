@@ -38,6 +38,8 @@ export interface PiLaunchSpec {
   readonly sessionId: string;
   readonly sessionDir: string;
   readonly controlDir?: string;
+  readonly receiptPublicKey?: string;
+  readonly receiptPrivateKeyPath?: string;
   readonly stdin?: Uint8Array;
 }
 

@@ -63,11 +63,14 @@ export function supervisorFixture(input: {
     },
   );
   const signals: string[] = [];
+  let processGroupAlive = true;
   const dependencies: PiProcessSupervisorDependencies = {
     identity,
     signalProcess: (_pid, signal) => {
       signals.push(signal);
+      if (signal === "SIGKILL") processGroupAlive = false;
     },
+    inspectProcessGroup: () => processGroupAlive,
     sleep: async () => undefined,
     now: () => new Date("2026-09-21T00:00:00.000Z"),
   };

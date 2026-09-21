@@ -1,3 +1,4 @@
+import { generateKeyPairSync } from "node:crypto";
 import { access, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -238,6 +239,37 @@ describe("durable Pi process transport", () => {
     await supervisor.cancel(record, 25);
   });
 
+  it("uses and removes the controller-prepared receipt signing key", async () => {
+    const root = await temporaryDirectory();
+    const controlDir = join(root, "control");
+    await mkdir(controlDir);
+    const receiptPrivateKeyPath = join(controlDir, "receipt-private.pem");
+    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+    const receiptPublicKey = publicKey.export({ type: "spki", format: "pem" }).toString();
+    await writeFile(
+      receiptPrivateKeyPath,
+      privateKey.export({ type: "pkcs8", format: "pem" }),
+      { mode: 0o600 },
+    );
+    const supervisor = new NodePiProcessSupervisor();
+    const record = await supervisor.launch({
+      attemptId: "attempt-bound-key",
+      attemptToken: "token-bound-key",
+      executable: process.execPath,
+      argv: ["-e", "setTimeout(() => {}, 10000)"],
+      cwd: root,
+      env: {},
+      sessionId: "session-bound-key",
+      sessionDir: join(root, "session"),
+      controlDir,
+      receiptPrivateKeyPath,
+      receiptPublicKey,
+    });
+    expect(record.receiptPublicKey).toBe(receiptPublicKey);
+    await expect(access(receiptPrivateKeyPath)).rejects.toMatchObject({ code: "ENOENT" });
+    await supervisor.cancel(record, 25);
+  });
+
   it("rejects a provider-forged exit receipt instead of masking failure", async () => {
     const root = await temporaryDirectory();
     const controlDir = join(root, "control");
@@ -294,6 +326,39 @@ describe("durable Pi process transport", () => {
     expect(evidence.signals).toEqual(["SIGKILL"]);
     expect(() => process.kill(providerPid, 0)).toThrow();
     await monitorExit;
+  });
+
+  it("kills surviving descendants after the direct provider exits", async () => {
+    const root = await temporaryDirectory();
+    const pidPath = join(root, "descendant.pid");
+    const script = [
+      "const {spawn}=require('node:child_process')",
+      `const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'})`,
+      `require('node:fs').writeFileSync(${JSON.stringify(pidPath)},String(child.pid))`,
+      "child.unref()",
+    ].join(";");
+    const supervisor = new NodePiProcessSupervisor();
+    const record = await supervisor.launch({
+      attemptId: "attempt-descendant",
+      attemptToken: "token-descendant",
+      executable: process.execPath,
+      argv: ["-e", script],
+      cwd: root,
+      env: {},
+      sessionId: "session-descendant",
+      sessionDir: join(root, "session"),
+      controlDir: join(root, "control"),
+    });
+    await waitFor(pidPath);
+    const descendantPid = Number(await readFile(pidPath, "utf8"));
+    try {
+      await supervisor.wait(record, AbortSignal.timeout(5_000));
+      const evidence = await new NodePiProcessSupervisor().cancel(record, 25);
+      expect(evidence.signals).toEqual(["SIGKILL"]);
+      expect(() => process.kill(descendantPid, 0)).toThrow();
+    } finally {
+      try { process.kill(descendantPid, "SIGKILL"); } catch {}
+    }
   });
 
   it("escalates through SIGKILL when a provider traps graceful signals", async () => {
