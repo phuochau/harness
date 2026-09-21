@@ -60,9 +60,9 @@ export interface ComposeProductionRunOptions {
   readonly ownerId?: string;
   readonly workerRuntime?: ProductionWorkerRuntime;
   readonly piWorkerRuntime?: PiWorkerRuntime;
+  readonly managedPiRuntime?: ManagedPiRuntimeBundle;
   readonly process?: ProcessRunner;
   readonly planningAgent?: PlanningAgent;
-  readonly managedPiRuntime?: ManagedPiRuntimeBundle;
 }
 
 export interface StandaloneProductionEffects {
@@ -122,6 +122,41 @@ const unavailableWorkerRuntime: ProductionWorkerRuntime = {
   },
 };
 
+function managedPlanningAgent(input: {
+  readonly workflow: CompiledWorkflow;
+  readonly runtime: ManagedPiRuntimeBundle;
+  readonly root: string;
+  readonly sessionRoot: string;
+  readonly sealer: ProductionPlanningArtifactSealer;
+}): PlanningAgent {
+  const routes: Record<string, string> = {};
+  const ports: Record<string, ChildPiPlanningPort> = {};
+  for (const stage of input.workflow.stages.filter((stage) => stage.uses.startsWith("spec-kit."))) {
+    const runner = stage.runner;
+    const profileId = typeof runner === "string" ? runner : runner?.prefer[0];
+    if (profileId === undefined) throw new Error(`planning stage ${stage.id} has no profile`);
+    routes[stage.uses.slice("spec-kit.".length)] = profileId;
+    if (ports[profileId] !== undefined) continue;
+    const profile = input.workflow.profiles.byId[profileId];
+    const managed = input.runtime.managedProfiles[profileId];
+    if (profile === undefined || managed === undefined) {
+      throw new Error(`managed planning profile is unavailable: ${profileId}`);
+    }
+    ports[profileId] = new ChildPiPlanningPort({
+      root: input.root,
+      profile,
+      managed,
+      supervisor: input.runtime.supervisor,
+      piExecutable: input.runtime.piExecutable,
+      piExecutableArgs: input.runtime.piExecutableArgs,
+      transportExtensionPath: input.runtime.transportExtensionPath,
+      sessionRoot: input.sessionRoot,
+      sealer: input.sealer,
+    });
+  }
+  return new RoutedChildPiPlanningPort(routes, ports);
+}
+
 export async function composeProductionRun(
   options: ComposeProductionRunOptions,
 ): Promise<ProductionRunSystem> {
@@ -167,31 +202,13 @@ export async function composeProductionRun(
     );
     let planning = options.planningAgent;
     if (planning === undefined && options.managedPiRuntime !== undefined) {
-      const routes: Record<string, string> = {};
-      const ports: Record<string, ChildPiPlanningPort> = {};
-      for (const stage of workflow.stages.filter((stage) => stage.uses.startsWith("spec-kit."))) {
-        const runner = stage.runner;
-        const profileId = typeof runner === "string" ? runner : runner?.prefer[0];
-        if (profileId === undefined) throw new Error(`planning stage ${stage.id} has no profile`);
-        routes[stage.uses.slice("spec-kit.".length)] = profileId;
-        if (ports[profileId] === undefined) {
-          const profile = workflow.profiles.byId[profileId];
-          const managed = options.managedPiRuntime.managedProfiles[profileId];
-          if (profile === undefined || managed === undefined) throw new Error(`managed planning profile is unavailable: ${profileId}`);
-          ports[profileId] = new ChildPiPlanningPort({
-            root: planningBinding.path,
-            profile,
-            managed,
-            supervisor: options.managedPiRuntime.supervisor,
-            piExecutable: options.managedPiRuntime.piExecutable,
-            piExecutableArgs: options.managedPiRuntime.piExecutableArgs,
-            transportExtensionPath: options.managedPiRuntime.transportExtensionPath,
-            sessionRoot: join(initialized.paths.workers, initialized.manifest.runId, "planning-sessions"),
-            sealer,
-          });
-        }
-      }
-      planning = new RoutedChildPiPlanningPort(routes, ports);
+      planning = managedPlanningAgent({
+        workflow,
+        runtime: options.managedPiRuntime,
+        root: planningBinding.path,
+        sessionRoot: join(initialized.paths.workers, initialized.manifest.runId, "planning-sessions"),
+        sealer,
+      });
     }
     if (planning === undefined) {
       const planningPort = new PiSessionPlanningPort(options.pi, options.context);
@@ -317,6 +334,7 @@ export async function createStandaloneProductionEffects(input: {
   readonly commands: Readonly<Record<string, readonly string[]>>;
   readonly workerRuntime?: ProductionWorkerRuntime;
   readonly piWorkerRuntime?: PiWorkerRuntime;
+  readonly managedPiRuntime?: ManagedPiRuntimeBundle;
 }): Promise<StandaloneProductionEffects> {
   const paths = await resolveRunPaths(input.root, input.runId);
   const manifest = await readRunManifest(paths.manifest);
@@ -357,16 +375,41 @@ export async function createStandaloneProductionEffects(input: {
     taskVerification: [input.commands.task_verify ?? []].filter((argv) => argv.length > 0),
     profiles: input.workflow.profiles,
   });
+  const effectivePiRuntime = input.piWorkerRuntime ?? input.managedPiRuntime?.workerRuntime;
   const workerRuntime = input.workerRuntime ?? (
-    input.piWorkerRuntime === undefined
+    effectivePiRuntime === undefined
       ? unavailableWorkerRuntime
       : new ProductionPiWorkerRuntime({
-          runtime: input.piWorkerRuntime,
+          runtime: effectivePiRuntime,
           profiles: input.workflow.profiles,
           attempts,
           records,
         })
   );
+  const planningSealer = new ProductionPlanningArtifactSealer(
+    manifest,
+    planningBinding,
+    worktrees,
+    git,
+  );
+  const planning: PlanningAgent = input.managedPiRuntime === undefined
+    ? {
+        enqueue: async () => {
+          throw new Error("standalone recovery cannot dispatch a Pi planning turn");
+        },
+        observe: async () => ({
+          status: "blocked" as const,
+          reason: "standalone recovery requires the managed Pi planning runtime",
+          evidence: [manifest.runId],
+        }),
+      }
+    : managedPlanningAgent({
+        workflow: input.workflow,
+        runtime: input.managedPiRuntime,
+        root: planningBinding.path,
+        sessionRoot: join(paths.workers, manifest.runId, "planning-sessions"),
+        sealer: planningSealer,
+      });
   const registry = createProductionActionRegistry({
     manifest,
     repository,
@@ -375,16 +418,7 @@ export async function createStandaloneProductionEffects(input: {
     readState,
     tasksSemanticHash: () => graph.graph.tasksSemanticHash,
     planningRoot: planningBinding.path,
-    planning: {
-      enqueue: async () => {
-        throw new Error("standalone recovery cannot dispatch a Pi planning turn");
-      },
-      observe: async () => ({
-        status: "blocked",
-        reason: "standalone recovery requires the original Pi session for planning",
-        evidence: [manifest.runId],
-      }),
-    },
+    planning,
     workerRuntime,
     verificationObservations: new JournalVerificationObservations(journal),
   });

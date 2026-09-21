@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { link, mkdir, open, readFile, unlink } from "node:fs/promises";
+import { link, lstat, mkdir, open, readFile, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { sha256 } from "../../shared/sha256.js";
 import { PiEventStreamParser, reducePiEvents } from "./events.js";
 import {
@@ -35,27 +36,88 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function durableCreate(path: string, value: unknown): Promise<void> {
+async function durableCreate(path: string, value: unknown): Promise<boolean> {
   const directory = dirname(path);
   await mkdir(directory, { recursive: true, mode: 0o700 });
+  const serialized = `${JSON.stringify(value)}\n`;
   const temporary = `${path}.tmp-${process.pid}-${crypto.randomUUID()}`;
   const file = await open(temporary, "wx", 0o600);
   try {
-    await file.writeFile(`${JSON.stringify(value)}\n`, "utf8");
+    await file.writeFile(serialized, "utf8");
     await file.sync();
   } finally {
     await file.close();
   }
   try {
-    await link(temporary, path);
+    try {
+      await link(temporary, path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      if (await readFile(path, "utf8") !== serialized) {
+        throw new Error(`durable launch conflict at ${path}`);
+      }
+      return false;
+    }
     const directoryHandle = await open(directory, "r");
     try {
       await directoryHandle.sync();
     } finally {
       await directoryHandle.close();
     }
+    return true;
   } finally {
     await unlink(temporary).catch(() => undefined);
+  }
+}
+
+async function durableCreateBytes(path: string, value: Uint8Array): Promise<boolean> {
+  const directory = dirname(path);
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  try {
+    const file = await open(path, "wx", 0o600);
+    try {
+      await file.writeFile(value);
+      await file.sync();
+    } finally {
+      await file.close();
+    }
+    const directoryHandle = await open(directory, "r");
+    try {
+      await directoryHandle.sync();
+    } finally {
+      await directoryHandle.close();
+    }
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    const existing = await readFile(path);
+    if (!existing.equals(Buffer.from(value))) {
+      throw new Error(`durable launch conflict at ${path}`);
+    }
+    return false;
+  }
+}
+
+async function readProcessRecord(path: string): Promise<PiProcessRecord | undefined> {
+  try {
+    return JSON.parse(await readFile(path, "utf8")) as PiProcessRecord;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+function assertMatchingRecord(record: PiProcessRecord, spec: PiLaunchSpec): void {
+  if (
+    record.schemaVersion !== 1 ||
+    record.attemptId !== spec.attemptId ||
+    record.attemptToken !== spec.attemptToken ||
+    record.sessionId !== spec.sessionId ||
+    record.sessionDir !== spec.sessionDir ||
+    record.cwd !== spec.cwd ||
+    record.argvHash !== sha256(JSON.stringify(spec.argv))
+  ) {
+    throw new Error(`durable Pi process record does not match attempt ${spec.attemptId}`);
   }
 }
 
@@ -83,23 +145,35 @@ async function terminalFromFile(eventsPath: string) {
   return reducePiEvents(await readEventRecords(eventsPath)).terminal;
 }
 
-function isAcceptedTerminal(terminal: Awaited<ReturnType<typeof terminalFromFile>>): boolean {
-  return terminal.settled && terminal.acceptedStopReason && terminal.completeToolResults;
-}
-
 async function processExitFromFile(
-  eventsPath: string,
+  sessionDir: string,
 ): Promise<{ exitCode: number | null; signal: NodeJS.Signals | null } | undefined> {
-  const records = await readEventRecords(eventsPath);
-  for (let index = records.length - 1; index >= 0; index -= 1) {
-    const event = records[index]?.event;
-    if (event?.type !== "process_exit") continue;
+  try {
+    const path = join(sessionDir, "exit.json");
+    const info = await lstat(path);
+    if (info.isSymbolicLink() || !info.isFile() || info.size > 4 * 1024) {
+      throw new Error("durable Pi process exit record is not a bounded regular file");
+    }
+    const value: unknown = JSON.parse(await readFile(path, "utf8"));
+    if (
+      typeof value !== "object" || value === null || Array.isArray(value) ||
+      !Object.prototype.hasOwnProperty.call(value, "exitCode") ||
+      !Object.prototype.hasOwnProperty.call(value, "signal") ||
+      ((value as { exitCode?: unknown }).exitCode !== null &&
+        typeof (value as { exitCode?: unknown }).exitCode !== "number") ||
+      ((value as { signal?: unknown }).signal !== null &&
+        typeof (value as { signal?: unknown }).signal !== "string")
+    ) {
+      throw new Error("invalid durable Pi process exit record");
+    }
     return {
-      exitCode: typeof event.exitCode === "number" ? event.exitCode : null,
-      signal: typeof event.signal === "string" ? event.signal as NodeJS.Signals : null,
+      exitCode: (value as { exitCode: number | null }).exitCode,
+      signal: (value as { signal: NodeJS.Signals | null }).signal,
     };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
   }
-  return undefined;
 }
 
 function abortPromise(signal: AbortSignal): Promise<never> {
@@ -120,14 +194,12 @@ export class NodePiProcessSupervisor implements PiProcessSupervisor {
   private readonly identity: ProcessIdentityPort;
   private readonly signalProcess: (pid: number, signal: NodeJS.Signals) => void;
   private readonly sleep: (milliseconds: number) => Promise<void>;
-  private readonly now: () => Date;
   private readonly owned = new Map<string, OwnedProcess>();
 
   public constructor(dependencies: PiProcessSupervisorDependencies = {}) {
     this.identity = dependencies.identity ?? new SystemProcessIdentity();
     this.signalProcess = dependencies.signalProcess ?? defaultSignalProcess;
     this.sleep = dependencies.sleep ?? delay;
-    this.now = dependencies.now ?? (() => new Date());
   }
 
   public async launch(spec: PiLaunchSpec): Promise<PiProcessRecord> {
@@ -135,73 +207,83 @@ export class NodePiProcessSupervisor implements PiProcessSupervisor {
     const eventsPath = join(spec.sessionDir, "events.jsonl");
     const stderrPath = join(spec.sessionDir, "stderr.log");
     const recordPath = join(spec.sessionDir, "process.json");
+    const launchPath = join(spec.sessionDir, "launch.json");
+    const stdinPath = join(spec.sessionDir, "stdin.bin");
+    const monitorPath = fileURLToPath(
+      new URL("../../../bin/pi-process-monitor.mjs", import.meta.url),
+    );
+    const launchIntent = {
+      schemaVersion: 1,
+      attemptId: spec.attemptId,
+      executable: spec.executable,
+      argv: [...spec.argv],
+      cwd: spec.cwd,
+      sessionId: spec.sessionId,
+      sessionDir: spec.sessionDir,
+      eventsPath,
+      stderrPath,
+      recordPath,
+      exitPath: join(spec.sessionDir, "exit.json"),
+      stdinPath,
+    };
     await Promise.all([
       open(eventsPath, "a", 0o600).then((file) => file.close()),
       open(stderrPath, "a", 0o600).then((file) => file.close()),
-      durableCreate(join(spec.sessionDir, "session.json"), {
+    ]);
+    await durableCreate(join(spec.sessionDir, "session.json"), {
         schemaVersion: 1,
         attemptId: spec.attemptId,
         attemptToken: spec.attemptToken,
         sessionId: spec.sessionId,
-      }),
-    ]);
-
+    });
+    await durableCreateBytes(stdinPath, spec.stdin ?? new Uint8Array());
+    const launchCreated = await durableCreate(launchPath, launchIntent);
+    if (!launchCreated) {
+      const existing = await readProcessRecord(recordPath);
+      if (existing === undefined) {
+        throw new Error(
+          `indeterminate durable launch for attempt ${spec.attemptId}; refusing duplicate spawn`,
+        );
+      }
+      assertMatchingRecord(existing, spec);
+      return existing;
+    }
     const events = await open(eventsPath, "a", 0o600);
-    const diagnostics = await open(stderrPath, "a", 0o600);
-    const child = spawn(spec.executable, [...spec.argv], {
+    const child = spawn(process.execPath, [monitorPath, launchPath], {
       cwd: spec.cwd,
       env: { ...spec.env, [ATTEMPT_TOKEN_ENV]: spec.attemptToken },
       shell: false,
       detached: true,
-      // Child-owned output descriptors keep the attempt alive if the
-      // controller process crashes. Diagnostics are suppressed because an
-      // unredacted provider stderr stream may contain credentials.
-      stdio: ["pipe", events.fd, "ignore"],
+      // The detached monitor owns the Pi child and durable exit evidence.
+      // Provider stderr stays suppressed because it can contain credentials.
+      stdio: ["ignore", events.fd, "ignore"],
     });
     if (child.pid === undefined) throw new Error("Pi process did not receive a pid");
     const pid = child.pid;
-    try {
-      this.signalProcess(pid, "SIGSTOP");
-      const observed = await this.identity.capture(pid, spec.executable, spec.attemptToken);
-      const record: PiProcessRecord = {
-        schemaVersion: 1,
-        attemptId: spec.attemptId,
-        attemptToken: spec.attemptToken,
-        executable: observed.executable,
-        argvHash: sha256(JSON.stringify(spec.argv)),
-        cwd: spec.cwd,
-        pid,
-        startIdentity: observed.startIdentity,
-        sessionId: spec.sessionId,
-        sessionDir: spec.sessionDir,
-        eventsPath,
-        stderrPath,
-        recordPath,
-        startedAt: this.now().toISOString(),
-      };
-      await durableCreate(recordPath, record);
-
-      const exit = new Promise<PiProcessExit>((resolve, reject) => {
-        child.once("error", reject);
-        child.once("close", (exitCode, signal) => {
-          void (async () => {
-            await events.write(
-              `${JSON.stringify({ type: "process_exit", exitCode, signal })}\n`,
-              undefined,
-              "utf8",
-            );
-            await Promise.all([events.sync(), diagnostics.sync()]);
-            await Promise.all([events.close(), diagnostics.close()]);
-            const result = { exitCode, signal, terminal: await terminalFromFile(eventsPath) };
-            this.owned.delete(record.attemptId);
-            resolve(result);
-          })().catch(reject);
-        });
+    const exit = new Promise<PiProcessExit>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", (exitCode, signal) => {
+        void (async () => {
+          await events.close();
+          const persisted = await processExitFromFile(spec.sessionDir);
+          const result = persisted ?? { exitCode, signal };
+          this.owned.delete(spec.attemptId);
+          resolve({ ...result, terminal: await terminalFromFile(eventsPath) });
+        })().catch(reject);
       });
+    });
+    try {
+      let record: PiProcessRecord | undefined;
+      for (let attempt = 0; attempt < 100 && record === undefined; attempt += 1) {
+        record = await readProcessRecord(recordPath);
+        if (record === undefined) await this.sleep(50);
+      }
+      if (record === undefined) {
+        throw new Error(`Pi process monitor did not persist identity for attempt ${spec.attemptId}`);
+      }
+      assertMatchingRecord(record, spec);
+      if (record.pid !== pid) throw new Error("Pi process monitor pid does not match spawned pid");
       this.owned.set(record.attemptId, { child, exit });
-      this.signalProcess(pid, "SIGCONT");
-      if (spec.stdin !== undefined) child.stdin?.end(spec.stdin);
-      else child.stdin?.end();
       return record;
     } catch (error) {
       try {
@@ -209,17 +291,20 @@ export class NodePiProcessSupervisor implements PiProcessSupervisor {
       } catch {
         // Preserve the launch error.
       }
-      await Promise.all([events.close(), diagnostics.close()]);
+      await events.close();
       throw error;
     }
   }
 
   public async observe(record: PiProcessRecord): Promise<PiProcessObservation> {
     const owned = this.owned.get(record.attemptId);
-    if (owned !== undefined && owned.child.exitCode !== null) {
+    if (
+      owned !== undefined &&
+      (owned.child.exitCode !== null || owned.child.signalCode !== null)
+    ) {
       return { status: "exited", exit: await owned.exit };
     }
-    const persistedExit = await processExitFromFile(record.eventsPath);
+    const persistedExit = await processExitFromFile(record.sessionDir);
     if (persistedExit !== undefined) {
       return {
         status: "exited",
@@ -233,17 +318,7 @@ export class NodePiProcessSupervisor implements PiProcessSupervisor {
         if (observed.stopped === true) this.signalProcess(record.pid, "SIGCONT");
         return { status: "running", record };
       }
-      const terminal = await terminalFromFile(record.eventsPath);
-      return isAcceptedTerminal(terminal)
-        ? { status: "exited", exit: { exitCode: null, signal: null, terminal } }
-        : { status: "identity_mismatch", evidence };
-    }
-    const terminal = await terminalFromFile(record.eventsPath);
-    if (isAcceptedTerminal(terminal)) {
-      return {
-        status: "exited",
-        exit: { exitCode: null, signal: null, terminal },
-      };
+      return { status: "identity_mismatch", evidence };
     }
     return { status: "missing" };
   }

@@ -18,21 +18,21 @@ import { explain } from "./explain.js";
 import { graph } from "./graph.js";
 import { status } from "./status.js";
 import { recover } from "./recover.js";
-import { loadEnvironment, loadWorkflow } from "../config/load.js";
-import { compileWorkflow } from "../config/compile.js";
 import { createStandaloneProductionEffects } from "../runtime/production/system.js";
-import { createManagedPiRuntime } from "../runtime/managed/factory.js";
+import { createManagedPiRuntimeFromResolved } from "../runtime/managed/factory.js";
 import type { JsonValue } from "../contracts/common.js";
 import { createWorkflowLifecycle } from "../core/workflow-lifecycle.js";
 import { managedRuntimePaths } from "../runtime/managed/paths.js";
 import { authCommand, runInteractive } from "./auth.js";
 import { findPackageRoot } from "./package-root.js";
-import { readDeclarativeProject } from "./trusted-project-reader.js";
+import { readDeclarativeProject, readTrustedHarnessLock } from "./trusted-project-reader.js";
 import { buildManagedEnvironment } from "../runtime/managed/environment.js";
 import { projectLocalSubscriptionCredentials } from "../runtime/managed/credentials.js";
 import type { ResolvedProfile } from "../config/profiles.js";
 import { canonicalJson } from "../shared/canonical-json.js";
 import { sha256 } from "../shared/sha256.js";
+import { resolveRunPaths } from "../state/paths.js";
+import { readResolvedRunConfig } from "../state/resolved-run-config.js";
 
 function semver(stdout: string): string | undefined {
   return /(?:^|\s|v)(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/.exec(stdout)?.[1];
@@ -337,7 +337,7 @@ async function verifyPiResourcesInChild(
 }
 
 export interface MainDependencies {
-  readonly createManagedRuntime?: typeof createManagedPiRuntime;
+  readonly createManagedRuntimeFromResolved?: typeof createManagedPiRuntimeFromResolved;
   readonly createStandaloneEffects?: typeof createStandaloneProductionEffects;
 }
 
@@ -547,17 +547,15 @@ export async function main(
     .description("Reconcile a run using installed production action adapters")
     .action(async (runId: string, path: string | undefined) => {
       const root = path ?? ".";
-      const project = await readDeclarativeProject(root);
-      const managed = await (dependencies.createManagedRuntime ?? createManagedPiRuntime)({
-        profiles: project.profiles,
-        runtimeVersion: project.lock.harnessVersion,
+      const lock = await readTrustedHarnessLock(root);
+      const runPaths = await resolveRunPaths(root, runId);
+      const frozen = await readResolvedRunConfig(runPaths.resolvedConfig);
+      const managed = await (
+        dependencies.createManagedRuntimeFromResolved ?? createManagedPiRuntimeFromResolved
+      )({
+        profiles: frozen.workflow.profiles,
+        runtimeVersion: lock.harnessVersion,
         packageRoot: await findPackageRoot(import.meta.url, "pi-multi-agent-harness"),
-      });
-      const environment = await loadEnvironment(join(root, ".harness/environment.yaml"));
-      const workflow = compileWorkflow({
-        workflow: await loadWorkflow(join(root, ".harness/workflow.yaml")),
-        environment,
-        profiles: managed.profiles,
       });
       let production: Awaited<ReturnType<typeof createStandaloneProductionEffects>> | undefined;
       try {
@@ -571,9 +569,9 @@ export async function main(
                 production ??= await (dependencies.createStandaloneEffects ?? createStandaloneProductionEffects)({
                   root,
                   runId,
-                  workflow,
-                  commands: environment.commands,
-                  piWorkerRuntime: managed.workerRuntime,
+                  workflow: frozen.workflow,
+                  commands: frozen.commands,
+                  managedPiRuntime: managed,
                 });
                 return await production.effects.recover(intent) as JsonValue;
               },

@@ -343,6 +343,9 @@ export class PiWorkerRuntime {
     if (exit.exitCode !== null && exit.exitCode !== 0) {
       return { status: "invalid", reason: `Pi process exited with code ${exit.exitCode}` };
     }
+    if (exit.signal !== null) {
+      return { status: "invalid", reason: `Pi process exited from signal ${exit.signal}` };
+    }
     return collectPiWorkerResult({
       assignment: prepared.assignment,
       resultPath: prepared.resultPath,

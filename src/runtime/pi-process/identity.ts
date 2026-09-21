@@ -43,10 +43,27 @@ async function normalizedExecutable(path: string): Promise<string> {
   return realpath(path).catch(() => path);
 }
 
-async function linuxIdentity(pid: number): Promise<{ start: string; executable: string; stopped: boolean }> {
-  const [stat, executable] = await Promise.all([
+interface RawLiveIdentity {
+  readonly start: string;
+  readonly executable: string;
+  readonly stopped: boolean;
+  readonly attemptToken: string;
+}
+
+function tokenFromEnvironment(environment: string, separator: string | RegExp): string {
+  const prefix = "PI_HARNESS_ATTEMPT_TOKEN=";
+  const entry = environment.split(separator).find((item) => item.startsWith(prefix));
+  if (entry === undefined || entry.length === prefix.length) {
+    throw new Error("live process is missing its attempt token");
+  }
+  return entry.slice(prefix.length);
+}
+
+async function linuxIdentity(pid: number): Promise<RawLiveIdentity> {
+  const [stat, executable, environment] = await Promise.all([
     readFile(`/proc/${pid}/stat`, "utf8"),
     realpath(`/proc/${pid}/exe`),
+    readFile(`/proc/${pid}/environ`, "utf8"),
   ]);
   const closingParenthesis = stat.lastIndexOf(")");
   const fields = stat.slice(closingParenthesis + 2).split(" ");
@@ -54,14 +71,20 @@ async function linuxIdentity(pid: number): Promise<{ start: string; executable: 
   if (closingParenthesis < 0 || startTime === undefined) {
     throw new Error(`cannot derive process start identity for pid ${pid}`);
   }
-  return { start: startTime, executable, stopped: fields[0] === "T" || fields[0] === "t" };
+  return {
+    start: startTime,
+    executable,
+    stopped: fields[0] === "T" || fields[0] === "t",
+    attemptToken: tokenFromEnvironment(environment, "\0"),
+  };
 }
 
-async function darwinIdentity(pid: number): Promise<{ start: string; executable: string; stopped: boolean }> {
-  const [{ stdout: start }, { stdout: executable }, { stdout: state }] = await Promise.all([
+async function darwinIdentity(pid: number): Promise<RawLiveIdentity> {
+  const [{ stdout: start }, { stdout: executable }, { stdout: state }, { stdout: environment }] = await Promise.all([
     execFileAsync("/bin/ps", ["-p", String(pid), "-o", "lstart="]),
     execFileAsync("/bin/ps", ["-p", String(pid), "-o", "comm="]),
     execFileAsync("/bin/ps", ["-p", String(pid), "-o", "state="]),
+    execFileAsync("/bin/ps", ["eww", "-p", String(pid), "-o", "command="]),
   ]);
   const marker = start.trim();
   const command = executable.trim();
@@ -70,10 +93,11 @@ async function darwinIdentity(pid: number): Promise<{ start: string; executable:
     start: marker,
     executable: await normalizedExecutable(command),
     stopped: state.trim().startsWith("T"),
+    attemptToken: tokenFromEnvironment(environment, /\s+/),
   };
 }
 
-async function liveIdentity(pid: number): Promise<{ start: string; executable: string; stopped: boolean }> {
+async function liveIdentity(pid: number): Promise<RawLiveIdentity> {
   if (process.platform === "linux") return linuxIdentity(pid);
   if (process.platform === "darwin") return darwinIdentity(pid);
   throw new Error(`unsupported process identity platform: ${process.platform}`);
@@ -101,12 +125,20 @@ export class SystemProcessIdentity implements ProcessIdentityPort {
         `spawned executable mismatch: expected ${expectedExecutable}, observed ${observed.executable}`,
       );
     }
+    if (observed.attemptToken !== attemptToken) {
+      throw new Error("spawned attempt token mismatch");
+    }
     return {
       pid,
       executable: observed.executable,
-      attemptToken,
+      attemptToken: observed.attemptToken,
       stopped: observed.stopped,
-      startIdentity: computeStartIdentity(pid, observed.start, observed.executable, attemptToken),
+      startIdentity: computeStartIdentity(
+        pid,
+        observed.start,
+        observed.executable,
+        observed.attemptToken,
+      ),
     };
   }
 
@@ -116,13 +148,13 @@ export class SystemProcessIdentity implements ProcessIdentityPort {
       return {
         pid: record.pid,
         executable: observed.executable,
-        attemptToken: record.attemptToken,
+        attemptToken: observed.attemptToken,
         stopped: observed.stopped,
         startIdentity: computeStartIdentity(
           record.pid,
           observed.start,
           observed.executable,
-          record.attemptToken,
+          observed.attemptToken,
         ),
       };
     } catch (error) {

@@ -173,7 +173,8 @@ export class ChildPiPlanningPort implements PlanningAgent {
     }
     const terminal = observation.exit.terminal;
     if (
-      (observation.exit.exitCode !== null && observation.exit.exitCode !== 0) || !terminal.settled ||
+      (observation.exit.exitCode !== null && observation.exit.exitCode !== 0) ||
+      observation.exit.signal !== null || !terminal.settled ||
       !terminal.acceptedStopReason || !terminal.completeToolResults ||
       terminal.terminalEventHash === undefined
     ) {

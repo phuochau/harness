@@ -3,6 +3,7 @@ export interface RunPaths {
   readonly commonDir: string;
   readonly root: string;
   readonly manifest: string;
+  readonly resolvedConfig: string;
   readonly events: string;
   readonly state: string;
   readonly lease: string;

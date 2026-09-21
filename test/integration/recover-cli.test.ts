@@ -1,4 +1,4 @@
-import { access, mkdtemp, readdir, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -13,6 +13,7 @@ import { createTempGitRepository } from "../support/git-fixtures.js";
 import { fixtureResolvedProfiles } from "../support/factories.js";
 import type { ManagedPiRuntimeBundle } from "../../src/runtime/managed/factory.js";
 import type { JsonValue } from "../../src/contracts/common.js";
+import { writeResolvedRunConfig } from "../../src/state/resolved-run-config.js";
 
 const cleanup: Array<() => Promise<void>> = [];
 
@@ -59,6 +60,17 @@ it("runs standalone recovery with scheduling disabled for an existing durable ru
     remote: "origin",
     baseBranch: "main",
   });
+  await writeResolvedRunConfig(initialized.paths.resolvedConfig, {
+    schemaVersion: 1,
+    workflow,
+    commands: environment.commands,
+  });
+  const profilesPath = join(repo.path, ".harness/profiles.yaml");
+  await writeFile(
+    profilesPath,
+    (await readFile(profilesPath, "utf8")).replaceAll("pi-shell-acp/gpt-5.5", "pi-shell-acp/future-model"),
+    "utf8",
+  );
   const lease = await RunLease.acquire(initialized.paths, "fixture");
   await new Journal(initialized.paths).append({
     schemaVersion: 1,
@@ -92,11 +104,14 @@ it("runs standalone recovery with scheduling disabled for an existing durable ru
     profiles: fixtureResolvedProfiles(),
     workerRuntime,
   } as ManagedPiRuntimeBundle;
-  let receivedWorker: unknown;
+  let receivedRuntime: unknown;
   await expect(main(["recover", "F023", repo.path], {
-    createManagedRuntime: async () => managed,
+    createManagedRuntimeFromResolved: async (input) => {
+      expect(input.profiles).toEqual(workflow.profiles);
+      return managed;
+    },
     createStandaloneEffects: async (input) => {
-      receivedWorker = input.piWorkerRuntime;
+      receivedRuntime = input.managedPiRuntime;
       return {
         effects: {
           runFresh: async () => ({} as JsonValue),
@@ -106,6 +121,6 @@ it("runs standalone recovery with scheduling disabled for an existing durable ru
       };
     },
   })).resolves.toBe(0);
-  expect(receivedWorker).toBe(workerRuntime);
+  expect(receivedRuntime).toBe(managed);
   await expect(access(initialized.paths.state)).resolves.toBeUndefined();
 });

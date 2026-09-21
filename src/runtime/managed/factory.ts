@@ -23,6 +23,14 @@ export interface ManagedPiRuntimeBundle {
   readonly workerRuntime: PiWorkerRuntime;
 }
 
+export interface ManagedPiRuntimeBaseInput {
+  readonly runtimeVersion: string;
+  readonly packageRoot: string;
+  readonly dataHome?: string;
+  readonly ambient?: Readonly<Record<string, string | undefined>>;
+  readonly projectCredentials?: boolean;
+}
+
 async function existing(paths: readonly string[], label: string): Promise<string> {
   for (const path of paths) {
     try { await access(path); return path; } catch {}
@@ -56,13 +64,8 @@ async function resolveNodeRuntime(pathValue: string): Promise<string> {
   throw new Error("managed Pi requires Node >=22.22.2; run harness setup with a supported Node runtime");
 }
 
-export async function createManagedPiRuntime(input: {
+export async function createManagedPiRuntime(input: ManagedPiRuntimeBaseInput & {
   readonly profiles: ProfileDocument;
-  readonly runtimeVersion: string;
-  readonly packageRoot: string;
-  readonly dataHome?: string;
-  readonly ambient?: Readonly<Record<string, string | undefined>>;
-  readonly projectCredentials?: boolean;
 }): Promise<ManagedPiRuntimeBundle> {
   const ambient = input.ambient ?? process.env;
   const userHome = ambient.HOME ?? homedir();
@@ -109,6 +112,19 @@ export async function createManagedPiRuntime(input: {
     mcp: {},
   };
   const profiles = resolveProfiles(input.profiles, resources);
+  return createManagedPiRuntimeFromResolved({ ...input, profiles });
+}
+
+export async function createManagedPiRuntimeFromResolved(
+  input: ManagedPiRuntimeBaseInput & { readonly profiles: ResolvedProfiles },
+): Promise<ManagedPiRuntimeBundle> {
+  const ambient = input.ambient ?? process.env;
+  const userHome = ambient.HOME ?? homedir();
+  const executablePath = ambient.PATH ?? "/usr/bin:/bin";
+  const dataHome = input.dataHome ?? ambient.XDG_DATA_HOME ?? join(userHome, ".local", "share");
+  const base = managedRuntimePaths({ dataHome, runtimeVersion: input.runtimeVersion, profileId: "planner-codex" });
+  const packageModules = join(base.packages, "node_modules");
+  const profiles = input.profiles;
   const managedProfiles: Record<string, ManagedProfileView> = {};
   for (const profile of Object.values(profiles.byId)) {
     const paths = managedRuntimePaths({ dataHome, runtimeVersion: input.runtimeVersion, profileId: profile.id });

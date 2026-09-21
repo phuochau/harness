@@ -76,7 +76,7 @@ it.runIf(!ownerMode)("survives controller death and recovers from terminal evide
     const recovered = new NodePiProcessSupervisor();
     const exit = await recovered.wait(record, AbortSignal.timeout(10_000));
     expect(exit).toMatchObject({
-      exitCode: null,
+      exitCode: 0,
       signal: null,
       terminal: {
         settled: true,

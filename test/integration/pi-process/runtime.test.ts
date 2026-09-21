@@ -68,7 +68,34 @@ describe("durable Pi process transport", () => {
     expect(await readFile(record.stderrPath, "utf8")).toBe("");
   });
 
-  it("accepts a settled terminal file after the owning controller disappears", async () => {
+  it("preserves a non-zero exit after an otherwise accepted terminal stream", async () => {
+    const sessionDir = await temporaryDirectory();
+    const supervisor = new NodePiProcessSupervisor();
+    const script = [
+      'process.stdout.write(JSON.stringify({type:"message_end",role:"assistant",content:"RESULT"})+"\\n")',
+      'process.stdout.write(JSON.stringify({type:"turn_end",stopReason:"stop"})+"\\n")',
+      'process.stdout.write(JSON.stringify({type:"agent_settled"})+"\\n")',
+      "process.exitCode=7",
+    ].join(";");
+    const record = await supervisor.launch({
+      attemptId: "attempt-failed-exit",
+      attemptToken: "token-failed-exit",
+      executable: process.execPath,
+      argv: ["-e", script],
+      cwd: sessionDir,
+      env: {},
+      sessionId: "session-failed-exit",
+      sessionDir,
+    });
+
+    await expect(supervisor.wait(record, AbortSignal.timeout(5_000))).resolves.toMatchObject({
+      exitCode: 7,
+      signal: null,
+      terminal: { settled: true, acceptedStopReason: true, completeToolResults: true },
+    });
+  });
+
+  it("refuses terminal evidence without the monitor's durable exit status", async () => {
     const sessionDir = await temporaryDirectory();
     const eventsPath = join(sessionDir, "events.jsonl");
     await writeFile(eventsPath, [
@@ -87,22 +114,10 @@ describe("durable Pi process transport", () => {
       identity: new FakeProcessIdentity(undefined),
     });
 
-    expect(await supervisor.observe(record)).toMatchObject({
-      status: "exited",
-      exit: {
-        exitCode: null,
-        signal: null,
-        terminal: {
-          settled: true,
-          acceptedStopReason: true,
-          completeToolResults: true,
-          finalAssistantText: "RESULT",
-        },
-      },
-    });
+    expect(await supervisor.observe(record)).toEqual({ status: "missing" });
   });
 
-  it("accepts durable terminal evidence when the recorded pid has been reused", async () => {
+  it("refuses terminal evidence when the recorded pid has been reused", async () => {
     const sessionDir = await temporaryDirectory();
     const eventsPath = join(sessionDir, "events.jsonl");
     await writeFile(eventsPath, [
@@ -127,13 +142,28 @@ describe("durable Pi process transport", () => {
     });
 
     expect(await supervisor.observe(record)).toMatchObject({
-      status: "exited",
-      exit: {
-        exitCode: null,
-        signal: null,
-        terminal: { settled: true, finalAssistantText: "RESULT" },
-      },
+      status: "identity_mismatch",
+      evidence: expect.arrayContaining(["start identity mismatch", "executable mismatch"]),
     });
+  });
+
+  it("returns the same durable monitor instead of spawning a duplicate", async () => {
+    const sessionDir = await temporaryDirectory();
+    const supervisor = new NodePiProcessSupervisor();
+    const spec = {
+      attemptId: "attempt-idempotent",
+      attemptToken: "token-idempotent",
+      executable: process.execPath,
+      argv: ["-e", "setTimeout(() => {}, 10000)"],
+      cwd: sessionDir,
+      env: {},
+      sessionId: "session-idempotent",
+      sessionDir,
+    } as const;
+    const first = await supervisor.launch(spec);
+    const second = await new NodePiProcessSupervisor().launch(spec);
+    expect(second).toEqual(first);
+    await supervisor.cancel(first, 25);
   });
 
   it("observes a matching live process without launching a replacement", async () => {
@@ -152,6 +182,27 @@ describe("durable Pi process transport", () => {
     const recoveredSupervisor = new NodePiProcessSupervisor();
     expect(await recoveredSupervisor.observe(record)).toEqual({ status: "running", record });
     await recoveredSupervisor.cancel(record, 50);
+  });
+
+  it("observes the live attempt token instead of trusting the persisted token", async () => {
+    const sessionDir = await temporaryDirectory();
+    const supervisor = new NodePiProcessSupervisor();
+    const record = await supervisor.launch({
+      attemptId: "attempt-token",
+      attemptToken: "actual-live-token",
+      executable: process.execPath,
+      argv: ["-e", "setTimeout(() => {}, 10000)"],
+      cwd: sessionDir,
+      env: {},
+      sessionId: "session-token",
+      sessionDir,
+    });
+    const forged = { ...record, attemptToken: "forged-persisted-token" };
+    await expect(new NodePiProcessSupervisor().observe(forged)).resolves.toMatchObject({
+      status: "identity_mismatch",
+      evidence: expect.arrayContaining(["attempt token mismatch"]),
+    });
+    await supervisor.cancel(record, 25);
   });
 
   it("continues an exactly matching process left stopped by a controller crash", async () => {

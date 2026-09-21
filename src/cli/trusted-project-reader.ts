@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { parse } from "yaml";
 import {
   validateEnvironmentAndLock,
+  validateHarnessLock,
   validateProfiles,
   validateWorkflow,
   type EnvironmentDocument,
@@ -127,6 +128,25 @@ export async function readDeclarativeProject(rootInput: string): Promise<Declara
     if (error instanceof TrustedProjectReadError) throw error;
     throw new TrustedProjectReadError(
       `invalid declarative project: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+export async function readTrustedHarnessLock(rootInput: string): Promise<HarnessLock> {
+  let root: string;
+  try {
+    root = await realpath(rootInput);
+  } catch (error) {
+    throw new TrustedProjectReadError(
+      `project root is unavailable: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  await assertDirectoryNotSymlink(join(root, ".harness"));
+  try {
+    return validateHarnessLock(parse(await boundedRegularFile(join(root, ".harness/harness.lock"))));
+  } catch (error) {
+    throw new TrustedProjectReadError(
+      `invalid harness lock: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }
