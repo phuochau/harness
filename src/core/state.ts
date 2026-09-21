@@ -65,7 +65,10 @@ export interface RunState {
     string,
     { candidateCommit: string; targetCommit: string; tasksSemanticHash: string }
   >;
-  integrationPipeline?: string;
+  integrationPipeline?: {
+    taskId: string;
+    status: "preparing_candidate" | "verifying_candidate";
+  };
   operator: { paused: boolean; lastIntent?: string };
   planning: PlanningState;
 }

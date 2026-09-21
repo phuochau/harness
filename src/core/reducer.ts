@@ -241,7 +241,10 @@ function applyEvent(state: RunState, event: HarnessEvent): void {
     case "integration.observed":
       ensureJob(state, event.entityId).candidateCommit =
         event.payload.candidateCommit;
-      state.integrationPipeline = event.entityId;
+      state.integrationPipeline = {
+        taskId: taskIdForJob(event.entityId) ?? event.entityId,
+        status: "verifying_candidate",
+      };
       break;
     case "integration.conflicted":
       transitionJob(state, event.entityId, "VERIFYING", "RETRY");
@@ -257,6 +260,18 @@ function applyEvent(state: RunState, event: HarnessEvent): void {
       break;
     case "effect.intent":
       state.outstandingEffects[event.payload.idempotencyKey] = event.payload;
+      if (
+        event.payload.laneKey.startsWith("integration-pipeline:") &&
+        event.payload.input &&
+        typeof event.payload.input === "object" &&
+        !Array.isArray(event.payload.input) &&
+        typeof event.payload.input.taskId === "string"
+      ) {
+        state.integrationPipeline = {
+          taskId: event.payload.input.taskId,
+          status: "preparing_candidate",
+        };
+      }
       break;
     case "effect.observed":
     case "effect.failed":
