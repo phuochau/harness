@@ -314,7 +314,7 @@ export function createWorkflowLifecycle(): WorkflowLifecycle {
             ? "Retry explicitly if the work should continue."
             : code === "APPROVAL_PENDING"
               ? "Open the run in interactive Pi and approve or deny the plan."
-            : "Inspect the Herdr agent and retry cancellation.",
+            : "Inspect the Pi worker process and retry cancellation.",
         )];
       }
       return [{

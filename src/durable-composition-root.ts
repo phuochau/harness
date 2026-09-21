@@ -99,7 +99,7 @@ function effectResultCommand(
 ): ControllerCommand {
   return {
     schemaVersion: 1,
-    source: "controller",
+    source: "process",
     kind: "effect_result",
     idempotencyKey: `effect-result:${intent.idempotencyKey}`,
     payload: {
@@ -286,7 +286,7 @@ export function createHarnessSystem(
     lease: ports.lease,
     clock: ports.clock,
     derive: (state, accepted) =>
-      accepted.command.source === "controller" &&
+      accepted.command.source === "process" &&
       accepted.command.kind === "effect_result"
         ? effectResultDecision(accepted)
         : ports.derive(state, accepted),

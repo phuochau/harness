@@ -35,8 +35,8 @@ export class ControllerEventRouter implements HarnessRuntimeEventSink {
     return this.controller.enqueue(this.command("pi", "runtime_event", event, data));
   }
 
-  public herdr(event: string, data: JsonValue): Promise<unknown> {
-    return this.controller.enqueue(this.command("herdr", "runtime_event", event, data));
+  public process(event: string, data: JsonValue): Promise<unknown> {
+    return this.controller.enqueue(this.command("process", "runtime_event", event, data));
   }
 
   public tick(reason: string): Promise<unknown> {

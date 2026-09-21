@@ -9,6 +9,7 @@ import { GitWorkerAttemptPort } from "../../../src/runtime/production/worker-att
 import type { RunManifest } from "../../../src/state/run-manifest.js";
 import { createTempGitRepository } from "../../support/git-fixtures.js";
 import { sha256 } from "../../../src/shared/sha256.js";
+import { fixtureResolvedProfiles } from "../../support/factories.js";
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -76,18 +77,19 @@ it("binds an implementation attempt to Git, validates it, and persists its seale
     graph: () => graph,
     readState: async () => initialRunState("F100", manifest.workflowRevision),
     taskVerification: [],
+    profiles: fixtureResolvedProfiles(),
   });
   const intent = {
     action: "worker.execute" as const,
     idempotencyKey: "worker.execute:implement:T001:1",
-    recovery: "non_retryable" as const,
+    recovery: "reconcilable" as const,
     laneKey: "job:implement:T001",
     input: {
       jobId: "implement:T001",
       stageId: "implement",
       taskId: "T001",
       attempt: 1,
-      worker: "devin",
+      worker: "implementer-devin",
     },
   };
   const prepared = await attempts.prepare(intent);

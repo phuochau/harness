@@ -11,7 +11,7 @@ import {
   runConcurrentWakeupRace,
 } from "../support/controller-fixtures.js";
 
-it("serializes timer, Herdr, Pi-equivalent, and operator wakeups", async () => {
+it("serializes timer, process, Pi, and operator wakeups", async () => {
   const result = await runConcurrentWakeupRace();
   expect(result).toEqual({ maxConcurrentTransactions: 1, launchIntentCount: 1 });
 });

@@ -33,7 +33,7 @@ it("reuses one recovered controller per canonical repository and run", async () 
   expect(recoveries).toBe(1);
 });
 
-it("routes Pi, Herdr, and timer wakeups only through the serialized queue", async () => {
+it("routes Pi, process, and timer wakeups only through the serialized queue", async () => {
   let active = 0;
   let maxConcurrent = 0;
   const seen: ControllerCommand[] = [];
@@ -55,11 +55,11 @@ it("routes Pi, Herdr, and timer wakeups only through the serialized queue", asyn
   const router = new ControllerEventRouter(controller, () => "2026-09-21T00:00:00.000Z");
   await Promise.all([
     router.pi("turn_end", { turnIndex: 1 }),
-    router.herdr("agent_idle", { target: "implement:T001" }),
+    router.process("process_exit", { target: "implement:T001" }),
     router.tick("scheduler"),
   ]);
   expect(maxConcurrent).toBe(1);
-  expect(seen.map((command) => command.source)).toEqual(["pi", "herdr", "timer"]);
+  expect(seen.map((command) => command.source)).toEqual(["pi", "process", "timer"]);
 });
 
 it("records planning completion only at agent_settled, never at a bare turn_end", async () => {

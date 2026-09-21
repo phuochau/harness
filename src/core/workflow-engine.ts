@@ -146,7 +146,7 @@ function recoveryFor(stage: CompiledStage): EffectIntent["recovery"] {
       : "non_retryable";
   }
   if (stage.uses === "worker.execute" || stage.uses === "worker.review") {
-    return "non_retryable";
+    return "reconcilable";
   }
   return "reconcilable";
 }

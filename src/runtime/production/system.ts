@@ -1,5 +1,3 @@
-import { spawn } from "node:child_process";
-import { setTimeout as delay } from "node:timers/promises";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { EffectExecutor } from "../../actions/executor.js";
 import type {
@@ -27,15 +25,11 @@ import { PlanningAction } from "../../speckit/planning-action.js";
 import type { ArtifactPaths } from "../../speckit/artifacts.js";
 import { Journal } from "../../state/journal.js";
 import { RunLease } from "../../state/lease.js";
-import { connectInstalledHerdr, type HerdrClient } from "../herdr/client.js";
-import { HerdrRuntime } from "../herdr/runtime.js";
-import { workerAdapters } from "../workers/index.js";
 import { createProductionActionRegistry } from "./action-registry.js";
 import { recoverCleanupFailures } from "./cleanup-recovery.js";
-import {
-  HerdrProductionWorkerRuntime,
-  type ProductionHerdrPort,
-} from "./herdr-worker.js";
+import type { ProductionWorkerRuntime } from "./worker-action.js";
+import type { PiWorkerRuntime } from "../pi-worker/runtime.js";
+import { ProductionPiWorkerRuntime } from "./pi-worker.js";
 import { JournalVerificationObservations } from "./journal-observations.js";
 import { loadRunTaskGraph, ProductionPlanningArtifactSealer } from "./planning-artifacts.js";
 import { DurableRecordStore } from "./records.js";
@@ -60,8 +54,8 @@ export interface ComposeProductionRunOptions {
   readonly pi: ExtensionAPI;
   readonly context: ExtensionContext;
   readonly ownerId?: string;
-  readonly ensureHerdr?: () => Promise<HerdrClient>;
-  readonly workerHerdr?: ProductionHerdrPort;
+  readonly workerRuntime?: ProductionWorkerRuntime;
+  readonly piWorkerRuntime?: PiWorkerRuntime;
   readonly process?: ProcessRunner;
 }
 
@@ -114,32 +108,13 @@ class DurableInteractiveApprovalStore implements ApprovalStore {
   }
 }
 
-async function installedHerdrRunning(): Promise<boolean> {
-  const process = new NodeProcessRunner();
-  const result = await process.run("herdr", ["status", "--json"], { shell: false });
-  if (result.exitCode !== 0) return false;
-  try {
-    return JSON.parse(result.stdout).server?.running === true;
-  } catch {
-    return false;
-  }
-}
-
-export async function ensureInstalledHerdr(): Promise<HerdrClient> {
-  if (!(await installedHerdrRunning())) {
-    const child = spawn("herdr", ["server"], {
-      detached: true,
-      stdio: "ignore",
-    });
-    child.unref();
-    const deadline = Date.now() + 10_000;
-    while (!(await installedHerdrRunning())) {
-      if (Date.now() >= deadline) throw new Error("Herdr server did not become ready");
-      await delay(100);
-    }
-  }
-  return connectInstalledHerdr();
-}
+const unavailableWorkerRuntime: ProductionWorkerRuntime = {
+  async prepare() { throw new Error("managed Pi worker runtime is not configured"); },
+  async execute() { throw new Error("managed Pi worker runtime is not configured"); },
+  async reconcile() {
+    return { status: "indeterminate", evidence: ["managed Pi worker runtime is not configured"] };
+  },
+};
 
 export async function composeProductionRun(
   options: ComposeProductionRunOptions,
@@ -149,7 +124,6 @@ export async function composeProductionRun(
     initialized.paths,
     options.ownerId ?? `pi-${process.pid}-${crypto.randomUUID()}`,
   );
-  let herdrClient: HerdrClient | undefined;
   try {
     const journal = new Journal(initialized.paths);
     if ((await journal.read()).length === 0) {
@@ -194,9 +168,6 @@ export async function composeProductionRun(
         git,
       ),
     });
-    const herdr = options.workerHerdr ?? new HerdrRuntime(
-      herdrClient = await (options.ensureHerdr ?? ensureInstalledHerdr)(),
-    );
     const records = new DurableRecordStore(initialized.paths.artifacts);
     let system: DurableHarnessSystem | undefined;
     const readState = async () => {
@@ -211,12 +182,18 @@ export async function composeProductionRun(
       graph: () => currentGraph,
       readState,
       taskVerification: [options.commands.task_verify ?? []].filter((argv) => argv.length > 0),
+      profiles: workflow.profiles,
     });
-    const workerRuntime = new HerdrProductionWorkerRuntime({
-      adapters: workerAdapters(),
-      herdr,
-      attempts,
-    });
+    const workerRuntime = options.workerRuntime ?? (
+      options.piWorkerRuntime === undefined
+        ? unavailableWorkerRuntime
+        : new ProductionPiWorkerRuntime({
+            runtime: options.piWorkerRuntime,
+            profiles: workflow.profiles,
+            attempts,
+            records,
+          })
+    );
     const registry = createProductionActionRegistry({
       manifest: initialized.manifest,
       repository: initialized.repository,
@@ -286,15 +263,10 @@ export async function composeProductionRun(
       graph: () => currentGraph,
       async dispose() {
         abort.abort();
-        try {
-          await composed.dispose();
-        } finally {
-          herdrClient?.close();
-        }
+        await composed.dispose();
       },
     });
   } catch (error) {
-    herdrClient?.close();
     await lease.release().catch(() => undefined);
     throw error;
   }
@@ -305,6 +277,8 @@ export async function createStandaloneProductionEffects(input: {
   readonly runId: string;
   readonly workflow: CompiledWorkflow;
   readonly commands: Readonly<Record<string, readonly string[]>>;
+  readonly workerRuntime?: ProductionWorkerRuntime;
+  readonly piWorkerRuntime?: PiWorkerRuntime;
 }): Promise<StandaloneProductionEffects> {
   const paths = await resolveRunPaths(input.root, input.runId);
   const manifest = await readRunManifest(paths.manifest);
@@ -334,7 +308,6 @@ export async function createStandaloneProductionEffects(input: {
     for (const event of await journal.read()) state = reduceEvent(state, event);
     return state;
   };
-  const client = await ensureInstalledHerdr();
   const records = new DurableRecordStore(paths.artifacts);
   const attempts = new GitWorkerAttemptPort({
     manifest,
@@ -344,12 +317,18 @@ export async function createStandaloneProductionEffects(input: {
     graph: () => graph,
     readState,
     taskVerification: [input.commands.task_verify ?? []].filter((argv) => argv.length > 0),
+    profiles: input.workflow.profiles,
   });
-  const workerRuntime = new HerdrProductionWorkerRuntime({
-    adapters: workerAdapters(),
-    herdr: new HerdrRuntime(client),
-    attempts,
-  });
+  const workerRuntime = input.workerRuntime ?? (
+    input.piWorkerRuntime === undefined
+      ? unavailableWorkerRuntime
+      : new ProductionPiWorkerRuntime({
+          runtime: input.piWorkerRuntime,
+          profiles: input.workflow.profiles,
+          attempts,
+          records,
+        })
+  );
   const registry = createProductionActionRegistry({
     manifest,
     repository,
@@ -388,7 +367,6 @@ export async function createStandaloneProductionEffects(input: {
     effects: executor,
     async dispose() {
       abort.abort();
-      client.close();
       // The recovery command's fenced lease is released by recoverRun before
       // this transport is disposed. Per-effect cleanup already ran while the
       // lease was held; a global worktree sweep here could race a newly

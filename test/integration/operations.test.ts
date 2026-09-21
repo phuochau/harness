@@ -1,6 +1,5 @@
 import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { afterEach, expect, it } from "vitest";
-import { start, type StartDependencies } from "../../src/cli/start.js";
 import { status } from "../../src/cli/status.js";
 import { explain } from "../../src/cli/explain.js";
 import { recoverRun } from "../../src/controller/reconcile-run.js";
@@ -10,67 +9,6 @@ import { journalFixture } from "../support/state-fixtures.js";
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()));
-});
-
-function startFixture(existing: boolean) {
-  const calls: string[] = [];
-  const dependencies: StartDependencies = {
-    git: { inspect: async () => ({ root: "/repo", identity: "repo-identity" }) },
-    herdr: {
-      ensureWorkspace: async () => ({ id: "workspace-1", rootPaneId: "pane-1" }),
-      findAgent: async (input) => existing ? {
-        name: input.name,
-        kind: "pi" as const,
-        workspaceId: "workspace-1",
-        paneId: "pane-1",
-        status: "idle",
-      } : undefined,
-      startAgent: async (input) => {
-        calls.push("agent.start");
-        return {
-          name: input.name,
-          kind: "pi" as const,
-          workspaceId: "workspace-1",
-          paneId: "pane-1",
-          status: "idle",
-        };
-      },
-      waitFor: async () => { calls.push("agent.wait"); },
-    },
-    extensionProbe: { assertReady: async () => { calls.push("extension.ready"); } },
-  };
-  return { calls, dependencies };
-}
-
-it("reattaches the dedicated Pi agent instead of starting a duplicate", async () => {
-  const fixture = startFixture(true);
-  const result = await start({ root: "/repo" }, fixture.dependencies);
-  expect(fixture.calls).not.toContain("agent.start");
-  expect(result.mode).toBe("reattached");
-});
-
-it("starts one stable Pi controller when none exists", async () => {
-  const fixture = startFixture(false);
-  const first = await start({ root: "/repo" }, fixture.dependencies);
-  const secondFixture = startFixture(false);
-  const second = await start({ root: "/repo" }, secondFixture.dependencies);
-  expect(first.agent.name).toBe(second.agent.name);
-  expect(fixture.calls.filter((call) => call === "agent.start")).toHaveLength(1);
-});
-
-it("reports Herdr unavailability without starting a second controller", async () => {
-  const fixture = startFixture(false);
-  const dependencies: StartDependencies = {
-    ...fixture.dependencies,
-    herdr: {
-      ...fixture.dependencies.herdr,
-      ensureWorkspace: async () => { throw new Error("Herdr unavailable"); },
-    },
-  };
-  await expect(start({ root: "/repo" }, dependencies)).rejects.toThrow(
-    /Herdr unavailable/,
-  );
-  expect(fixture.calls).not.toContain("agent.start");
 });
 
 it("recovers effects but does not schedule without Pi", async () => {

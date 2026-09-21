@@ -64,9 +64,8 @@ export function command(
   payload: JsonValue = {},
 ): ControllerCommand {
   const kindBySource = {
-    controller: "effect_result",
     timer: "tick",
-    herdr: "runtime_event",
+    process: "runtime_event",
     pi: "planning_turn",
     operator: "operator_intent",
     recovery: "recover",
@@ -420,7 +419,7 @@ export async function runConcurrentWakeupRace(): Promise<{
   const queue = new ControllerCommandQueue(processor);
   await Promise.all([
     queue.enqueue(command("timer", "a")),
-    queue.enqueue(command("herdr", "b")),
+    queue.enqueue(command("process", "b")),
     queue.enqueue(command("operator", "c")),
   ]);
   return { maxConcurrentTransactions, launchIntentCount };

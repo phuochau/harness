@@ -32,7 +32,7 @@ const result = {
 const intent: EffectIntent<"worker.execute", Record<string, unknown>> = {
   action: "worker.execute",
   idempotencyKey: "worker.execute:implement:T001:1",
-  recovery: "non_retryable",
+  recovery: "reconcilable",
   laneKey: "job:implement:T001",
   input: { jobId: "implement:T001", taskId: "T001", attempt: 1, worker: "devin" },
 };
@@ -202,7 +202,7 @@ it("keeps a durable worker success outstanding until cleanup succeeds", async ()
   expect(cleanupCalls).toBe(2);
 });
 
-it("quarantines a prepared attempt before reporting failed recovery", async () => {
+it("preserves a prepared attempt while reporting indeterminate recovery", async () => {
   const root = await mkdtemp(join(tmpdir(), "harness-worker-action-"));
   temporary.push(root);
   const prepared = { assignmentHash: result.assignmentHash };
@@ -235,10 +235,11 @@ it("quarantines a prepared attempt before reporting failed recovery", async () =
     },
   });
   await new DurableRecordStore(freshRoot).put("worker-prepared", intent.idempotencyKey, prepared);
+  abort.mockClear();
   await expect(recovering.reconcile(recoveryContext(), intent)).resolves.toMatchObject({
     status: "indeterminate",
   });
-  expect(abort).toHaveBeenCalledWith(prepared, intent);
+  expect(abort).not.toHaveBeenCalled();
 });
 
 it("durably marks and aborts an in-flight worker cancellation", async () => {

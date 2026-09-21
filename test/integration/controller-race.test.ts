@@ -10,7 +10,7 @@ it("serializes concurrent wakeups into one logical launch", async () => {
   try {
     const results = await Promise.all([
       fixture.queue.enqueue(command("timer", "tick:1")),
-      fixture.queue.enqueue(command("herdr", "agent-idle:a1")),
+      fixture.queue.enqueue(command("process", "process-exit:a1")),
       fixture.queue.enqueue(command("operator", "retry:T001")),
     ]);
     expect(fixture.maxConcurrentTransactions).toBe(1);

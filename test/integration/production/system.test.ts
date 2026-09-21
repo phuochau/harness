@@ -36,11 +36,6 @@ it("composes one fenced resident controller around an immutable production run",
       remote: "origin",
       baseBranch: "main",
     });
-    const fakeHerdr = {
-      request: async () => ({ workspaces: [] }),
-      subscribe: () => () => undefined,
-      close: () => undefined,
-    };
     const entries: any[] = [];
     const context = {
       isIdle: () => true,
@@ -57,7 +52,6 @@ it("composes one fenced resident controller around an immutable production run",
       commands: { task_verify: ["npm", "test"], full_verify: ["npm", "test"] },
       pi: { appendEntry() {}, sendUserMessage() {} } as any,
       context: context as any,
-      ensureHerdr: async () => fakeHerdr as any,
     });
     await expect(system.readState()).resolves.toMatchObject({
       runId: "F200",
@@ -168,11 +162,6 @@ it("drives a correlated Pi planning stage through the resident durable controlle
             ),
         },
       } as any,
-      ensureHerdr: async () => ({
-        request: async () => ({ workspaces: [] }),
-        subscribe: () => () => undefined,
-        close: () => undefined,
-      }) as any,
     });
     await system.controller.enqueue({
       schemaVersion: 1,

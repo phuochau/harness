@@ -84,7 +84,7 @@ export class DurableWorkerAction<K extends ProductionWorkerKind>
   ) {}
 
   public recovery(_input: ProductionWorkerInput): RecoveryClass {
-    return "non_retryable";
+    return "reconcilable";
   }
 
   private async completed(
@@ -230,10 +230,7 @@ export class DurableWorkerAction<K extends ProductionWorkerKind>
       await this.afterFailed(prepared, intent);
       throw error;
     }
-    if (result.status !== "observed") {
-      await this.afterFailed(prepared, intent);
-      return result;
-    }
+    if (result.status !== "observed") return result;
     const output = validateWorkerResult(result.output);
     await this.options.records.put("worker-completed", intent.idempotencyKey, output);
     await this.afterCompleted(prepared, output, intent);
@@ -263,6 +260,12 @@ export class DurableWorkerCancelAction
     });
     if (
       await this.options.records.get("worker-aborted", original.idempotencyKey) !==
+        undefined
+    ) {
+      return { cancelledIntentKey: original.idempotencyKey };
+    }
+    if (
+      await this.options.records.get("worker-completed", original.idempotencyKey) !==
         undefined
     ) {
       return { cancelledIntentKey: original.idempotencyKey };

@@ -26,11 +26,24 @@ function validateCandidate(
 
 function unwrapResult(raw: string): string {
   const start = "HARNESS_REVIEW_RESULT_V1 ";
-  const end = "\nHARNESS_REVIEW_RESULT_END_V1";
-  const marker = raw.lastIndexOf(start);
-  if (marker >= 0) {
-    const finish = raw.indexOf(end, marker + start.length);
-    if (finish >= 0) return raw.slice(marker + start.length, finish);
+  const end = "HARNESS_REVIEW_RESULT_END_V1";
+  const normalized = raw.replace(/\r\n/g, "\n");
+  const marker = normalized.lastIndexOf(`\n${start}`) + 1;
+  const startsAtBeginning = normalized.startsWith(start);
+  const offset = startsAtBeginning ? 0 : marker;
+  if (
+    offset >= 0 &&
+    normalized.indexOf(start) === offset &&
+    normalized.indexOf(start, offset + start.length) === -1
+  ) {
+    const finish = normalized.indexOf(`\n${end}`, offset + start.length);
+    if (
+      finish >= 0 &&
+      normalized.slice(finish + end.length + 1).trim() === "" &&
+      finish - (offset + start.length) <= 256 * 1024
+    ) {
+      return normalized.slice(offset + start.length, finish);
+    }
   }
   return raw.trim();
 }

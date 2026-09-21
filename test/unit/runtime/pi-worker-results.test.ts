@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -115,5 +115,86 @@ describe("Pi worker result boundaries", () => {
     expect(parsed).toMatchObject({ status: "valid", result: { outcome: "approved" } });
     expect(await readFile(join(root, ".harness-output", "pi-evidence-1.txt"), "utf8"))
       .toBe("reviewed");
+  });
+
+  it("rejects quoted or non-final review protocol blocks", async () => {
+    const assignment = contractAssignment({
+      role: "review",
+      workerKind: "codex",
+      implementationWorkerKind: "devin",
+      worktree: {
+        role: "review",
+        path: "/tmp/review",
+        branch: null,
+        commit: "abc123",
+        writable: false,
+      },
+    });
+    const envelope = JSON.stringify({
+      result: {
+        schemaVersion: 1,
+        assignmentHash: assignment.assignmentHash,
+        role: "review",
+        outcome: "approved",
+        reviewedCommit: assignment.commit,
+        findings: [],
+      },
+      evidence: [],
+    });
+    const terminal = {
+      settled: true,
+      acceptedStopReason: true,
+      completeToolResults: true,
+    };
+    expect(parseTerminalWorkerResult(
+      `  HARNESS_REVIEW_RESULT_V1 ${envelope}\nHARNESS_REVIEW_RESULT_END_V1`,
+      assignment,
+      terminal,
+    ).status).toBe("invalid");
+    expect(parseTerminalWorkerResult(
+      `HARNESS_REVIEW_RESULT_V1 ${envelope}\nHARNESS_REVIEW_RESULT_END_V1\nmore output`,
+      assignment,
+      terminal,
+    ).status).toBe("invalid");
+  });
+
+  it("refuses to materialize review evidence through an output symlink", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harness-pi-result-"));
+    const external = await mkdtemp(join(tmpdir(), "harness-pi-result-external-"));
+    temporary.push(root, external);
+    await symlink(external, join(root, ".harness-output"));
+    const assignment = contractAssignment({
+      role: "review",
+      workerKind: "codex",
+      implementationWorkerKind: "devin",
+      worktree: {
+        role: "review",
+        path: root,
+        branch: null,
+        commit: "abc123",
+        writable: false,
+      },
+    });
+    const envelope = JSON.stringify({
+      result: {
+        schemaVersion: 1,
+        assignmentHash: assignment.assignmentHash,
+        role: "review",
+        outcome: "approved",
+        reviewedCommit: assignment.commit,
+        findings: [],
+      },
+      evidence: [],
+    });
+    await expect(collectPiWorkerResult({
+      assignment,
+      resultPath: join(root, ".harness-output", "result.json"),
+      terminal: {
+        settled: true,
+        acceptedStopReason: true,
+        completeToolResults: true,
+        finalAssistantText: `HARNESS_REVIEW_RESULT_V1 ${envelope}\nHARNESS_REVIEW_RESULT_END_V1`,
+      },
+    })).rejects.toThrow(/output directory/);
   });
 });

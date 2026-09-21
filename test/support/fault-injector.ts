@@ -7,7 +7,7 @@ export const crashBoundaries = [
   "after-effect",
   "before-observation",
   "after-observation",
-  "after-herdr-prompt-send",
+  "after-pi-process-spawn",
   "during-snapshot",
   "after-worker-result",
   "after-multi-commit-integration",
@@ -80,7 +80,7 @@ export class CrashSafeEffectHarness {
       this.externalExecutions.set(this.key, 1);
       this.checkpointAll([
         "after-effect",
-        "after-herdr-prompt-send",
+        "after-pi-process-spawn",
         "after-worker-result",
         "after-multi-commit-integration",
         "after-atomic-task-finalize",

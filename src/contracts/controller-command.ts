@@ -5,9 +5,8 @@ export const ControllerCommandSchema = Type.Object(
   {
     schemaVersion: VersionSchema,
     source: Type.Union([
-      Type.Literal("controller"),
       Type.Literal("timer"),
-      Type.Literal("herdr"),
+      Type.Literal("process"),
       Type.Literal("pi"),
       Type.Literal("operator"),
       Type.Literal("recovery"),

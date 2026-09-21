@@ -16,13 +16,14 @@ import { GitEvidence } from "./git-evidence.js";
 import type {
   PreparedAttemptBinding,
   ProductionWorkerAttemptPort,
-} from "./herdr-worker.js";
+} from "./pi-worker.js";
 import type { DurableRecordStore } from "./records.js";
 import type {
   ProductionWorkerInput,
   ProductionWorkerKind,
 } from "./worker-action.js";
 import { sha256 } from "../../shared/sha256.js";
+import type { ResolvedProfiles } from "../../config/profiles.js";
 
 export interface GitWorkerAttemptOptions {
   readonly manifest: RunManifest;
@@ -32,16 +33,19 @@ export interface GitWorkerAttemptOptions {
   readonly graph: () => ValidatedTaskGraph;
   readonly readState: () => Promise<RunState>;
   readonly taskVerification: readonly (readonly string[])[];
+  readonly profiles: ResolvedProfiles;
 }
 
 function inputRecord(
   intent: EffectIntent<ProductionWorkerKind, ProductionWorkerInput>,
+  profiles: ResolvedProfiles,
 ): {
   readonly jobId: string;
   readonly stageId: string;
   readonly taskId?: string;
   readonly attempt: number;
-  readonly worker: WorkerKind;
+  readonly profileId: string;
+  readonly family: WorkerKind;
 } {
   const input = intent.input;
   if (
@@ -49,7 +53,8 @@ function inputRecord(
     typeof input.stageId !== "string" ||
     !Number.isInteger(input.attempt) ||
     Number(input.attempt) < 1 ||
-    !["codex", "devin", "claude"].includes(String(input.worker)) ||
+    typeof input.worker !== "string" ||
+    profiles.byId[input.worker] === undefined ||
     (input.taskId !== undefined && typeof input.taskId !== "string")
   ) {
     throw new Error("worker effect is missing its immutable job identity");
@@ -59,26 +64,32 @@ function inputRecord(
     stageId: input.stageId,
     ...(input.taskId === undefined ? {} : { taskId: input.taskId as string }),
     attempt: Number(input.attempt),
-    worker: input.worker as WorkerKind,
+    profileId: input.worker,
+    family: profiles.byId[input.worker]!.family,
   };
 }
 
 function implementationResult(
   state: RunState,
   taskId: string,
-): { readonly commit: string; readonly worker: WorkerKind } {
+  profiles: ResolvedProfiles,
+): { readonly commit: string; readonly profileId: string; readonly family: WorkerKind } {
   const job = state.jobs[`implement:${taskId}`];
   const result = job?.result;
   if (
     job === undefined ||
-    !["codex", "devin", "claude"].includes(job.worker ?? "") ||
+    job.worker === undefined || profiles.byId[job.worker] === undefined ||
     result?.outcome !== "completed" ||
     !("role" in result) ||
     result.role !== "implementation"
   ) {
     throw new Error(`task ${taskId} has no accepted implementation result`);
   }
-  return { commit: result.commit, worker: job.worker as WorkerKind };
+  return {
+    commit: result.commit,
+    profileId: job.worker,
+    family: profiles.byId[job.worker]!.family,
+  };
 }
 
 function disciplines(role: "implementation" | "review"): readonly string[] {
@@ -130,7 +141,7 @@ export class GitWorkerAttemptPort implements ProductionWorkerAttemptPort {
   public async prepare(
     intent: EffectIntent<ProductionWorkerKind, ProductionWorkerInput>,
   ): Promise<PreparedAttemptBinding> {
-    const bound = inputRecord(intent);
+    const bound = inputRecord(intent, this.options.profiles);
     const graph = this.options.graph();
     const artifacts = Object.values(this.options.manifest.artifactPaths);
     const role = intent.action === "worker.execute" ? "implementation" : "review";
@@ -165,7 +176,9 @@ export class GitWorkerAttemptPort implements ProductionWorkerAttemptPort {
           taskId: bound.taskId,
           attempt: bound.attempt,
           role,
-          workerKind: bound.worker,
+          profileId: bound.profileId,
+          profileFamily: bound.family,
+          workerKind: bound.family,
           commit: binding.commit,
           allowedPaths: task.ownedPaths,
           requiredDisciplines: disciplines(role),
@@ -186,7 +199,7 @@ export class GitWorkerAttemptPort implements ProductionWorkerAttemptPort {
     if (bound.taskId !== undefined) {
       const task = graph.byId.get(bound.taskId);
       if (task === undefined) throw new Error(`unknown task ${bound.taskId}`);
-      const implementation = implementationResult(state, bound.taskId);
+      const implementation = implementationResult(state, bound.taskId, this.options.profiles);
       const binding = await this.options.worktrees.openReview({
         runId: this.options.manifest.runId,
         taskId: bound.taskId,
@@ -203,8 +216,11 @@ export class GitWorkerAttemptPort implements ProductionWorkerAttemptPort {
           taskId: bound.taskId,
           attempt: bound.attempt,
           role,
-          workerKind: bound.worker,
-          implementationWorkerKind: implementation.worker,
+          profileId: bound.profileId,
+          profileFamily: bound.family,
+          workerKind: bound.family,
+          implementationProfileFamily: implementation.family,
+          implementationWorkerKind: implementation.family,
           commit: implementation.commit,
           allowedPaths: task.ownedPaths,
           requiredDisciplines: disciplines(role),
@@ -239,7 +255,9 @@ export class GitWorkerAttemptPort implements ProductionWorkerAttemptPort {
         runHead,
         attempt: bound.attempt,
         role,
-        workerKind: bound.worker,
+        profileId: bound.profileId,
+        profileFamily: bound.family,
+        workerKind: bound.family,
         commit: runHead,
         allowedPaths: [],
         requiredDisciplines: disciplines(role),
