@@ -1,6 +1,18 @@
 import { appendFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { vi } from "vitest";
+import { EffectExecutor } from "../../src/actions/executor.js";
+import { ActionRegistry } from "../../src/actions/registry.js";
+import type {
+  ActionContext,
+  ActionDependencies,
+  ActionHandler,
+  EffectIntent,
+  GitPort,
+  ReconcileResult,
+  RecoveryClass,
+} from "../../src/actions/types.js";
 import type { JsonValue } from "../../src/contracts/common.js";
 import type { HarnessEvent } from "../../src/contracts/events.js";
 import { validateHarnessEvent } from "../../src/contracts/events.js";
@@ -24,6 +36,8 @@ import type { DeepPartial } from "./fixture.js";
 import { deepMerge } from "./fixture.js";
 import { fixtureState, type FixtureState } from "./factories.js";
 import { completedResult } from "./factories.js";
+import { FakeClock } from "./fake-clock.js";
+import { FakeProcessRunner } from "./fake-process.js";
 import { createTempRepo } from "./temp-repo.js";
 
 export interface TempRepoWithWorktree {
@@ -496,4 +510,75 @@ export function replay(events: readonly HarnessEvent[]): RunState {
   let state = initialRunState("F023", workflowRevision);
   for (const event of events) state = reduceEvent(state, event);
   return state;
+}
+
+export const fixtureIntent = (
+  overrides: Partial<EffectIntent<string, JsonValue>> = {},
+): EffectIntent<string, JsonValue> => ({
+  action: "worker.start",
+  idempotencyKey: "effect:start:T001",
+  recovery: "reconcilable",
+  laneKey: "worker:T001",
+  input: {},
+  ...overrides,
+});
+
+function fakeGitPort(): GitPort {
+  return {
+    patchIdForRange: async () => "patch-id",
+    findCommitByTrailer: async () => undefined,
+    assertIntegrationMetadata: async () => undefined,
+    assertWorktreeCommit: async () => undefined,
+    commitTree: async () => "commit",
+    updateRefCas: async () => undefined,
+    revParse: async (ref) => ref,
+    revParseOptional: async () => undefined,
+    status: async () => [],
+  };
+}
+
+export function actionContextDependencies(): ActionDependencies {
+  return {
+    process: new FakeProcessRunner(),
+    git: fakeGitPort(),
+    approvals: { get: async () => undefined },
+    clock: new FakeClock(),
+    signal: new AbortController().signal,
+  };
+}
+
+export function actionContext(): ActionContext {
+  return Object.freeze({ ...actionContextDependencies(), isRecovery: false });
+}
+
+export function recoveryContext(): ActionContext {
+  return Object.freeze({ ...actionContextDependencies(), isRecovery: true });
+}
+
+export interface FakeHandlerOptions {
+  readonly recovery?: (input: JsonValue) => RecoveryClass;
+  readonly reconcile?: ReconcileResult<JsonValue>;
+  readonly execute?: JsonValue;
+}
+
+export function fakeHandler(options: FakeHandlerOptions = {}) {
+  const execute = vi.fn(async () => options.execute ?? { ok: true });
+  const reconcile = vi.fn(
+    async () => options.reconcile ?? ({ status: "not_found" } as const),
+  );
+  const handler: ActionHandler<"worker.start", JsonValue, JsonValue> = {
+    kind: "worker.start",
+    recovery: options.recovery ?? (() => "reconcilable"),
+    execute,
+    reconcile,
+  };
+  return Object.assign(handler, { execute, reconcile });
+}
+
+export function effectExecutor(
+  handler: ReturnType<typeof fakeHandler>,
+): EffectExecutor {
+  const registry = new ActionRegistry();
+  registry.register(handler);
+  return new EffectExecutor(registry, actionContextDependencies());
 }
