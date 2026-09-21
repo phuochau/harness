@@ -2,8 +2,10 @@ import type { EffectIntent } from "./actions/types.js";
 import type { Clock } from "./actions/types.js";
 import type { JsonValue } from "./contracts/common.js";
 import type { ControllerCommand } from "./contracts/controller-command.js";
+import type { DecisionEventDraft } from "./contracts/events.js";
 import {
   DurableCommandProcessor,
+  type AcceptedCommandRecord,
   type CommandDeriver,
 } from "./controller/command-source.js";
 import { ControllerCommandQueue } from "./controller/command-queue.js";
@@ -27,6 +29,16 @@ export interface DurableHarnessPorts {
   readonly clock: Clock;
   readonly derive: CommandDeriver;
   readonly effects: DurableEffectPort;
+  readonly lifecycle?: {
+    observed(
+      intent: EffectIntent<string, JsonValue>,
+      output: unknown,
+    ): readonly DecisionEventDraft[];
+    failed?(
+      intent: EffectIntent<string, JsonValue>,
+      error: unknown,
+    ): readonly DecisionEventDraft[];
+  };
 }
 
 export interface DurableHarnessSystem {
@@ -67,11 +79,16 @@ function effectResultCommand(
   runId: string,
   intent: EffectIntent<string, JsonValue>,
   outcome:
-    | { readonly status: "observed"; readonly output: unknown }
+    | {
+        readonly status: "observed";
+        readonly output: unknown;
+        readonly lifecycle: readonly DecisionEventDraft[];
+      }
     | {
         readonly status: "failed";
         readonly code: string;
         readonly evidence: readonly string[];
+        readonly lifecycle: readonly DecisionEventDraft[];
       },
 ): ControllerCommand {
   return {
@@ -87,7 +104,71 @@ function effectResultCommand(
       ...(outcome.status === "observed"
         ? { output: jsonValue(outcome.output) }
         : { code: outcome.code, evidence: [...outcome.evidence] }),
+      lifecycle: jsonValue(outcome.lifecycle),
     },
+  };
+}
+
+function record(value: JsonValue): Readonly<Record<string, JsonValue>> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("effect result payload must be an object");
+  }
+  return value;
+}
+
+function requiredString(
+  value: Readonly<Record<string, JsonValue>>,
+  key: string,
+): string {
+  const result = value[key];
+  if (typeof result !== "string" || result.length === 0) {
+    throw new Error(`effect result payload requires ${key}`);
+  }
+  return result;
+}
+
+function effectResultDecision(
+  accepted: AcceptedCommandRecord,
+): { readonly events: readonly DecisionEventDraft[]; readonly effects: readonly [] } {
+  const payload = record(accepted.command.payload);
+  const status = requiredString(payload, "status");
+  const action = requiredString(payload, "action");
+  const intentKey = requiredString(payload, "intentKey");
+  const entityId = requiredString(payload, "entityId");
+  const lifecycleValue = payload.lifecycle;
+  if (!Array.isArray(lifecycleValue)) {
+    throw new Error("effect result payload requires lifecycle events");
+  }
+  const lifecycle = lifecycleValue as unknown as DecisionEventDraft[];
+  if (status === "observed") {
+    return {
+      events: [{
+        eventType: "effect.observed",
+        entityId,
+        idempotencyKey: `observed:${intentKey}`,
+        payload: { action, intentKey, output: payload.output ?? null },
+      }, ...lifecycle],
+      effects: [],
+    };
+  }
+  if (status !== "failed") throw new Error(`unknown effect result status ${status}`);
+  const evidence = payload.evidence;
+  if (!Array.isArray(evidence) || evidence.some((item) => typeof item !== "string")) {
+    throw new Error("failed effect result requires string evidence");
+  }
+  return {
+    events: [{
+      eventType: "effect.failed",
+      entityId,
+      idempotencyKey: `failed:${intentKey}`,
+      payload: {
+        action,
+        intentKey,
+        code: requiredString(payload, "code"),
+        evidence,
+      },
+    }, ...lifecycle],
+    effects: [],
   };
 }
 
@@ -96,6 +177,7 @@ export function createHarnessSystem(
 ): DurableHarnessSystem {
   const dispatches = new Set<Promise<void>>();
   const recovering = new Set<string>();
+  let activityRevision = 0;
   let disposed = false;
   let controller: HarnessController;
 
@@ -111,6 +193,7 @@ export function createHarnessSystem(
   ): void => {
     if (recovering.has(intent.idempotencyKey)) return;
     recovering.add(intent.idempotencyKey);
+    activityRevision += 1;
     const operation = (async () => {
       let command: ControllerCommand;
       try {
@@ -120,9 +203,21 @@ export function createHarnessSystem(
         command = effectResultCommand(
           ports.runId,
           intent,
-          { status: "observed", output },
+          {
+            status: "observed",
+            output,
+            lifecycle: ports.lifecycle?.observed(intent, output) ?? [],
+          },
         );
       } catch (error) {
+        const defaultFailure: DecisionEventDraft = {
+          eventType: "job.failed",
+          entityId: entityFor(intent, ports.runId),
+          idempotencyKey: `job-failed:${intent.idempotencyKey}`,
+          payload: {
+            reason: error instanceof Error ? error.message : String(error),
+          },
+        };
         command = effectResultCommand(
           ports.runId,
           intent,
@@ -135,11 +230,19 @@ export function createHarnessSystem(
                 ? (error as { code: string }).code
                 : "EFFECT_EXECUTION_FAILED",
             evidence: safeEvidence(error),
+            lifecycle: ports.lifecycle?.failed?.(intent, error) ?? [defaultFailure],
           },
         );
       }
       try {
         await controller.enqueue(command);
+        await controller.enqueue({
+          schemaVersion: 1,
+          source: "timer",
+          kind: "tick",
+          idempotencyKey: `wake-after-effect:${intent.idempotencyKey}`,
+          payload: { reason: "effect_result", intentKey: intent.idempotencyKey },
+        });
       } finally {
         recovering.delete(intent.idempotencyKey);
       }
@@ -157,7 +260,11 @@ export function createHarnessSystem(
     journal: ports.journal,
     lease: ports.lease,
     clock: ports.clock,
-    derive: ports.derive,
+    derive: (state, accepted) =>
+      accepted.command.source === "controller" &&
+      accepted.command.kind === "effect_result"
+        ? effectResultDecision(accepted)
+        : ports.derive(state, accepted),
     hooks: {
       afterFreshEffectIntent: (intent) => dispatch(intent, "fresh"),
     },
@@ -166,10 +273,17 @@ export function createHarnessSystem(
 
   const drain = async (): Promise<void> => {
     while (true) {
+      const observedRevision = activityRevision;
       await controller.drain();
       const active = [...dispatches];
-      if (active.length === 0) return;
       await Promise.all(active);
+      await controller.drain();
+      if (
+        dispatches.size === 0 &&
+        activityRevision === observedRevision
+      ) {
+        return;
+      }
     }
   };
 

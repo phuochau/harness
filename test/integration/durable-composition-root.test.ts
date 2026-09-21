@@ -2,8 +2,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
-import type { JsonValue } from "../../src/contracts/common.js";
-import type { DecisionEventDraft } from "../../src/contracts/events.js";
 import type { AcceptedCommandRecord } from "../../src/controller/command-source.js";
 import type { RunState } from "../../src/core/state.js";
 import { createHarnessSystem } from "../../src/durable-composition-root.js";
@@ -43,36 +41,9 @@ it("persists an intent before dispatch and feeds its observation through the que
   const lease = await RunLease.acquire(paths, "controller:test");
   const clock = new FakeClock();
   const executions: string[] = [];
-  const derive = (_state: RunState, accepted: AcceptedCommandRecord) => {
-    const payload = accepted.command.payload as Record<string, JsonValue>;
-    if (accepted.command.kind === "effect_result") {
-      const event: DecisionEventDraft = payload.status === "observed"
-        ? {
-            eventType: "effect.observed",
-            entityId: String(payload.entityId),
-            idempotencyKey: `observed:${String(payload.intentKey)}`,
-            payload: {
-              action: String(payload.action),
-              intentKey: String(payload.intentKey),
-              output: payload.output ?? null,
-            },
-          }
-        : {
-            eventType: "effect.failed",
-            entityId: String(payload.entityId),
-            idempotencyKey: `failed:${String(payload.intentKey)}`,
-            payload: {
-              action: String(payload.action),
-              intentKey: String(payload.intentKey),
-              code: String(payload.code),
-              evidence: Array.isArray(payload.evidence) ? payload.evidence : [],
-            },
-          };
-      return { events: [event], effects: [] };
-    }
-    return {
+  const derive = (_state: RunState, accepted: AcceptedCommandRecord) => ({
       events: [],
-      effects: [
+      effects: accepted.command.source === "operator" ? [
         {
           action: "fake.effect",
           idempotencyKey: "fake-effect:F023:1",
@@ -80,9 +51,8 @@ it("persists an intent before dispatch and feeds its observation through the que
           laneKey: "fake:F023",
           input: { entityId: "run:F023", value: 42 },
         },
-      ],
-    };
-  };
+      ] : [],
+    });
   const system = createHarnessSystem({
     runId: "F023",
     workflowRevision: `sha256:${"a".repeat(64)}`,
@@ -153,24 +123,7 @@ it("reconciles an outstanding intent on resident restart without fresh execution
     journal,
     lease,
     clock,
-    derive: (_state, accepted) => {
-      const payload = accepted.command.payload as Record<string, JsonValue>;
-      return accepted.command.kind === "effect_result"
-        ? {
-            events: [{
-              eventType: "effect.observed",
-              entityId: String(payload.entityId),
-              idempotencyKey: `observed:${String(payload.intentKey)}`,
-              payload: {
-                action: String(payload.action),
-                intentKey: String(payload.intentKey),
-                output: payload.output ?? null,
-              },
-            }],
-            effects: [],
-          }
-        : { events: [], effects: [] };
-    },
+    derive: () => ({ events: [], effects: [] }),
     effects: {
       async runFresh() {
         throw new Error("fresh execution is forbidden during recovery");

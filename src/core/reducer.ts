@@ -289,10 +289,14 @@ function applyEvent(state: RunState, event: HarnessEvent): void {
       break;
     case "job.done": {
       const taskId = taskIdForJob(event.entityId);
-      if (taskId && !state.finalizedTasks[taskId]) {
+      if (
+        taskId &&
+        event.payload.requiresTaskFinalization !== false &&
+        !state.finalizedTasks[taskId]
+      ) {
         throw new ReducerError(`integration evidence missing for ${event.entityId}`);
       }
-      transitionJob(state, event.entityId, "VERIFYING", "DONE");
+      transitionJob(state, event.entityId, ["RUNNING", "VERIFYING"], "DONE");
       break;
     }
     case "job.invalidated":

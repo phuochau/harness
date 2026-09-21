@@ -272,7 +272,13 @@ export const HarnessEventSchema = Type.Union([
   event("planning.transcript_recovered", PlanningRecoveredPayloadSchema),
   event("planning.completed", PlanningCompletedPayloadSchema),
   event("planning.blocked", BlockerSchema),
-  event("job.done", Type.Object({}, { additionalProperties: false })),
+  event(
+    "job.done",
+    Type.Object(
+      { requiresTaskFinalization: Type.Optional(Type.Boolean()) },
+      { additionalProperties: false },
+    ),
+  ),
   event(
     "job.invalidated",
     Type.Object(
