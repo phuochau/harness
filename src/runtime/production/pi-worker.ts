@@ -205,6 +205,13 @@ export class ProductionPiWorkerRuntime implements ProductionWorkerRuntime {
 
   public constructor(private readonly options: ProductionPiWorkerRuntimeOptions) {}
 
+  private async cleanupProcess(value: PersistedPreparedPiAttempt): Promise<void> {
+    const process = await this.processRecord(value);
+    if (process !== undefined) {
+      await this.options.runtime.cancel({ attemptId: value.attemptId, process });
+    }
+  }
+
   private launchOnce(prepared: PreparedPiAttempt): Promise<PiProcessRecord> {
     const existing = this.launches.get(prepared.attemptId);
     if (existing !== undefined) return existing;
@@ -387,6 +394,7 @@ export class ProductionPiWorkerRuntime implements ProductionWorkerRuntime {
     output: WorkerResult,
   ): Promise<void> {
     const value = parsePrepared(persisted, this.options.profiles, this.options.processRoot);
+    await this.cleanupProcess(value);
     if (output.outcome === "blocked" || output.outcome === "failed") {
       await this.options.attempts.abort(value.binding);
     } else {
@@ -399,10 +407,7 @@ export class ProductionPiWorkerRuntime implements ProductionWorkerRuntime {
     _intent: EffectIntent<ProductionWorkerKind, ProductionWorkerInput>,
   ): Promise<void> {
     const value = parsePrepared(persisted, this.options.profiles, this.options.processRoot);
-    const process = await this.processRecord(value);
-    if (process !== undefined) {
-      await this.options.runtime.cancel({ attemptId: value.attemptId, process });
-    }
+    await this.cleanupProcess(value);
     await this.options.attempts.abort(value.binding);
   }
 }

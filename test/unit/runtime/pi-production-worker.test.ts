@@ -172,6 +172,7 @@ it("launches one durable Pi process and accepts its structured result", async ()
     value.binding,
   );
   await value.runtime.afterCompleted(prepared, value.result);
+  expect(value.pi.cancel).toHaveBeenCalledOnce();
   expect(value.attempts.release).toHaveBeenCalledWith(value.binding);
 });
 

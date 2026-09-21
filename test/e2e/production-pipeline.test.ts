@@ -184,6 +184,9 @@ class SimulatedPiRuntime {
       }
       await writeFile(prepared.resultPath, `${JSON.stringify(result)}\n`, "utf8");
       this.results.set(prepared.attemptId, result);
+      const controlDir = prepared.launch.controlDir ?? prepared.launch.sessionDir;
+      const receiptPublicKey = prepared.launch.receiptPublicKey;
+      if (receiptPublicKey === undefined) throw new Error("missing prepared receipt key");
       const process = processRecord({
         attemptId: prepared.attemptId,
         attemptToken: prepared.launch.attemptToken,
@@ -191,9 +194,11 @@ class SimulatedPiRuntime {
         cwd: prepared.launch.cwd,
         sessionId: prepared.launch.sessionId,
         sessionDir: prepared.launch.sessionDir,
-        eventsPath: join(prepared.launch.sessionDir, "events.jsonl"),
-        stderrPath: join(prepared.launch.sessionDir, "stderr.log"),
-        recordPath: join(prepared.launch.sessionDir, "process.json"),
+        eventsPath: join(controlDir, "events.jsonl"),
+        stderrPath: join(controlDir, "stderr.log"),
+        recordPath: join(controlDir, "process.json"),
+        providerPath: join(controlDir, "provider.json"),
+        receiptPublicKey,
       });
       this.records.set(prepared.attemptId, process);
       return { attemptId: prepared.attemptId, process };
