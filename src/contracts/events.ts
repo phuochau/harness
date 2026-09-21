@@ -48,6 +48,7 @@ export const EffectIntentPayloadSchema = Type.Object(
   },
   { additionalProperties: false },
 );
+export type EffectIntentPayload = Static<typeof EffectIntentPayloadSchema>;
 const EffectObservationPayloadSchema = Type.Object(
   {
     action: Type.String({ minLength: 1 }),
