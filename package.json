@@ -1,0 +1,57 @@
+{
+  "name": "pi-multi-agent-harness",
+  "version": "0.1.0",
+  "description": "Durable multi-agent orchestration for Pi",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "harness": "./bin/harness.mjs"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./extension": "./dist/pi/extension.js"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "presets",
+    "src/defaults"
+  ],
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./dist/pi/extension.js"
+    ]
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "check:phase1": "npm run typecheck && npm run build && vitest run test/unit/contracts test/unit/config test/unit/graph test/integration/package-smoke.test.ts"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "dependencies": {
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "commander": "15.0.0",
+    "execa": "10.0.1",
+    "proper-lockfile": "4.1.2",
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.86.1",
+    "@types/node": "26.6.2",
+    "@types/proper-lockfile": "4.1.4",
+    "fast-check": "4.10.2",
+    "typebox": "1.3.34",
+    "typescript": "7.0.2",
+    "vitest": "5.0.1"
+  }
+}
