@@ -1,5 +1,6 @@
 import type {
   EnvironmentDocument,
+  JsonValue,
   HarnessEvent,
   HarnessLock,
   TaskGraphDocument,
@@ -195,7 +196,7 @@ export interface FixtureState {
   readonly workflowRevision: `sha256:${string}`;
   readonly sequence: number;
   readonly eventHash: `sha256:${string}`;
-  readonly jobs: Readonly<Record<string, unknown>>;
+  readonly jobs: Readonly<Record<string, JsonValue>>;
 }
 
 export const fixtureState = fixture<FixtureState>(() => ({

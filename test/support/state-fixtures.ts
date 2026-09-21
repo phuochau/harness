@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { JsonValue } from "../../src/contracts/common.js";
@@ -6,9 +6,14 @@ import type { HarnessEvent } from "../../src/contracts/events.js";
 import { Journal, type EventInput } from "../../src/state/journal.js";
 import { RunLease, type LeaseHandle } from "../../src/state/lease.js";
 import { resolveRunPaths } from "../../src/state/paths.js";
+import {
+  writeSnapshot,
+  type EventBoundary,
+} from "../../src/state/snapshot.js";
 import type { RunPaths } from "../../src/state/types.js";
 import type { DeepPartial } from "./fixture.js";
 import { deepMerge } from "./fixture.js";
+import { fixtureState, type FixtureState } from "./factories.js";
 import { createTempRepo } from "./temp-repo.js";
 
 export interface TempRepoWithWorktree {
@@ -103,4 +108,66 @@ export async function journalFixture(): Promise<JournalFixture> {
     lease,
     cleanup: repo.cleanup,
   };
+}
+
+export interface PersistedRunOptions {
+  readonly events?: number;
+  readonly snapshotAt?: number;
+  readonly tornTail?: boolean;
+  readonly corruptSequence?: number;
+}
+
+export interface PersistedRunFixture extends JournalFixture {
+  readonly state: FixtureState;
+  readonly boundary: EventBoundary;
+}
+
+export async function persistedRunFixture(
+  options: PersistedRunOptions = {},
+): Promise<PersistedRunFixture> {
+  const fixture = await journalFixture();
+  const eventCount = options.events ?? 2;
+  const events: HarnessEvent[] = [];
+  for (let index = 0; index < eventCount; index += 1) {
+    const result = await fixture.journal.append(
+      fixtureEventInput({
+        idempotencyKey: `event:${index + 1}`,
+        entityId: `job:${index + 1}`,
+      }),
+      fixture.lease,
+    );
+    events.push(result.event);
+  }
+  const snapshotAt = Math.min(options.snapshotAt ?? 0, events.length);
+  const boundary: EventBoundary =
+    snapshotAt === 0
+      ? {
+          sequence: 0,
+          eventHash: `sha256:${"0".repeat(64)}` as `sha256:${string}`,
+        }
+      : {
+          sequence: snapshotAt,
+          eventHash: events[snapshotAt - 1]!.eventHash as `sha256:${string}`,
+        };
+  const state = fixtureState({
+    sequence: boundary.sequence,
+    eventHash: boundary.eventHash,
+  });
+  if (options.snapshotAt !== undefined) {
+    await writeSnapshot(fixture.paths, state, boundary, fixture.lease);
+  }
+  if (options.corruptSequence !== undefined) {
+    const lines = (await readFile(fixture.paths.events, "utf8"))
+      .trimEnd()
+      .split("\n");
+    const target = options.corruptSequence - 1;
+    const event = JSON.parse(lines[target]!) as Record<string, unknown>;
+    event.sequence = 999;
+    lines[target] = JSON.stringify(event);
+    await writeFile(fixture.paths.events, `${lines.join("\n")}\n`, "utf8");
+  }
+  if (options.tornTail) {
+    await appendFile(fixture.paths.events, '{"partial":', "utf8");
+  }
+  return { ...fixture, state, boundary };
 }
