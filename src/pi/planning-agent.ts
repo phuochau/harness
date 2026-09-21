@@ -59,6 +59,12 @@ export type PlanningCorrelationObservation =
 
 export class PlanningCorrelationError extends Error {}
 
+export interface PlanningProfileLifecycle {
+  begin(correlationId: string): Promise<unknown>;
+  settle(correlationId: string, finalTurnIndex: number): Promise<string | undefined>;
+  abortBeforeDispatch(correlationId: string, reason: string): Promise<void>;
+}
+
 interface PlanningRequestEntryData {
   readonly schema: "harness/planning-request/v1";
   readonly generation: number;
@@ -96,7 +102,10 @@ function isPlanningRequest(value: unknown): value is PlanningRequestEntryData {
 }
 
 export class PiPlanningCorrelation {
-  public constructor(private readonly pi: PiPlanningPort) {}
+  public constructor(
+    private readonly pi: PiPlanningPort,
+    private readonly profile?: PlanningProfileLifecycle,
+  ) {}
 
   public async enqueue(
     request: PlanningRequest,
@@ -122,23 +131,32 @@ export class PiPlanningCorrelation {
     if (!Number.isSafeInteger(generation) || generation < 1) {
       throw new PlanningCorrelationError("invalid planning correlation generation");
     }
-    const requestEntryId = await this.pi.appendEntry(
-      "harness:planning-request",
-      requestEntryData(request, generation),
-    );
-    const receipt = deepFreeze({
-      correlationId: request.correlationId,
-      generation,
-      sessionFile: session.sessionFile,
-      requestEntryId,
-    });
-    const marker = `<!-- harness-planning:${request.correlationId}:${generation} -->`;
-    const instruction = context.instruction?.trim();
-    await this.pi.sendUserMessage(
-      `${request.command}${instruction ? ` ${instruction}` : ""}\n\n${marker}`,
-      { expandPromptTemplates: true },
-    );
-    return receipt;
+    await this.profile?.begin(request.correlationId);
+    try {
+      const requestEntryId = await this.pi.appendEntry(
+        "harness:planning-request",
+        requestEntryData(request, generation),
+      );
+      const receipt = deepFreeze({
+        correlationId: request.correlationId,
+        generation,
+        sessionFile: session.sessionFile,
+        requestEntryId,
+      });
+      const marker = `<!-- harness-planning:${request.correlationId}:${generation} -->`;
+      const instruction = context.instruction?.trim();
+      await this.pi.sendUserMessage(
+        `${request.command}${instruction ? ` ${instruction}` : ""}\n\n${marker}`,
+        { expandPromptTemplates: true },
+      );
+      return receipt;
+    } catch (error) {
+      await this.profile?.abortBeforeDispatch(
+        request.correlationId,
+        error instanceof Error ? error.message : String(error),
+      );
+      throw error;
+    }
   }
 
   public async request(receipt: PlanningRunReceipt): Promise<PlanningRequest | undefined> {
@@ -164,6 +182,17 @@ export class PiPlanningCorrelation {
         status: "blocked",
         reason: "planning transcript has no safe terminal boundary",
         evidence: [...settlement.evidence],
+      };
+    }
+    const drift = await this.profile?.settle(
+      receipt.correlationId,
+      settlement.finalTurnIndex,
+    );
+    if (drift !== undefined) {
+      return {
+        status: "blocked",
+        reason: drift,
+        evidence: [receipt.correlationId, receipt.requestEntryId],
       };
     }
     return deepFreeze({

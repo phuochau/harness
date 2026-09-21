@@ -33,7 +33,8 @@
     "test": "vitest run",
     "check:phase1": "npm run typecheck && npm run build && vitest run test/unit/contracts test/unit/config test/unit/graph test/integration/package-smoke.test.ts",
     "check:phase2": "npm run check:phase1 && vitest run test/unit/state test/unit/core test/integration/controller-race.test.ts test/e2e/fake-controller.test.ts",
-    "check:phase3": "npm run check:phase2 && vitest run test/integration/git test/integration/herdr test/contract"
+    "check:phase3": "npm run check:phase2 && vitest run test/integration/git test/integration/herdr test/contract",
+    "check:phase4": "npm run check:phase3 && vitest run test/integration/speckit test/integration/pi-loader.test.ts test/integration/pi-residency.test.ts test/integration/init.test.ts test/unit/pi-commands.test.ts"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
