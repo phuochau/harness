@@ -231,7 +231,7 @@ it("rejects a recovery record signed under a replacement trust root", async () =
   expect(value.pi.recover).not.toHaveBeenCalled();
 });
 
-it("does not signal a process that has already completed during cancellation", async () => {
+it("cleans the process group even when the direct provider already completed", async () => {
   const value = await fixture();
   const prepared = await value.runtime.prepare(value.intent);
   await value.records.putPiProcess(value.bindProcess(prepared));
@@ -244,6 +244,19 @@ it("does not signal a process that has already completed during cancellation", a
     },
   });
   await value.runtime.abort(prepared, value.intent);
-  expect(value.pi.cancel).not.toHaveBeenCalled();
+  expect(value.pi.cancel).toHaveBeenCalledOnce();
+  expect(value.attempts.abort).toHaveBeenCalledWith(value.binding);
+});
+
+it("delegates monitor-loss cleanup to the identity-checking supervisor", async () => {
+  const value = await fixture();
+  const prepared = await value.runtime.prepare(value.intent);
+  await value.records.putPiProcess(value.bindProcess(prepared));
+  (value.pi.observe as any).mockResolvedValueOnce({
+    status: "identity_mismatch",
+    evidence: ["Pi monitor is missing while its provider remains alive"],
+  });
+  await value.runtime.abort(prepared, value.intent);
+  expect(value.pi.cancel).toHaveBeenCalledOnce();
   expect(value.attempts.abort).toHaveBeenCalledWith(value.binding);
 });

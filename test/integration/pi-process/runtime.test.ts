@@ -270,6 +270,58 @@ describe("durable Pi process transport", () => {
     await supervisor.cancel(record, 25);
   });
 
+  it("retains the prepared receipt key until a monitor claims the launch", async () => {
+    const root = await temporaryDirectory();
+    const controlDir = join(root, "control");
+    await mkdir(controlDir);
+    const receiptPrivateKeyPath = join(controlDir, "receipt-private.pem");
+    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+    await writeFile(
+      receiptPrivateKeyPath,
+      privateKey.export({ type: "pkcs8", format: "pem" }),
+      { mode: 0o600 },
+    );
+    const supervisor = new NodePiProcessSupervisor({
+      spawnProcess: (() => { throw new Error("simulated controller interruption"); }) as any,
+    });
+    await expect(supervisor.launch({
+      attemptId: "attempt-pre-monitor-crash",
+      attemptToken: "token-pre-monitor-crash",
+      executable: process.execPath,
+      argv: ["-e", ""],
+      cwd: root,
+      env: {},
+      sessionId: "session-pre-monitor-crash",
+      sessionDir: join(root, "session"),
+      controlDir,
+      receiptPrivateKeyPath,
+      receiptPublicKey: publicKey.export({ type: "spki", format: "pem" }).toString(),
+    })).rejects.toThrow("simulated controller interruption");
+    await expect(readFile(receiptPrivateKeyPath, "utf8")).resolves.toContain(
+      "BEGIN PRIVATE KEY",
+    );
+  });
+
+  it("persists signed completion when the provider exits before identity capture", async () => {
+    const root = await temporaryDirectory();
+    const supervisor = new NodePiProcessSupervisor();
+    const record = await supervisor.launch({
+      attemptId: "attempt-fast-exit",
+      attemptToken: "token-fast-exit",
+      executable: "/usr/bin/true",
+      argv: [],
+      cwd: root,
+      env: {},
+      sessionId: "session-fast-exit",
+      sessionDir: join(root, "session"),
+      controlDir: join(root, "control"),
+    });
+    await expect(supervisor.wait(record, AbortSignal.timeout(5_000))).resolves.toMatchObject({
+      exitCode: 0,
+      signal: null,
+    });
+  });
+
   it("rejects a provider-forged exit receipt instead of masking failure", async () => {
     const root = await temporaryDirectory();
     const controlDir = join(root, "control");

@@ -1,8 +1,11 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
-import { createManagedPiRuntimeFromResolved } from "../../../src/runtime/managed/factory.js";
+import {
+  createManagedPiRuntimeFromResolved,
+  managedRuntimeHash,
+} from "../../../src/runtime/managed/factory.js";
 import { sha256 } from "../../../src/shared/sha256.js";
 import { fixtureResolvedProfiles } from "../../support/factories.js";
 
@@ -58,4 +61,24 @@ it("rejects a recovery package whose frozen supervisor identity is unavailable",
       runtimeHash: `sha256:${"1".repeat(64)}`,
     },
   })).rejects.toThrow("frozen harness runtime identity is unavailable");
+});
+
+it("hashes every executable dist module used by recovery", async () => {
+  const packageRoot = await mkdtemp(join(tmpdir(), "harness-runtime-hash-"));
+  temporary.push(packageRoot);
+  await Promise.all([
+    mkdir(join(packageRoot, "bin"), { recursive: true }),
+    mkdir(join(packageRoot, "dist", "runtime", "pi-worker"), { recursive: true }),
+  ]);
+  await Promise.all([
+    writeFile(join(packageRoot, "bin", "harness.mjs"), "export {};\n"),
+    writeFile(join(packageRoot, "bin", "pi-process-monitor.mjs"), "export {};\n"),
+    writeFile(join(packageRoot, "dist", "runtime", "pi-worker", "runtime.js"), "export const value = 1;\n"),
+  ]);
+  const before = await managedRuntimeHash(packageRoot);
+  await writeFile(
+    join(packageRoot, "dist", "runtime", "pi-worker", "runtime.js"),
+    "export const value = 2;\n",
+  );
+  await expect(managedRuntimeHash(packageRoot)).resolves.not.toBe(before);
 });

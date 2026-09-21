@@ -113,6 +113,19 @@ durableCreate(launch.recordPath, {
   receiptPublicKey,
   startedAt: new Date().toISOString(),
 });
+if (launch.receiptPrivateKeyPath !== undefined) {
+  try {
+    unlinkSync(launch.receiptPrivateKeyPath);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  const keyDirectory = openSync(dirname(launch.receiptPrivateKeyPath), "r");
+  try {
+    fsyncSync(keyDirectory);
+  } finally {
+    closeSync(keyDirectory);
+  }
+}
 
 const childEnvironment = { ...process.env };
 delete childEnvironment.PI_HARNESS_ATTEMPT_TOKEN;
@@ -125,28 +138,34 @@ child = spawn(launch.executable, launch.argv, {
   detached: false,
   stdio: ["pipe", "inherit", "ignore"],
 });
-for (const signal of pendingSignals.splice(0)) forward(signal);
-if (child.pid !== undefined) {
-  const providerIdentity = await identity(child.pid);
-  const providerPayload = {
-    schemaVersion: 1,
-    attemptId: launch.attemptId,
-    pid: child.pid,
-    processGroupId: process.pid,
-    startIdentity: sha256(
-      `${child.pid}\0${providerIdentity.start}\0${providerIdentity.executable}\0${providerToken}`,
-    ),
-    executable: providerIdentity.executable,
-    attemptToken: providerToken,
-  };
-  durableCreate(launch.providerPath, signed(providerPayload));
-}
-const input = readFileSync(launch.stdinPath);
-child.stdin.end(input);
-const result = await new Promise((resolve, reject) => {
+const resultPromise = new Promise((resolve) => {
   child.once("error", () => resolve({ exitCode: 1, signal: null }));
   child.once("close", (exitCode, signal) => resolve({ exitCode, signal }));
 });
+child.stdin?.on("error", () => undefined);
+for (const signal of pendingSignals.splice(0)) forward(signal);
+if (child.pid !== undefined) {
+  try {
+    const providerIdentity = await identity(child.pid);
+    const providerPayload = {
+      schemaVersion: 1,
+      attemptId: launch.attemptId,
+      pid: child.pid,
+      processGroupId: process.pid,
+      startIdentity: sha256(
+        `${child.pid}\0${providerIdentity.start}\0${providerIdentity.executable}\0${providerToken}`,
+      ),
+      executable: providerIdentity.executable,
+      attemptToken: providerToken,
+    };
+    durableCreate(launch.providerPath, signed(providerPayload));
+  } catch {
+    try { child.kill("SIGKILL"); } catch {}
+  }
+}
+const input = readFileSync(launch.stdinPath);
+child.stdin.end(input);
+const result = await resultPromise;
 durableCreate(launch.exitPath, signed({ schemaVersion: 1, ...result }));
 await new Promise((resolve) => process.stdout.write(
   `${JSON.stringify({ type: "process_exit", ...result })}\n`,

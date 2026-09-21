@@ -1,8 +1,8 @@
-import { access, readFile, realpath } from "node:fs/promises";
+import { access, readFile, readdir, realpath } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { homedir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ProfileDocument } from "../../contracts/profiles.js";
 import { resolveProfiles, type LockedProfileResources, type ResolvedProfiles } from "../../config/profiles.js";
@@ -40,14 +40,27 @@ export interface ManagedPiRuntimeBaseInput {
 }
 
 export async function managedRuntimeHash(packageRoot: string): Promise<`sha256:${string}`> {
+  const executableFiles = async (directory: string): Promise<string[]> => {
+    const files: string[] = [];
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) files.push(...await executableFiles(path));
+      else if (entry.isFile() && entry.name.endsWith(".js")) files.push(path);
+    }
+    return files;
+  };
   const paths = [
+    join(packageRoot, "bin", "harness.mjs"),
     join(packageRoot, "bin", "pi-process-monitor.mjs"),
-    join(packageRoot, "dist", "runtime", "pi-process", "process.js"),
-    join(packageRoot, "dist", "runtime", "pi-process", "identity.js"),
-    join(packageRoot, "dist", "runtime", "production", "pi-worker.js"),
-  ];
-  const content = await Promise.all(paths.map((path) => readFile(path)));
-  return sha256(Buffer.concat(content.flatMap((value) => [value, Buffer.from([0])])));
+    ...await executableFiles(join(packageRoot, "dist")),
+  ].sort((left, right) => left.localeCompare(right));
+  const content = await Promise.all(paths.map(async (path) => [
+    Buffer.from(relative(packageRoot, path)),
+    Buffer.from([0]),
+    await readFile(path),
+    Buffer.from([0]),
+  ]));
+  return sha256(Buffer.concat(content.flat()));
 }
 
 async function assertPackageIdentity(input: ManagedPiRuntimeBaseInput): Promise<void> {

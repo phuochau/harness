@@ -24,6 +24,7 @@ const ATTEMPT_TOKEN_ENV = "PI_HARNESS_ATTEMPT_TOKEN";
 
 export interface PiProcessSupervisorDependencies {
   readonly identity?: ProcessIdentityPort;
+  readonly spawnProcess?: typeof spawn;
   readonly signalProcess?: (pid: number, signal: NodeJS.Signals) => void;
   readonly inspectProcessGroup?: (processGroupId: number) => boolean;
   readonly sleep?: (milliseconds: number) => Promise<void>;
@@ -240,7 +241,7 @@ function defaultInspectProcessGroup(processGroupId: number): boolean {
   }
 }
 
-async function consumeReceiptPrivateKey(spec: PiLaunchSpec): Promise<string> {
+async function readReceiptPrivateKey(spec: PiLaunchSpec): Promise<string> {
   if ((spec.receiptPrivateKeyPath === undefined) !== (spec.receiptPublicKey === undefined)) {
     throw new Error("Pi receipt public and private keys must be prepared together");
   }
@@ -257,13 +258,6 @@ async function consumeReceiptPrivateKey(spec: PiLaunchSpec): Promise<string> {
     .export({ type: "spki", format: "pem" }).toString();
   if (derivedPublicKey !== spec.receiptPublicKey) {
     throw new Error("Pi receipt private key does not match the prepared public key");
-  }
-  await unlink(spec.receiptPrivateKeyPath);
-  const directory = await open(dirname(spec.receiptPrivateKeyPath), "r");
-  try {
-    await directory.sync();
-  } finally {
-    await directory.close();
   }
   return privateKey;
 }
@@ -341,6 +335,7 @@ function abortPromise(signal: AbortSignal): Promise<never> {
 
 export class NodePiProcessSupervisor implements PiProcessSupervisor {
   private readonly identity: ProcessIdentityPort;
+  private readonly spawnProcess: typeof spawn;
   private readonly signalProcess: (pid: number, signal: NodeJS.Signals) => void;
   private readonly inspectProcessGroup: (processGroupId: number) => boolean;
   private readonly sleep: (milliseconds: number) => Promise<void>;
@@ -348,6 +343,7 @@ export class NodePiProcessSupervisor implements PiProcessSupervisor {
 
   public constructor(dependencies: PiProcessSupervisorDependencies = {}) {
     this.identity = dependencies.identity ?? new SystemProcessIdentity();
+    this.spawnProcess = dependencies.spawnProcess ?? spawn;
     this.signalProcess = dependencies.signalProcess ?? defaultSignalProcess;
     this.inspectProcessGroup = dependencies.inspectProcessGroup ?? defaultInspectProcessGroup;
     this.sleep = dependencies.sleep ?? delay;
@@ -385,6 +381,9 @@ export class NodePiProcessSupervisor implements PiProcessSupervisor {
       ...(spec.receiptPublicKey === undefined
         ? {}
         : { receiptPublicKey: spec.receiptPublicKey }),
+      ...(spec.receiptPrivateKeyPath === undefined
+        ? {}
+        : { receiptPrivateKeyPath: spec.receiptPrivateKeyPath }),
     };
     await Promise.all([
       open(eventsPath, "a", 0o600).then((file) => file.close()),
@@ -414,17 +413,23 @@ export class NodePiProcessSupervisor implements PiProcessSupervisor {
       // an unclaimed launch is safe: concurrent monitors race that atomic
       // claim and only the winner can spawn a provider.
     }
-    const receiptPrivateKey = await consumeReceiptPrivateKey(spec);
+    const receiptPrivateKey = await readReceiptPrivateKey(spec);
     const events = await open(eventsPath, "a", 0o600);
-    const child = spawn(process.execPath, [monitorPath, launchPath], {
-      cwd: spec.cwd,
-      env: { ...spec.env, [ATTEMPT_TOKEN_ENV]: spec.attemptToken },
-      shell: false,
-      detached: true,
-      // The detached monitor owns the Pi child and durable exit evidence.
-      // Provider stderr stays suppressed because it can contain credentials.
-      stdio: ["pipe", events.fd, "ignore"],
-    });
+    let child: ChildProcess;
+    try {
+      child = this.spawnProcess(process.execPath, [monitorPath, launchPath], {
+        cwd: spec.cwd,
+        env: { ...spec.env, [ATTEMPT_TOKEN_ENV]: spec.attemptToken },
+        shell: false,
+        detached: true,
+        // The detached monitor owns the Pi child and durable exit evidence.
+        // Provider stderr stays suppressed because it can contain credentials.
+        stdio: ["pipe", events.fd, "ignore"],
+      });
+    } catch (error) {
+      await events.close();
+      throw error;
+    }
     if (child.pid === undefined) throw new Error("Pi process did not receive a pid");
     if (child.stdin === null) throw new Error("Pi process monitor stdin is unavailable");
     child.stdin.end(receiptPrivateKey);
@@ -580,6 +585,7 @@ export class NodePiProcessSupervisor implements PiProcessSupervisor {
     for (const signal of ["SIGINT", "SIGTERM", "SIGKILL"] as const) {
       const observed = await this.identity.inspect(record);
       if (observed === undefined) {
+        if (!this.inspectProcessGroup(record.pid)) break;
         const provider = await readProviderRecord(record);
         if (provider === undefined) {
           throw new Error("cannot verify cancellation after Pi monitor loss");
@@ -596,7 +602,6 @@ export class NodePiProcessSupervisor implements PiProcessSupervisor {
             );
           }
         }
-        if (!this.inspectProcessGroup(record.pid)) break;
         this.signalProcess(record.pid, "SIGKILL");
         sent.push("SIGKILL");
         break;

@@ -401,15 +401,7 @@ export class ProductionPiWorkerRuntime implements ProductionWorkerRuntime {
     const value = parsePrepared(persisted, this.options.profiles, this.options.processRoot);
     const process = await this.processRecord(value);
     if (process !== undefined) {
-      const observation = await this.options.runtime.observe({
-        attemptId: value.attemptId,
-        process,
-      });
-      if (observation.status === "running") {
-        await this.options.runtime.cancel({ attemptId: value.attemptId, process });
-      } else if (observation.status === "identity_mismatch") {
-        throw new Error(`cannot safely abort Pi worker: ${observation.evidence.join("; ")}`);
-      }
+      await this.options.runtime.cancel({ attemptId: value.attemptId, process });
     }
     await this.options.attempts.abort(value.binding);
   }
