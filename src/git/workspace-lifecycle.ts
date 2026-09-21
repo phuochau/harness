@@ -42,7 +42,7 @@ export interface ImplementationWorkspaceInput {
 
 export interface ReviewWorkspaceInput {
   readonly runId: string;
-  readonly taskId: string;
+  readonly taskId?: string;
   readonly attempt: number;
   readonly commit: string;
 }
@@ -159,6 +159,25 @@ export class WorktreeLifecycle {
   ): Promise<LifecycleWorktreeBinding> {
     const path = workspacePath(this.workspaceRoot, input);
     assertPathInside(this.workspaceRoot, path);
+    const registered = this.registry.get(path);
+    if (registered !== undefined) {
+      const binding = registered.binding;
+      if (
+        binding.runId !== input.runId ||
+        binding.role !== input.role ||
+        binding.taskId !== input.taskId ||
+        binding.attempt !== input.attempt ||
+        binding.branch !== input.branch ||
+        binding.baseCommit !== input.baseCommit ||
+        binding.writable !== input.writable ||
+        JSON.stringify(binding.ownedPaths) !== JSON.stringify(input.ownedPaths ?? []) ||
+        JSON.stringify(binding.artifactPaths) !== JSON.stringify(input.artifactPaths ?? [])
+      ) {
+        throw new WorkspaceInvariantError("registered worktree binding mismatch");
+      }
+      await this.assertRegisteredIdentity(binding);
+      return binding;
+    }
     await mkdir(dirname(path), { recursive: true });
     const args = input.branch === null
       ? ["worktree", "add", "--detach", path, input.commit]
@@ -446,6 +465,15 @@ export class WorktreeLifecycle {
       return;
     }
     await this.removeRegistered(entry.binding, false);
+  }
+
+  public async releaseCompleted(binding: LifecycleWorktreeBinding): Promise<void> {
+    const entry = this.registry.get(binding.path);
+    if (entry === undefined) return;
+    if (entry.binding.id !== binding.id) {
+      throw new WorkspaceInvariantError("registered worktree binding mismatch");
+    }
+    await this.releasePath(binding.path);
   }
 
   public async cleanupAll(): Promise<void> {

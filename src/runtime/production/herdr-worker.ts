@@ -275,11 +275,12 @@ export class HerdrProductionWorkerRuntime implements ProductionWorkerRuntime {
 
   public async afterCompleted(
     prepared: PreparedWorkerAttempt,
-    _output: WorkerResult,
+    output: WorkerResult,
     _intent: EffectIntent<ProductionWorkerKind, ProductionWorkerInput>,
   ): Promise<void> {
     const value = parsePrepared(prepared);
     await this.options.herdr.closeWorkspace(value.identity.workspaceId);
+    if (output.outcome === "blocked" || output.outcome === "failed") return;
     await this.options.attempts.release(value.binding);
   }
 }

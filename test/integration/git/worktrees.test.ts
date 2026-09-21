@@ -247,3 +247,29 @@ it("recovers registered ownership after a controller restart", async () => {
     await context.cleanup();
   }
 });
+
+it("reuses the exact registered attempt and releases completed work idempotently", async () => {
+  const context = await fixture();
+  try {
+    const task = await context.repo.repository.ensureTaskBranch(
+      "F023",
+      "T005",
+      context.run.commit,
+    );
+    const input = {
+      runId: "F023",
+      taskId: "T005",
+      attempt: 1,
+      branch: task.name,
+      baseCommit: task.baseCommit,
+      ownedPaths: ["src/**"],
+    } as const;
+    const first = await context.manager.openImplementation(input);
+    await expect(context.manager.openImplementation(input)).resolves.toEqual(first);
+    await context.manager.sealImplementation(first, first.commit);
+    await context.manager.releaseCompleted(first);
+    await expect(context.manager.releaseCompleted(first)).resolves.toBeUndefined();
+  } finally {
+    await context.cleanup();
+  }
+});
