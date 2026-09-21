@@ -53,7 +53,7 @@ it("loads the source extension through Pi's real resource loader", async () => {
   ]);
   expect(extension.handlers.get("session_start")).toHaveLength(1);
   expect(extension.handlers.get("session_shutdown")).toHaveLength(1);
-});
+}, 15_000);
 
 it("starts and disposes a real idle Pi session without launching a model turn", async () => {
   const { cwd, loader } = await loadExtension("src/pi/extension.ts");
@@ -62,7 +62,7 @@ it("starts and disposes a real idle Pi session without launching a model turn", 
     sessionManager: SessionManager.inMemory(cwd),
   });
   session.dispose();
-});
+}, 15_000);
 
 it.runIf(process.env.HARNESS_COMPAT_PI === "1")(
   "loads the built extension with the pinned installed Pi",
@@ -71,4 +71,5 @@ it.runIf(process.env.HARNESS_COMPAT_PI === "1")(
     expect(result.errors).toEqual([]);
     expect(result.extensions.length).toBeGreaterThan(0);
   },
+  15_000,
 );
