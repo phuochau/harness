@@ -31,7 +31,8 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "check:phase1": "npm run typecheck && npm run build && vitest run test/unit/contracts test/unit/config test/unit/graph test/integration/package-smoke.test.ts"
+    "check:phase1": "npm run typecheck && npm run build && vitest run test/unit/contracts test/unit/config test/unit/graph test/integration/package-smoke.test.ts",
+    "check:phase2": "npm run check:phase1 && vitest run test/unit/state test/unit/core test/integration/controller-race.test.ts test/e2e/fake-controller.test.ts"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",

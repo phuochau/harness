@@ -90,6 +90,23 @@ export const fixtureWorkflow = fixture<WorkflowDocument>(() => ({
       needs: [{ stage: "record_task_done", scope: "all" }],
       with: { argv: "${commands.full_verify}" },
     },
+    {
+      id: "final_review",
+      uses: "worker.review",
+      runner: { prefer: ["codex", "claude", "devin"] },
+      needs: [{ stage: "final_verify", scope: "all" }],
+      policies: { require_different_worker_kind: true, scope: "final_diff" },
+    },
+    {
+      id: "push",
+      uses: "git.push",
+      needs: [{ stage: "final_review", scope: "all" }],
+    },
+    {
+      id: "final_pr",
+      uses: "github.pull-request",
+      needs: [{ stage: "push", scope: "all" }],
+    },
   ],
 }));
 

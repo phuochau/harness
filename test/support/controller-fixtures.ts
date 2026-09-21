@@ -1,5 +1,7 @@
 import type { JsonValue } from "../../src/contracts/common.js";
 import type { ControllerCommand } from "../../src/contracts/controller-command.js";
+import type { TaskGraphDocument } from "../../src/contracts/task-graph.js";
+import { compileWorkflow } from "../../src/config/compile.js";
 import type {
   CommandDecisionBatch,
   DecisionEventDraft,
@@ -23,6 +25,11 @@ import {
 } from "../../src/core/assignment.js";
 import type { EvidenceGit } from "../../src/core/evidence.js";
 import { initialRunState, type RunState } from "../../src/core/state.js";
+import {
+  WorkflowScheduler,
+  type SchedulerAction,
+} from "../../src/core/scheduler.js";
+import { validateGraph } from "../../src/core/task-graph.js";
 import type {
   ReviewSelection,
 } from "../../src/core/review-policy.js";
@@ -39,6 +46,15 @@ import { FakeClock } from "./fake-clock.js";
 import type { DeepPartial } from "./fixture.js";
 import { deepMerge, fixture } from "./fixture.js";
 import { createTempRepoWithWorktree } from "./state-fixtures.js";
+import {
+  FakeActionRegistry,
+  type CrashBoundary,
+} from "./fake-action-registry.js";
+import {
+  diamondTaskGraph,
+  fixtureCompileInput,
+  fixtureGraphContextFor,
+} from "./factories.js";
 
 const revision = `sha256:${"a".repeat(64)}`;
 
@@ -543,4 +559,103 @@ export function fakeEvidenceGit(
     worktreeStatus: async () => options.status ?? [],
     worktreeCommit: async () => options.worktreeCommit ?? "abc123",
   };
+}
+
+export function successfulFakeResults(): Readonly<Record<string, unknown>> {
+  return {
+    "command.run": { exitCode: 0 },
+    "spec-kit.tasks": { graph: "accepted" },
+    "worker.execute": { outcome: "completed" },
+    "worker.review": { outcome: "approved" },
+    "git.integrate": { candidateCommit: "candidate" },
+    "git.project-task-status": { targetCommit: "target" },
+    "git.push": { pushed: true },
+    "github.pull-request": { url: "https://example.invalid/pr/1" },
+  };
+}
+
+export function graphWithIndependentNonParallelTask(): TaskGraphDocument {
+  const graph = structuredClone(diamondTaskGraph());
+  graph.tasks[0]!.dependsOn = [];
+  graph.tasks[0]!.parallelEligible = true;
+  graph.tasks[1]!.dependsOn = [];
+  graph.tasks[1]!.parallelEligible = false;
+  graph.tasks[2]!.dependsOn = [];
+  graph.tasks[2]!.parallelEligible = true;
+  return graph;
+}
+
+export interface ControllerFixtureOptions {
+  readonly graph?: TaskGraphDocument;
+  readonly actionResults?: Readonly<Record<string, unknown>>;
+  readonly crashAt?: CrashBoundary;
+}
+
+export class FakeControllerSystem {
+  public readonly state;
+  private hasRun = false;
+
+  public constructor(
+    private readonly scheduler: WorkflowScheduler,
+    private readonly actions: FakeActionRegistry,
+  ) {
+    this.state = scheduler.state;
+  }
+
+  public get metrics() {
+    return this.actions.metrics;
+  }
+
+  public async runToQuiescence(): Promise<void> {
+    if (this.hasRun) return;
+    this.hasRun = true;
+    await this.scheduler.runToQuiescence(this.actions);
+  }
+
+  public async crashAndRestart(): Promise<void> {
+    const first: SchedulerAction = {
+      kind: "worker.execute",
+      jobId: "implement:T001",
+      stageId: "implement",
+      taskId: "T001",
+      attempt: 1,
+      input: {},
+    };
+    try {
+      await this.actions.execute(first);
+    } catch (error) {
+      if (!(error instanceof Error) || !/injected crash/.test(error.message)) {
+        throw error;
+      }
+    }
+    await this.actions.recover(first);
+    await this.runToQuiescence();
+  }
+
+  public actionKinds(): string[] {
+    return this.actions.actionKinds();
+  }
+
+  public executeCount(kind: string, identity: string): number {
+    return this.actions.executeCount(kind, identity);
+  }
+
+  public observationCount(kind: string, identity: string): number {
+    return this.actions.observationCount(kind, identity);
+  }
+}
+
+export async function createControllerFixture(
+  options: ControllerFixtureOptions = {},
+): Promise<FakeControllerSystem> {
+  const graph = options.graph ?? diamondTaskGraph();
+  const validated = validateGraph(graph, fixtureGraphContextFor(graph));
+  const workflow = compileWorkflow(fixtureCompileInput());
+  return new FakeControllerSystem(
+    new WorkflowScheduler(workflow, validated),
+    new FakeActionRegistry(
+      options.actionResults ?? successfulFakeResults(),
+      options.crashAt,
+    ),
+  );
 }
