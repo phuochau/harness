@@ -8,20 +8,13 @@ pi_packages:
     scope: project
     resources:
       extensions: [dist/pi/extension.js]
-agent_plugins:
-  - id: superpowers-pi
-    dependency: superpowers
-    agent: pi
-    plugin_id: superpowers
-  - id: superpowers-codex
-    dependency: superpowers
-    agent: codex
-    plugin_id: superpowers-dev/superpowers
-  - id: superpowers-devin
-    dependency: superpowers
-    agent: devin
-    plugin_id: superpowers
-  - id: superpowers-claude
-    dependency: superpowers
-    agent: claude
-    plugin_id: superpowers@superpowers-dev
+  - id: devin-acp
+    dependency: pi-devin-acp
+    scope: managed
+    resources:
+      extensions: [index.ts]
+  - id: claude-bridge
+    dependency: pi-claude-bridge
+    scope: managed
+    resources:
+      extensions: [src/index.ts]

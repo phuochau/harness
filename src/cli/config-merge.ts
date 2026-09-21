@@ -72,13 +72,16 @@ export function validateGeneratedConfiguration(files: Readonly<Record<string, st
     throw new Error("invalid generated harness policy");
   }
   const packages = settingsPackages(JSON.parse(files[".pi/settings.json"]!));
-  if (packages.length !== environment.pi_packages.length) {
+  const projectPackages = environment.pi_packages.filter(
+    (requirement) => requirement.scope === "project",
+  );
+  if (packages.length !== projectPackages.length) {
     throw new Error("Pi settings package set disagrees with the environment");
   }
   if (new Set(packages.map((item) => item.source)).size !== packages.length) {
     throw new Error("Pi settings package sources must be unique");
   }
-  for (const requirement of environment.pi_packages) {
+  for (const requirement of projectPackages) {
     const dependency = lock.dependencies.find(
       (candidate) => candidate.id === requirement.dependency,
     )!;

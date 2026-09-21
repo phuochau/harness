@@ -1,4 +1,6 @@
 import type { ProcessRunner } from "../actions/types.js";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { EnvironmentDocument } from "../contracts/index.js";
 import { executeInstallPlan, type InstallApproval } from "../install/executor.js";
 import { mergePiPackageSettings } from "../install/pi-settings.js";
@@ -13,6 +15,7 @@ import type {
 } from "../install/types.js";
 import { OFFICIAL_NPM_REGISTRY } from "../install/recipes.js";
 import { doctor, type DoctorReport } from "./doctor.js";
+import { managedRuntimePaths } from "../runtime/managed/paths.js";
 import {
   assertLauncherMatchesLock,
   readDeclarativeProject,
@@ -24,6 +27,7 @@ export interface BootstrapOptions {
   readonly dryRun?: boolean;
   readonly repair?: boolean;
   readonly yes?: boolean;
+  readonly dataHome?: string;
 }
 
 export interface BootstrapDependencies {
@@ -50,8 +54,30 @@ export type BootstrapResult =
 
 type PiPackageRequirement = EnvironmentDocument["pi_packages"][number];
 
+function managedDependencies(project: DeclarativeProject): ReadonlySet<string> {
+  const byId = new Map(project.lock.dependencies.map((item) => [item.id, item]));
+  const selected = new Set(
+    project.environment.pi_packages
+      .filter((item) => item.scope === "managed")
+      .map((item) => item.dependency),
+  );
+  const visit = (id: string): void => {
+    const dependency = byId.get(id);
+    if (dependency === undefined) throw new Error(`unknown managed dependency ${id}`);
+    for (const parent of dependency.dependsOn) {
+      if (selected.has(parent)) continue;
+      selected.add(parent);
+      visit(parent);
+    }
+  };
+  for (const id of [...selected]) visit(id);
+  return selected;
+}
+
 function piRequirement(project: DeclarativeProject, stepId: string): PiPackageRequirement | undefined {
-  return project.environment.pi_packages.find((item) => item.dependency === stepId);
+  return project.environment.pi_packages.find(
+    (item) => item.dependency === stepId && item.scope === "project",
+  );
 }
 
 function probeResult(
@@ -88,9 +114,11 @@ async function configurePiPackage(
   );
   await mergePiPackageSettings({
     root: project.root,
-    declaredSources: project.environment.pi_packages.map((item) =>
+    declaredSources: project.environment.pi_packages
+      .filter((item) => item.scope === "project")
+      .map((item) =>
       project.lock.dependencies.find((dependency) => dependency.id === item.dependency)!.piSource!,
-    ),
+      ),
     entry: {
       source: dependency.piSource!,
       extensions: (resources.extensions ?? []).map((path) => `+${path}`),
@@ -140,8 +168,18 @@ export async function bootstrap(
     dependencies.machinePolicy,
     project.projectPolicy,
   );
+  const dataHome = options.dataHome ??
+    process.env.XDG_DATA_HOME ??
+    join(homedir(), ".local", "share");
+  const managed = managedRuntimePaths({
+    dataHome,
+    runtimeVersion: project.lock.harnessVersion,
+    profileId: "planner-codex",
+  });
   const plan = createInstallPlan(resolvedLock, initialReport, policy, {
     repair: options.repair === true,
+    managedDependencyIds: managedDependencies(project),
+    managedRoot: managed.packages,
   });
   await dependencies.presenter.show(plan);
   if (options.dryRun === true) return { status: "planned", plan };

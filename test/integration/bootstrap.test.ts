@@ -44,14 +44,18 @@ it("installs the approved project-local Pi package and verifies it", async () =>
   process.queue({ exitCode: 0, stdout: "installed", stderr: "" });
   let installed = false;
   const versions: Record<string, string> = {
+    node: "22.22.2",
     "pi-coding-agent": "0.86.1",
     typebox: "1.3.34",
     "spec-kit": "0.8.7",
     superpowers: "6.4.1",
-    herdr: "0.9.1",
+    "pi-devin-acp": "0.3.4",
+    "pi-claude-bridge": "0.8.0",
     codex: "0.155.1",
     devin: "3000.10.31",
     claude: "2.1.234",
+    git: "2.51.0",
+    "github-cli": "2.80.0",
   };
   const report = () => ({
     byId: Object.fromEntries([

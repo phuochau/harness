@@ -43,6 +43,48 @@ it("uses the exact locked project-local Pi package recipe", () => {
   expect(plan.warnings.join(" ")).toMatch(/arbitrary code/);
 });
 
+it("installs managed Pi provider packages under the approved runtime root", () => {
+  const providerLock: HarnessLock = {
+    ...piLock,
+    dependencies: [
+      {
+        ...piLock.dependencies[0]!,
+        id: "pi-devin-acp",
+        version: "0.3.4",
+        source: {
+          kind: "npm",
+          identity: "@tian.zuo/pi-devin-acp",
+          version: "0.3.4",
+          integrity: "sha512-su1j4yDc8nSvHvx4eFvyXp2BAHFjArThdKUzEoy+v/AnLUKx6E39bFXzS0RZGTweueddKKdhiihEeK5yWaH1nQ==",
+        },
+        piSource: "npm:@tian.zuo/pi-devin-acp@0.3.4",
+      },
+    ],
+  };
+  const plan = createInstallPlan(
+    providerLock,
+    { byId: { "pi-devin-acp": { id: "pi-devin-acp", status: "missing" } } },
+    effectivePolicy(builtInBaseline(), undefined, {}),
+    {
+      managedDependencyIds: new Set(["pi-devin-acp"]),
+      managedRoot: "/managed/pi-harness/runtimes/0.1.0/packages",
+    },
+  );
+  expect(plan.steps[0]).toMatchObject({
+    mode: "automatic",
+    executable: "npm",
+    scope: "managed",
+    argv: [
+      "install",
+      "--prefix",
+      "/managed/pi-harness/runtimes/0.1.0/packages",
+      "--ignore-scripts",
+      "--registry=https://registry.npmjs.org/",
+      "@tian.zuo/pi-devin-acp@0.3.4",
+    ],
+  });
+});
+
 it("marks unknown or unverifiable sources as manual blockers", () => {
   const lock: HarnessLock = {
     ...piLock,
@@ -91,6 +133,27 @@ it("orders dependencies and skips exact versions already present", () => {
     ["parent", "skipped"],
     ["child", "automatic"],
   ]);
+});
+
+it("accepts versions satisfying a locked minimum and system capability", () => {
+  const lock: HarnessLock = {
+    ...piLock,
+    dependencies: [
+      { ...piLock.dependencies[0]!, id: "node", version: ">=22.22.2" },
+      { ...piLock.dependencies[0]!, id: "git", version: "system" },
+    ],
+  };
+  const plan = createInstallPlan(
+    lock,
+    {
+      byId: {
+        node: { id: "node", status: "present", version: "22.23.0" },
+        git: { id: "git", status: "present", version: "2.51.0" },
+      },
+    },
+    effectivePolicy(builtInBaseline(), undefined, {}),
+  );
+  expect(plan.steps.map((step) => step.mode)).toEqual(["skipped", "skipped"]);
 });
 
 it("blocks unsafe observed state and unexpected project package entries", () => {

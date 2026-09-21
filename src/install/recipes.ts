@@ -13,7 +13,7 @@ export interface AutomaticInstallRecipe {
   readonly argv: readonly string[];
   readonly environment?: Readonly<Record<string, string>>;
   readonly cwd: "trusted-install-root";
-  readonly scope: "project" | "global";
+  readonly scope: "project" | "managed" | "global";
   readonly expectedMutations: readonly string[];
   readonly rollback: string;
 }
@@ -31,7 +31,41 @@ function exactPiSource(dependency: LockedDependency, source: TrustedSource): str
 export function recipeFor(
   dependency: LockedDependency,
   source: TrustedSource,
+  options: {
+    readonly managed?: boolean;
+    readonly managedRoot?: string;
+  } = {},
 ): InstallRecipe {
+  if (options.managed === true) {
+    if (source.kind !== "npm" || options.managedRoot === undefined) {
+      return {
+        mode: "manual",
+        reason: "managed dependencies require an exact npm source and runtime root",
+      };
+    }
+    if (!options.managedRoot.startsWith("/") || options.managedRoot.includes("\0")) {
+      return { mode: "manual", reason: "managed runtime root is unsafe" };
+    }
+    return {
+      mode: "automatic",
+      recipe: {
+        executable: "npm",
+        argv: [
+          "install",
+          "--prefix",
+          options.managedRoot,
+          "--ignore-scripts",
+          `--registry=${OFFICIAL_NPM_REGISTRY}`,
+          `${source.identity}@${source.version}`,
+        ],
+        environment: npmRegistryEnvironment,
+        cwd: "trusted-install-root",
+        scope: "managed",
+        expectedMutations: [`${options.managedRoot}/node_modules/**`],
+        rollback: `npm uninstall --prefix ${options.managedRoot} ${source.identity}`,
+      },
+    };
+  }
   if (dependency.kind === "pi-package") {
     const piSource = exactPiSource(dependency, source);
     if (piSource === undefined) {

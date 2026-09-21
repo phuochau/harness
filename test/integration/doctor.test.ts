@@ -3,11 +3,27 @@ import { afterEach, expect, it } from "vitest";
 import { doctor } from "../../src/cli/doctor.js";
 import { executableCapabilities } from "../../src/cli/main.js";
 import { readDeclarativeProject } from "../../src/cli/trusted-project-reader.js";
+import { probeNodeVersion } from "../../src/install/probes.js";
 import { maliciousProjectFixture } from "../support/install-fixtures.js";
 
 const temporary: string[] = [];
 afterEach(async () => {
   await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+});
+
+it("enforces the Node floor required by the Devin ACP dependency", () => {
+  expect(probeNodeVersion("v22.19.0")).toEqual({
+    id: "node",
+    status: "wrong_version",
+    version: "22.19.0",
+    required: ">=22.22.2",
+  });
+  expect(probeNodeVersion("v22.22.2")).toEqual({
+    id: "node",
+    status: "present",
+    version: "22.22.2",
+    required: ">=22.22.2",
+  });
 });
 
 it("returns a schema-versioned report with required versions and redacted evidence", async () => {
@@ -51,26 +67,17 @@ it("treats every missing required locked capability as unhealthy", async () => {
     .toBe(true);
 });
 
-it("projects routed profile IDs to distinct provider families", async () => {
+it("does not require Herdr integration capabilities", async () => {
   const root = await maliciousProjectFixture();
   temporary.push(root);
   const capabilities = executableCapabilities(await readDeclarativeProject(root));
   const integrations = capabilities.filter((item) =>
     item.id.startsWith("herdr-integration:"),
   );
-  expect(integrations.map((item) => item.id).sort()).toEqual([
-    "herdr-integration:claude",
-    "herdr-integration:codex",
-    "herdr-integration:devin",
-  ]);
-  for (const integration of integrations) {
-    const target = integration.id.slice("herdr-integration:".length);
-    expect(integration.parseVersion(`${target}: current (v1) (/tmp/hook)`)).toBe("current");
-    expect(integration.parseVersion(`${target}: not installed (/tmp/hook)`)).toBeUndefined();
-  }
+  expect(integrations).toEqual([]);
 });
 
-it("requires the locked Superpowers version in Pi and every supported worker", async () => {
+it("does not probe user-global agent plugins for managed profiles", async () => {
   const root = await maliciousProjectFixture();
   temporary.push(root);
   const capabilities = executableCapabilities(await readDeclarativeProject(root));
@@ -80,36 +87,10 @@ it("requires the locked Superpowers version in Pi and every supported worker", a
       .map((item) => [item.id, item]),
   );
 
-  expect(Object.keys(probes).sort()).toEqual([
-    "agent-plugin:superpowers-claude",
-    "agent-plugin:superpowers-codex",
-    "agent-plugin:superpowers-devin",
-    "agent-plugin:superpowers-pi",
-  ]);
-  expect(probes["agent-plugin:superpowers-pi"]?.parseVersion(
-    "  /opt/pi-harness/superpowers/6.4.1\n",
-  )).toBe("6.4.1");
-  expect(probes["agent-plugin:superpowers-pi"]?.parseVersion(
-    "  C:\\pi-harness\\superpowers\\6.4.1\n",
-  )).toBe("6.4.1");
-  expect(probes["agent-plugin:superpowers-pi"]?.parseVersion(
-    "  /opt/pi-harness/superpowers/6.4.10\n",
-  )).toBeUndefined();
-  expect(probes["agent-plugin:superpowers-devin"]?.parseVersion(
-    "superpowers v6.4.1 enabled\n",
-  )).toBe("6.4.1");
-  expect(probes["agent-plugin:superpowers-devin"]?.parseVersion(
-    "superpowers v6.4.10 enabled\n",
-  )).toBeUndefined();
-  expect(probes["agent-plugin:superpowers-claude"]?.parseVersion(JSON.stringify([
-    { id: "superpowers@superpowers-dev", version: "6.4.1", enabled: true },
-  ]))).toBe("6.4.1");
-  expect(probes["agent-plugin:superpowers-claude"]?.parseVersion(JSON.stringify([
-    { id: "superpowers@superpowers-dev", version: "6.4.1", enabled: false },
-  ]))).toBeUndefined();
+  expect(probes).toEqual({});
 });
 
-it("keeps the four Superpowers probes for legacy environment/v1 files", async () => {
+it("keeps global plugin discovery disabled when agent_plugins is absent", async () => {
   const root = await maliciousProjectFixture();
   temporary.push(root);
   const environmentPath = `${root}/.harness/environment.yaml`;
@@ -120,5 +101,5 @@ it("keeps the four Superpowers probes for legacy environment/v1 files", async ()
     "utf8",
   );
   const capabilities = executableCapabilities(await readDeclarativeProject(root));
-  expect(capabilities.filter((item) => item.id.startsWith("agent-plugin:"))).toHaveLength(4);
+  expect(capabilities.filter((item) => item.id.startsWith("agent-plugin:"))).toHaveLength(0);
 });

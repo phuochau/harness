@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { initProject } from "../../../src/cli/init.js";
-import { probeEnvironment } from "../../../src/install/probes.js";
+import {
+  probeEnvironment,
+  probeExecutable,
+} from "../../../src/install/probes.js";
 import { FakeProcessRunner } from "../../support/fake-process.js";
 
 const temporary: string[] = [];
@@ -124,4 +127,78 @@ it("runs executable probes shell-free and redacts auth output", async () => {
   expect(report.byId["auth:tool"]).toEqual({ id: "auth:tool", status: "present" });
   expect(JSON.stringify(report)).not.toContain("secret-value");
   expect(process.calls.every((call) => call.options.shell === false)).toBe(true);
+});
+
+it("applies minimum-version constraints during executable probing", async () => {
+  const process = new FakeProcessRunner();
+  process.queue({ exitCode: 0, stdout: "v22.19.0\n", stderr: "" });
+  const results = await probeExecutable(process, {
+    id: "node",
+    command: "node",
+    versionArgs: ["--version"],
+    expectedVersion: ">=22.22.2",
+    parseVersion: (stdout) => /v(\d+\.\d+\.\d+)/.exec(stdout)?.[1],
+  });
+  expect(results[0]).toMatchObject({
+    id: "node",
+    status: "wrong_version",
+    version: "22.19.0",
+  });
+});
+
+it("probes exact managed provider packages without importing their extensions", async () => {
+  const root = await projectFixture();
+  const managed = join(root, "managed-packages");
+  for (const [name, version, extension] of [
+    ["@tian.zuo/pi-devin-acp", "0.3.4", "index.ts"],
+    ["pi-claude-bridge", "0.8.0", "src/index.ts"],
+  ] as const) {
+    const packageRoot = join(managed, "node_modules", name);
+    await mkdir(dirname(join(packageRoot, extension)), { recursive: true });
+    await writeFile(
+      join(packageRoot, "package.json"),
+      JSON.stringify({ name, version }),
+      "utf8",
+    );
+    await writeFile(join(packageRoot, extension), "throw new Error('must not import')", "utf8");
+  }
+  await writeFile(
+    join(managed, "package-lock.json"),
+    JSON.stringify({
+      packages: {
+        "node_modules/@tian.zuo/pi-devin-acp": {
+          integrity: "sha512-su1j4yDc8nSvHvx4eFvyXp2BAHFjArThdKUzEoy+v/AnLUKx6E39bFXzS0RZGTweueddKKdhiihEeK5yWaH1nQ==",
+        },
+        "node_modules/pi-claude-bridge": {
+          integrity: "sha512-CaSXdCdMWLGcvvG4IZuKeyUIyLio2m8nEO7cUFZdxKPdkwWuf8Eq46Ys2z3VlSjCidlIpasLwiCdJStXSt6EZQ==",
+        },
+      },
+    }),
+    "utf8",
+  );
+  const report = await probeEnvironment({
+    root,
+    managedPackagesRoot: managed,
+    process: new FakeProcessRunner(),
+    capabilities: [],
+  });
+  expect(report.byId["pi-devin-acp"]).toMatchObject({
+    status: "present",
+    version: "0.3.4",
+  });
+  expect(report.byId["pi-claude-bridge"]).toMatchObject({
+    status: "present",
+    version: "0.8.0",
+  });
+
+  const lock = JSON.parse(await readFile(join(managed, "package-lock.json"), "utf8"));
+  lock.packages["node_modules/pi-claude-bridge"].integrity = "sha512-tampered";
+  await writeFile(join(managed, "package-lock.json"), JSON.stringify(lock), "utf8");
+  const tampered = await probeEnvironment({
+    root,
+    managedPackagesRoot: managed,
+    process: new FakeProcessRunner(),
+    capabilities: [],
+  });
+  expect(tampered.byId["pi-claude-bridge"]?.status).toBe("wrong_source");
 });

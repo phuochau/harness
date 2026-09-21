@@ -24,6 +24,7 @@ import { compileWorkflow } from "../config/compile.js";
 import { createStandaloneProductionEffects } from "../runtime/production/system.js";
 import type { JsonValue } from "../contracts/common.js";
 import { createWorkflowLifecycle } from "../core/workflow-lifecycle.js";
+import { managedRuntimePaths } from "../runtime/managed/paths.js";
 
 function semver(stdout: string): string | undefined {
   return /(?:^|\s|v)(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/.exec(stdout)?.[1];
@@ -49,22 +50,26 @@ function agentPluginCapabilityId(id: string): string {
   return `agent-plugin:${id}`;
 }
 
-const legacySuperpowersPlugins = [
-  { id: "superpowers-pi", dependency: "superpowers", agent: "pi", plugin_id: "superpowers" },
-  { id: "superpowers-codex", dependency: "superpowers", agent: "codex", plugin_id: "superpowers-dev/superpowers" },
-  { id: "superpowers-devin", dependency: "superpowers", agent: "devin", plugin_id: "superpowers" },
-  { id: "superpowers-claude", dependency: "superpowers", agent: "claude", plugin_id: "superpowers@superpowers-dev" },
-] as const;
-
 function declaredAgentPlugins(project: DeclarativeProject) {
-  return project.environment.agent_plugins ?? legacySuperpowersPlugins;
+  return project.environment.agent_plugins ?? [];
 }
 
 export function executableCapabilities(
   project: DeclarativeProject,
 ): readonly ExecutableCapability[] {
+  const managed = managedRuntimePaths({
+    dataHome: process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"),
+    runtimeVersion: project.lock.harnessVersion,
+    profileId: "planner-codex",
+  });
   const result: ExecutableCapability[] = [
-    { id: "node", command: process.execPath, versionArgs: ["--version"], parseVersion: semver },
+    {
+      id: "node",
+      command: process.execPath,
+      versionArgs: ["--version"],
+      expectedVersion: ">=22.22.2",
+      parseVersion: semver,
+    },
     { id: "git", command: "git", versionArgs: ["--version"], parseVersion: semver },
     {
       id: "github-cli",
@@ -75,9 +80,8 @@ export function executableCapabilities(
     },
   ];
   const commands: Readonly<Record<string, string>> = {
-    "pi-coding-agent": "pi",
+    "pi-coding-agent": join(managed.packages, "node_modules", ".bin", "pi"),
     "spec-kit": "specify",
-    herdr: "herdr",
     codex: "codex",
     devin: "devin",
     claude: "claude",
@@ -113,16 +117,6 @@ export function executableCapabilities(
     },
   };
   for (const dependency of project.lock.dependencies) {
-    if (dependency.id === "typebox") {
-      result.push({
-        id: dependency.id,
-        command: "npm",
-        versionArgs: ["list", "--global", "--json", "--depth=0", dependency.source.identity],
-        expectedVersion: dependency.version,
-        parseVersion: (stdout) => npmVersion(dependency.source.identity, stdout),
-      });
-      continue;
-    }
     const command = commands[dependency.id];
     if (command !== undefined) {
       const authConfig = auth[dependency.id];
@@ -135,30 +129,6 @@ export function executableCapabilities(
         ...(authConfig === undefined ? {} : { auth: authConfig }),
       });
     }
-  }
-  const herdrTargets = new Set<string>();
-  for (const stage of project.workflow.stages) {
-    const profileIds = stage.runner === undefined
-      ? []
-      : typeof stage.runner === "string"
-        ? [stage.runner]
-        : stage.runner.prefer;
-    for (const profileId of profileIds) {
-      const profile = project.profiles.profiles[profileId];
-      if (profile !== undefined) herdrTargets.add(profile.family);
-    }
-  }
-  for (const target of herdrTargets) {
-    result.push({
-      id: `herdr-integration:${target}`,
-      command: "herdr",
-      versionArgs: ["integration", "status"],
-      expectedVersion: "current",
-      parseVersion: (stdout) =>
-        new RegExp(`^${target}: current(?:\\s|$)`, "m").test(stdout)
-          ? "current"
-          : undefined,
-    });
   }
   const superpowersVersion = project.lock.dependencies.find(
     (dependency) => dependency.id === "superpowers",
@@ -248,6 +218,11 @@ export async function defaultProbe(
 ): Promise<CapabilityReport> {
   const report = await probeEnvironment({
     root: project.root,
+    managedPackagesRoot: managedRuntimePaths({
+      dataHome: process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"),
+      runtimeVersion: project.lock.harnessVersion,
+      profileId: "planner-codex",
+    }).packages,
     process: processRunner,
     capabilities: executableCapabilities(project),
   });
@@ -255,26 +230,6 @@ export async function defaultProbe(
   for (const requirement of project.environment.pi_packages) {
     const result = byId[`pi-package:${requirement.id}`];
     if (result !== undefined) byId[requirement.dependency] = result;
-  }
-  const superpowers = project.lock.dependencies.find(
-    (dependency) => dependency.id === "superpowers",
-  );
-  if (superpowers !== undefined) {
-    const required = declaredAgentPlugins(project)
-      .filter((plugin) => plugin.dependency === "superpowers")
-      .map((plugin) => byId[agentPluginCapabilityId(plugin.id)])
-      .filter((result): result is NonNullable<typeof result> => result !== undefined);
-    byId.superpowers = required.length > 0 && required.every(
-      (result) => result.status === "present" && result.version === superpowers.version,
-    )
-      ? { id: "superpowers", status: "present", version: superpowers.version }
-      : {
-          id: "superpowers",
-          status: "unverifiable",
-          evidence: required
-            .filter((result) => result.status !== "present")
-            .map((result) => `${result.id}:${result.status}`),
-        };
   }
   const planningAuth = byId["auth:pi-coding-agent"];
   byId["planning-profile:chatgpt"] = {
@@ -350,7 +305,7 @@ async function verifyNpmIntegrity(
 async function verifyPiResourcesInChild(
   processRunner: NodeProcessRunner,
   root: string,
-  scope: "project" | "global",
+  scope: "project" | "managed" | "global",
 ): Promise<boolean> {
   if (scope !== "project") return true;
   const script = [

@@ -134,7 +134,9 @@ export async function probePiPackages(input: {
   try {
     directories = await packageDirectories(cacheRoot);
   } catch (error) {
-    for (const requirement of input.environment.pi_packages) {
+    for (const requirement of input.environment.pi_packages.filter(
+      (item) => item.scope === "project",
+    )) {
       results[`pi-package:${requirement.id}`] = {
         id: `pi-package:${requirement.id}`,
         status: "unverifiable",
@@ -143,7 +145,9 @@ export async function probePiPackages(input: {
     }
     return results;
   }
-  for (const requirement of input.environment.pi_packages) {
+  for (const requirement of input.environment.pi_packages.filter(
+    (item) => item.scope === "project",
+  )) {
     const id = `pi-package:${requirement.id}`;
     const dependency = input.lock.dependencies.find(
       (item) => item.id === requirement.dependency,

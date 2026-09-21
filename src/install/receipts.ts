@@ -1,5 +1,6 @@
 import { chmod, mkdir, open, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { redactDiagnostic } from "../runtime/managed/redaction.js";
 
 export interface InstallReceipt {
   readonly schemaVersion: 1;
@@ -13,7 +14,7 @@ export interface InstallReceipt {
 
 function assertSafeReceipt(receipt: InstallReceipt): void {
   for (const value of [receipt.planHash, receipt.stepId, receipt.version, receipt.reason]) {
-    if (value !== undefined && /(?:token|password|secret|authorization)=/i.test(value)) {
+    if (value !== undefined && redactDiagnostic(value) !== value) {
       throw new Error("install receipt contains forbidden secret-shaped data");
     }
   }

@@ -1,6 +1,15 @@
 schema: harness/lock/v1
 harnessVersion: 0.1.0
 dependencies:
+  - id: node
+    kind: tool
+    version: ">=22.22.2"
+    source:
+      kind: formula
+      identity: node
+      version: 22.22.2
+      integrity: semver-floor:22.22.2
+    dependsOn: []
   - id: pi-multi-agent-harness
     kind: pi-package
     version: 0.1.0
@@ -33,7 +42,7 @@ dependencies:
     kind: tool
     version: 0.8.7
     source:
-      kind: manual
+      kind: signed-artifact
       identity: specify
       version: 0.8.7
       integrity: version-output:specify-0.8.7
@@ -44,18 +53,29 @@ dependencies:
     source:
       kind: git
       identity: https://github.com/obra/superpowers.git
-      version: 6.4.1
-      integrity: release-tag:6.4.1
+      version: 5bf4e78011075bcfc0dc295f0724994cd123ee71
+      integrity: git-commit:5bf4e78011075bcfc0dc295f0724994cd123ee71
     dependsOn: []
-  - id: herdr
-    kind: integration
-    version: 0.9.1
+  - id: pi-devin-acp
+    kind: pi-package
+    version: 0.3.4
     source:
-      kind: git
-      identity: https://github.com/herdrdev/herdr.git
-      version: 0.9.1
-      integrity: release-tag:v0.9.1
-    dependsOn: []
+      kind: npm
+      identity: "@tian.zuo/pi-devin-acp"
+      version: 0.3.4
+      integrity: sha512-su1j4yDc8nSvHvx4eFvyXp2BAHFjArThdKUzEoy+v/AnLUKx6E39bFXzS0RZGTweueddKKdhiihEeK5yWaH1nQ==
+    piSource: npm:@tian.zuo/pi-devin-acp@0.3.4
+    dependsOn: [pi-coding-agent, typebox]
+  - id: pi-claude-bridge
+    kind: pi-package
+    version: 0.8.0
+    source:
+      kind: npm
+      identity: pi-claude-bridge
+      version: 0.8.0
+      integrity: sha512-CaSXdCdMWLGcvvG4IZuKeyUIyLio2m8nEO7cUFZdxKPdkwWuf8Eq46Ys2z3VlSjCidlIpasLwiCdJStXSt6EZQ==
+    piSource: npm:pi-claude-bridge@0.8.0
+    dependsOn: [pi-coding-agent, typebox]
   - id: codex
     kind: integration
     version: 0.155.1
@@ -82,4 +102,22 @@ dependencies:
       identity: claude
       version: 2.1.234
       integrity: version-output:claude-2.1.234
+    dependsOn: []
+  - id: git
+    kind: tool
+    version: system
+    source:
+      kind: formula
+      identity: git
+      version: system
+      integrity: version-probe:git
+    dependsOn: []
+  - id: github-cli
+    kind: tool
+    version: system
+    source:
+      kind: formula
+      identity: gh
+      version: system
+      integrity: version-probe:gh
     dependsOn: []

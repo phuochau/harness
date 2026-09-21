@@ -27,7 +27,7 @@ export interface AutomaticInstallStep {
   readonly argv: readonly string[];
   readonly environment?: Readonly<Record<string, string>>;
   readonly cwd: "trusted-install-root";
-  readonly scope: "project" | "global";
+  readonly scope: "project" | "managed" | "global";
   readonly source: TrustedSource;
   readonly expectedVersion: string;
   readonly expectedMutations: readonly string[];
@@ -47,6 +47,26 @@ export interface InstallPlan {
 
 function digest(value: unknown): string {
   return `sha256:${createHash("sha256").update(canonicalJson(value)).digest("hex")}`;
+}
+
+function versionSatisfies(actual: string | undefined, required: string): boolean {
+  if (actual === undefined) return false;
+  if (required === "system") return true;
+  if (!required.startsWith(">=")) return actual === required;
+  const parse = (value: string): readonly number[] | undefined => {
+    const match = /^(\d+)\.(\d+)\.(\d+)/.exec(value);
+    return match === null
+      ? undefined
+      : [Number(match[1]), Number(match[2]), Number(match[3])];
+  };
+  const left = parse(actual);
+  const right = parse(required.slice(2));
+  if (left === undefined || right === undefined) return false;
+  for (let index = 0; index < 3; index += 1) {
+    if (left[index]! > right[index]!) return true;
+    if (left[index]! < right[index]!) return false;
+  }
+  return true;
 }
 
 type InstallPlanBody = Omit<InstallPlan, "planHash">;
@@ -110,14 +130,21 @@ export function createInstallPlan(
   lock: HarnessLock,
   report: CapabilityReport,
   policy: EffectivePolicy,
-  options: { readonly repair?: boolean } = {},
+  options: {
+    readonly repair?: boolean;
+    readonly managedDependencyIds?: ReadonlySet<string>;
+    readonly managedRoot?: string;
+  } = {},
 ): InstallPlan {
   const warnings: string[] = [];
   const steps: InstallStep[] = [];
 
   for (const dependency of orderedDependencies(lock)) {
     const observed = report.byId[dependency.id];
-    if (observed?.status === "present" && observed.version === dependency.version) {
+    if (
+      observed?.status === "present" &&
+      versionSatisfies(observed.version, dependency.version)
+    ) {
       steps.push({
         id: dependency.id,
         mode: "skipped",
@@ -158,7 +185,12 @@ export function createInstallPlan(
       continue;
     }
 
-    const recipe = recipeFor(dependency, source);
+    const recipe = recipeFor(dependency, source, {
+      managed: options.managedDependencyIds?.has(dependency.id) === true,
+      ...(options.managedRoot === undefined
+        ? {}
+        : { managedRoot: options.managedRoot }),
+    });
     if (recipe.mode === "manual") {
       steps.push({ id: dependency.id, mode: "manual", blocking: true, reason: recipe.reason });
       continue;

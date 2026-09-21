@@ -61,6 +61,7 @@ export interface ProbeEnvironmentContext {
   readonly root: string;
   readonly process: ProcessRunner;
   readonly capabilities: readonly ExecutableCapability[];
+  readonly managedPackagesRoot?: string;
   readonly machineSettingsPath?: string;
   readonly allowMachinePackageCommand?: (argv: readonly string[]) => boolean;
 }

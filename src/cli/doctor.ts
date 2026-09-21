@@ -1,6 +1,7 @@
 import type { LockedDependency } from "../contracts/lock.js";
 import type { CapabilityReport, ProbeResult, ProbeStatus } from "../install/types.js";
 import { readDeclarativeProject, type DeclarativeProject } from "./trusted-project-reader.js";
+import { redactDiagnostic } from "../runtime/managed/redaction.js";
 
 export interface DoctorOptions {
   readonly root: string;
@@ -28,15 +29,10 @@ export interface DoctorReport {
   readonly capabilities: readonly DoctorCapability[];
 }
 
-function redact(value: string): string {
-  return value
-    .replace(/Bearer\s+[^\s]+/gi, "Bearer [REDACTED]")
-    .replace(/\b(token|password|secret|authorization)=\S+/gi, "$1=[REDACTED]")
-    .replace(/:\/\/[^/@\s]+@/g, "://[REDACTED]@");
-}
-
 function safeSource(dependency: LockedDependency): string {
-  return redact(`${dependency.source.kind}:${dependency.source.identity}@${dependency.source.version}`);
+  return redactDiagnostic(
+    `${dependency.source.kind}:${dependency.source.identity}@${dependency.source.version}`,
+  );
 }
 
 function resultForDependency(
@@ -67,7 +63,9 @@ function requiredCapability(
     ...(result.version === undefined ? {} : { installedVersion: result.version }),
     requiredVersion: dependency.version,
     source: safeSource(dependency),
-    ...(result.evidence === undefined ? {} : { evidence: result.evidence.map(redact) }),
+    ...(result.evidence === undefined
+      ? {}
+      : { evidence: result.evidence.map((item) => redactDiagnostic(item)) }),
     ...(result.status === "present"
       ? {}
       : { repair: `Run harness bootstrap ${project.root} and approve the exact plan hash.` }),
@@ -90,7 +88,9 @@ export async function doctor(
       id: result.id,
       status: result.status,
       ...(result.version === undefined ? {} : { installedVersion: result.version }),
-      ...(result.evidence === undefined ? {} : { evidence: result.evidence.map(redact) }),
+      ...(result.evidence === undefined
+        ? {}
+        : { evidence: result.evidence.map((item) => redactDiagnostic(item)) }),
       ...(result.status === "present" ? {} : { repair: `Resolve ${result.id} and rerun harness doctor.` }),
     }));
   const capabilities = [...required, ...supplemental];

@@ -4,7 +4,7 @@
   "description": "Durable multi-agent orchestration for Pi",
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.22.2"
   },
   "bin": {
     "harness": "./bin/harness.mjs"

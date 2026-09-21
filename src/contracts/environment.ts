@@ -24,7 +24,7 @@ export const PiPackageRequirementSchema = Type.Object(
   {
     id: Type.String({ pattern: "^[a-z][a-z0-9-]*$" }),
     dependency: Type.String({ pattern: "^[a-z][a-z0-9-]*$" }),
-    scope: Type.Literal("project"),
+    scope: Type.Union([Type.Literal("project"), Type.Literal("managed")]),
     resources: PiResourcesSchema,
   },
   { additionalProperties: false },

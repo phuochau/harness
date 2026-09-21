@@ -10,4 +10,16 @@ it("keeps the packaged JSON release manifest identical to the built-in policy da
 
   expect(document.schema).toBe("harness/release-manifest/v1");
   expect(document.entries).toEqual(releaseManifest);
+  expect(releaseManifest.map((entry) => entry.id)).toEqual(
+    expect.arrayContaining([
+      "pi-coding-agent",
+      "pi-devin-acp",
+      "pi-claude-bridge",
+      "superpowers",
+      "spec-kit",
+      "git",
+      "github-cli",
+    ]),
+  );
+  expect(releaseManifest.some((entry) => entry.id.startsWith("herdr"))).toBe(false);
 });
