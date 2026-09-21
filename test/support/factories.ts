@@ -6,10 +6,9 @@ import type {
   WorkerResult,
   WorkflowDocument,
 } from "../../src/contracts/index.js";
-import {
-  BuiltInActionInputSchemas,
-} from "../../src/config/action-inputs.js";
+import { BuiltInActionInputSchemas } from "../../src/config/action-inputs.js";
 import type { CompileInput } from "../../src/config/compile.js";
+import type { GraphContext } from "../../src/core/task-graph.js";
 import type { DeepPartial } from "./fixture.js";
 import { fixture } from "./fixture.js";
 
@@ -107,7 +106,8 @@ export const fixtureHarnessLock = fixture<HarnessLock>(() => ({
   ],
 }));
 
-export const fixtureTaskGraph = fixture<TaskGraphDocument>(() => ({
+function diamondTaskGraphBase(): TaskGraphDocument {
+  return {
   schema: "harness/task-graph/v1",
   tasksSemanticHash: hashA,
   tasks: [
@@ -121,26 +121,6 @@ export const fixtureTaskGraph = fixture<TaskGraphDocument>(() => ({
       acceptanceRefs: ["FR-001"],
       ownedPaths: ["src/one.ts"],
     },
-  ],
-}));
-
-export function diamondTaskGraph(
-  overrides: DeepPartial<TaskGraphDocument> = {},
-): TaskGraphDocument {
-  return fixture<TaskGraphDocument>(() => ({
-    schema: "harness/task-graph/v1",
-    tasksSemanticHash: hashA,
-    tasks: [
-      {
-        id: "T001",
-        description: "one",
-        phase: "foundation",
-        labels: ["US1"],
-        parallelEligible: true,
-        dependsOn: [],
-        acceptanceRefs: ["FR-001"],
-        ownedPaths: ["src/one.ts"],
-      },
       {
         id: "T002",
         description: "two",
@@ -162,7 +142,15 @@ export function diamondTaskGraph(
         ownedPaths: ["src/three.ts"],
       },
     ],
-  }))(overrides);
+  };
+}
+
+export const fixtureTaskGraph = fixture<TaskGraphDocument>(diamondTaskGraphBase);
+
+export function diamondTaskGraph(
+  overrides: DeepPartial<TaskGraphDocument> = {},
+): TaskGraphDocument {
+  return fixture<TaskGraphDocument>(diamondTaskGraphBase)(overrides);
 }
 
 export const fixtureEvent = fixture<HarnessEvent>(() => ({
@@ -226,4 +214,68 @@ export function compileInputCase(
     ];
   }
   return input;
+}
+
+export type TaskGraphCase =
+  | "duplicate"
+  | "unknown_dependency"
+  | "cycle"
+  | "changed_owned_path"
+  | "unordered_overlap"
+  | "ordered_overlap";
+
+export function taskGraphCase(kind: TaskGraphCase): TaskGraphDocument {
+  const graph = structuredClone(fixtureTaskGraph());
+  switch (kind) {
+    case "duplicate":
+      graph.tasks.push(structuredClone(graph.tasks[0]!));
+      break;
+    case "unknown_dependency":
+      graph.tasks[2]!.dependsOn = ["T999"];
+      break;
+    case "cycle":
+      graph.tasks[0]!.dependsOn = ["T003"];
+      break;
+    case "changed_owned_path":
+      graph.tasks[0]!.ownedPaths = ["src/not-in-tasks.ts"];
+      break;
+    case "unordered_overlap":
+      graph.tasks[1]!.ownedPaths = [...graph.tasks[0]!.ownedPaths];
+      break;
+    case "ordered_overlap":
+      graph.tasks[2]!.ownedPaths = [...graph.tasks[0]!.ownedPaths];
+      break;
+  }
+  return fixture<TaskGraphDocument>(() => graph)();
+}
+
+export function fixtureGraphContext(
+  overrides: Partial<GraphContext> = {},
+): GraphContext {
+  const graph = diamondTaskGraph();
+  return {
+    tasksSemanticHash: overrides.tasksSemanticHash ?? graph.tasksSemanticHash,
+    taskRecords:
+      overrides.taskRecords ??
+      new Map(
+        graph.tasks.map((task) => [task.id, structuredClone(task)] as const),
+      ),
+    acceptanceRefs:
+      overrides.acceptanceRefs ??
+      new Set(graph.tasks.flatMap((task) => task.acceptanceRefs)),
+  };
+}
+
+export function fixtureGraphContextFor(
+  graph: TaskGraphDocument,
+): GraphContext {
+  return {
+    tasksSemanticHash: graph.tasksSemanticHash,
+    taskRecords: new Map(
+      graph.tasks.map((task) => [task.id, structuredClone(task)] as const),
+    ),
+    acceptanceRefs: new Set(
+      graph.tasks.flatMap((task) => task.acceptanceRefs),
+    ),
+  };
 }
