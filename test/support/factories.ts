@@ -56,9 +56,31 @@ export const fixtureWorkflow = fixture<WorkflowDocument>(() => ({
       on_failure: { changes_requested: { retry_stage: "implement" } },
     },
     {
+      id: "verify",
+      uses: "command.run",
+      needs: [{ stage: "review", scope: "same-item" }],
+      foreach: { source: "stages.tasks.outputs.graph", key: "task.id" },
+      with: { argv: "${commands.task_verify}" },
+      retry: { max_attempts: 3, max_elapsed_seconds: 3600 },
+      on_failure: { verification_failed: { retry_stage: "implement" } },
+    },
+    {
+      id: "integrate",
+      uses: "git.integrate",
+      needs: [{ stage: "verify", scope: "same-item" }],
+      foreach: { source: "stages.tasks.outputs.graph", key: "task.id" },
+    },
+    {
+      id: "post_integrate_verify",
+      uses: "command.run",
+      needs: [{ stage: "integrate", scope: "same-item" }],
+      foreach: { source: "stages.tasks.outputs.graph", key: "task.id" },
+      with: { argv: "${commands.task_verify}" },
+    },
+    {
       id: "record_task_done",
       uses: "git.project-task-status",
-      needs: [{ stage: "review", scope: "same-item" }],
+      needs: [{ stage: "post_integrate_verify", scope: "same-item" }],
       foreach: { source: "stages.tasks.outputs.graph", key: "task.id" },
     },
     {
