@@ -53,6 +53,30 @@ async function copyResource(source: string, target: string): Promise<void> {
   });
 }
 
+const preservedCredentialPaths = [
+  "pi-agent/auth.json",
+  "xdg-config/devin/config.json",
+  "home/.claude.json",
+  "home/.claude/.credentials.json",
+] as const;
+
+async function preserveCredentials(profileRoot: string, staging: string): Promise<void> {
+  for (const child of preservedCredentialPaths) {
+    const source = join(profileRoot, child);
+    try {
+      const info = await lstat(source);
+      if (info.isSymbolicLink() || !info.isFile() || info.size > 1024 * 1024) {
+        throw new Error(`managed credential is not a bounded regular file: ${child}`);
+      }
+      const target = join(staging, child);
+      await mkdir(dirname(target), { recursive: true, mode: 0o700 });
+      await cp(source, target, { errorOnExist: true, force: false });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+}
+
 function resourceName(id: string): string {
   const readable = id.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
   return `${readable || "resource"}-${sha256(id).slice(7, 19)}`;
@@ -125,6 +149,7 @@ export async function materializeProfile(
         mode: 0o700,
       });
     }
+    await preserveCredentials(paths.profileRoot, staging);
 
     const extensionPaths: string[] = [];
     for (const [index, source] of profile.extensions.entries()) {

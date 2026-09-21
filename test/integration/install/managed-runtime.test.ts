@@ -117,6 +117,18 @@ describe("managed profile materialization", () => {
     expect(view.providerSkillPaths).toEqual(view.piSkillPaths);
   });
 
+  it("preserves only allowlisted subscription credentials across rematerialization", async () => {
+    const input = await fixture("devin");
+    await materializeProfile(input.profile, input.paths);
+    const credential = join(input.paths.xdgConfigHome, "devin", "config.json");
+    await mkdir(dirname(credential), { recursive: true });
+    await writeFile(credential, '{"subscription":"ready"}\n', { mode: 0o600 });
+    await writeFile(join(input.paths.profileHome, "ambient-secret"), "do-not-preserve", "utf8");
+    await materializeProfile(input.profile, input.paths);
+    await expect(readFile(credential, "utf8")).resolves.toContain("subscription");
+    await expect(readFile(join(input.paths.profileHome, "ambient-secret"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("fails closed until declared MCP projection is implemented", async () => {
     const input = await fixture("claude");
     await expect(

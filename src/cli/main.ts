@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { mkdir } from "node:fs/promises";
 import { bootstrap } from "./bootstrap.js";
 import { parseArgvJson } from "./command-detection.js";
 import { doctor } from "./doctor.js";
@@ -23,6 +24,13 @@ import { createStandaloneProductionEffects } from "../runtime/production/system.
 import type { JsonValue } from "../contracts/common.js";
 import { createWorkflowLifecycle } from "../core/workflow-lifecycle.js";
 import { managedRuntimePaths } from "../runtime/managed/paths.js";
+import { authCommand, runInteractive } from "./auth.js";
+import { findPackageRoot } from "./package-root.js";
+import { readDeclarativeProject } from "./trusted-project-reader.js";
+import { buildManagedEnvironment } from "../runtime/managed/environment.js";
+import type { ResolvedProfile } from "../config/profiles.js";
+import { canonicalJson } from "../shared/canonical-json.js";
+import { sha256 } from "../shared/sha256.js";
 
 function semver(stdout: string): string | undefined {
   return /(?:^|\s|v)(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/.exec(stdout)?.[1];
@@ -371,13 +379,10 @@ export async function main(argv: readonly string[]): Promise<number> {
         });
       },
     );
-  program
-    .command("bootstrap [path]")
-    .description("Probe and install exact locked harness dependencies")
-    .option("--dry-run", "show the content-addressed plan without executing it")
-    .option("--repair", "repair a customized declared Pi package entry")
-    .option("--yes", "approve the exact generated plan non-interactively")
-    .action(async (path: string | undefined, flags: { dryRun?: boolean; repair?: boolean; yes?: boolean }) => {
+  const installAction = async (
+    path: string | undefined,
+    flags: { dryRun?: boolean; repair?: boolean; yes?: boolean },
+  ) => {
       const root = path ?? ".";
       const processRunner = new NodeProcessRunner();
       const result = await bootstrap(
@@ -412,6 +417,74 @@ export async function main(argv: readonly string[]): Promise<number> {
       if (result.status === "installed") {
         process.stdout.write(`${JSON.stringify(result.report, null, 2)}\n`);
       }
+    };
+  const configureInstall = (command: Command) => command
+    .description("Probe and install exact locked harness dependencies")
+    .option("--dry-run", "show the content-addressed plan without executing it")
+    .option("--repair", "repair a customized declared Pi package entry")
+    .option("--yes", "approve the exact generated plan non-interactively")
+    .action(installAction);
+  configureInstall(program.command("setup [path]"));
+  configureInstall(program.command("bootstrap [path]").description("Compatibility alias for setup"));
+  program
+    .command("auth <profile> [path]")
+    .description("Authenticate one isolated managed Pi profile using subscription login")
+    .action(async (profileId: string, path: string | undefined) => {
+      const root = path ?? ".";
+      const project = await readDeclarativeProject(root);
+      const declared = project.profiles.profiles[profileId];
+      if (declared === undefined) throw new Error(`unknown profile ${profileId}`);
+      const profile = {
+        id: profileId,
+        ...declared,
+        extensions: [],
+        skills: [],
+        promptTemplates: [],
+        contextFiles: false,
+        mcp: [],
+        hash: sha256(canonicalJson({ id: profileId, declared })),
+      } as unknown as ResolvedProfile;
+      const paths = managedRuntimePaths({
+        dataHome: process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"),
+        runtimeVersion: project.lock.harnessVersion,
+        profileId,
+      });
+      await Promise.all([
+        mkdir(paths.profileHome, { recursive: true, mode: 0o700 }),
+        mkdir(paths.piAgentDir, { recursive: true, mode: 0o700 }),
+        mkdir(paths.xdgConfigHome, { recursive: true, mode: 0o700 }),
+        mkdir(paths.xdgDataHome, { recursive: true, mode: 0o700 }),
+      ]);
+      const environment = buildManagedEnvironment({
+        profile,
+        paths,
+        ambient: process.env,
+        forwardedKeys: [],
+        executablePath: process.env.PATH ?? "/usr/bin:/bin",
+      });
+      const code = await runInteractive(authCommand({
+        profile,
+        managedEnvironment: environment,
+        piExecutable: join(paths.packages, "node_modules", ".bin", "pi"),
+      }), project.root);
+      if (code !== 0) throw new Error(`authentication command exited with code ${code}`);
+    });
+  program
+    .command("start [path]")
+    .description("Start the isolated Pi orchestrator in this project")
+    .action(async (path: string | undefined) => {
+      const root = path ?? ".";
+      const packageRoot = await findPackageRoot(import.meta.url, "pi-multi-agent-harness");
+      const code = await runInteractive({
+        executable: "pi",
+        argv: [
+          "--no-extensions", "--no-skills", "--no-prompt-templates",
+          "--no-context-files", "--no-themes", "--approve",
+          "--extension", join(packageRoot, "dist/pi/extension.js"),
+        ],
+        env: Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined)),
+      }, root);
+      if (code !== 0) throw new Error(`Pi orchestrator exited with code ${code}`);
     });
   program
     .command("doctor [path]")

@@ -23,7 +23,7 @@ stages:
       graph: specs/feature/task-graph.json
   - id: implement
     uses: worker.execute
-    runner: { prefer: [implementer-devin, implementer-codex, implementer-claude] }
+    runner: { prefer: [implementer-codex, implementer-devin, implementer-claude] }
     needs: [{ stage: tasks, scope: all }]
     foreach: { source: stages.tasks.outputs.graph, key: task.id }
     gate: task.dependencies_done
@@ -31,7 +31,7 @@ stages:
     retry: { max_attempts: 3, max_elapsed_seconds: 86400 }
   - id: review
     uses: worker.review
-    runner: { prefer: [reviewer-codex, reviewer-claude, reviewer-devin] }
+    runner: { prefer: [reviewer-codex, reviewer-devin, reviewer-claude] }
     needs: [{ stage: implement, scope: same-item }]
     foreach: { source: stages.tasks.outputs.graph, key: task.id }
     policies: { require_different_profile_family: true, scope: task }
@@ -68,7 +68,7 @@ stages:
     with: { argv: "${commands.full_verify}" }
   - id: final_review
     uses: worker.review
-    runner: { prefer: [reviewer-codex, reviewer-claude, reviewer-devin] }
+    runner: { prefer: [reviewer-codex, reviewer-devin, reviewer-claude] }
     needs: [{ stage: final_verify, scope: all }]
     policies: { scope: final_diff }
     on_failure:

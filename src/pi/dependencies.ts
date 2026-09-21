@@ -33,6 +33,9 @@ import { replayRunEvents } from "../cli/status.js";
 import { doctor as inspectCapabilities } from "../cli/doctor.js";
 import { defaultProbe } from "../cli/main.js";
 import { NodeProcessRunner } from "../git/process.js";
+import { createManagedPiRuntime, type ManagedPiRuntimeBundle } from "../runtime/managed/factory.js";
+import { findPackageRoot } from "../cli/package-root.js";
+import { readDeclarativeProject } from "../cli/trusted-project-reader.js";
 
 export interface HarnessSessionDependencies {
   readonly cwd: string;
@@ -67,6 +70,7 @@ interface LoadedProjectConfiguration {
   readonly workflow: CompiledWorkflow;
   readonly commands: Readonly<Record<string, readonly string[]>>;
   readonly permissions: readonly string[];
+  readonly runtime: ManagedPiRuntimeBundle;
 }
 
 function artifactPaths(workflow: CompiledWorkflow): ArtifactPaths {
@@ -103,10 +107,17 @@ async function loadProjectConfiguration(
   const permissions = Array.isArray(policy.protected_paths)
     ? policy.protected_paths.filter((item): item is string => typeof item === "string")
     : [];
+  const project = await readDeclarativeProject(cwd);
+  const runtime = await createManagedPiRuntime({
+    profiles: project.profiles,
+    runtimeVersion: project.lock.harnessVersion,
+    packageRoot: await findPackageRoot(import.meta.url, "pi-multi-agent-harness"),
+  });
   return {
-    workflow: compileWorkflow({ workflow: workflowDocument, environment }),
+    workflow: compileWorkflow({ workflow: workflowDocument, environment, profiles: runtime.profiles }),
     commands: environment.commands,
     permissions,
+    runtime,
   };
 }
 
@@ -312,6 +323,7 @@ class ProjectCommandBackend implements HarnessCommandBackend {
         commands: this.configuration.commands,
         pi: this.pi,
         context: this.context,
+        managedPiRuntime: this.configuration.runtime,
       });
       await this.active.controller.enqueue(command);
       return;
@@ -360,6 +372,7 @@ class ProjectCommandBackend implements HarnessCommandBackend {
       commands: this.configuration.commands,
       pi: this.pi,
       context: this.context,
+      managedPiRuntime: this.configuration.runtime,
     });
     await this.active.recover();
   }

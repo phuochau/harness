@@ -41,7 +41,10 @@ import { GitRepository } from "../../git/repository.js";
 import { initialRunState } from "../../core/state.js";
 import { reduceEvent } from "../../core/reducer.js";
 import type { DurableEffectPort } from "../../durable-composition-root.js";
+import { join } from "node:path";
 import type { PlanningAgent } from "../../ports/planning.js";
+import type { ManagedPiRuntimeBundle } from "../managed/factory.js";
+import { ChildPiPlanningPort, RoutedChildPiPlanningPort } from "../../pi/child-planning-port.js";
 
 export interface ProductionRunSystem extends DurableHarnessSystem {
   readonly graph: () => ValidatedTaskGraph;
@@ -59,6 +62,7 @@ export interface ComposeProductionRunOptions {
   readonly piWorkerRuntime?: PiWorkerRuntime;
   readonly process?: ProcessRunner;
   readonly planningAgent?: PlanningAgent;
+  readonly managedPiRuntime?: ManagedPiRuntimeBundle;
 }
 
 export interface StandaloneProductionEffects {
@@ -155,21 +159,51 @@ export async function composeProductionRun(
     } catch {
       // A new run has no task graph until the correlated Spec Kit tasks stage seals it.
     }
-    const planningPort = new PiSessionPlanningPort(options.pi, options.context);
-    const planningProfile = new PlanningProfileCoordinator(
-      new PiSessionModelPort(options.pi, options.context),
-      new PiSessionPlanningProfileStore(options.context),
+    const sealer = new ProductionPlanningArtifactSealer(
+      initialized.manifest,
+      planningBinding,
+      worktrees,
+      git,
     );
-    const planning = options.planningAgent ?? new PlanningAction({
+    let planning = options.planningAgent;
+    if (planning === undefined && options.managedPiRuntime !== undefined) {
+      const routes: Record<string, string> = {};
+      const ports: Record<string, ChildPiPlanningPort> = {};
+      for (const stage of workflow.stages.filter((stage) => stage.uses.startsWith("spec-kit."))) {
+        const runner = stage.runner;
+        const profileId = typeof runner === "string" ? runner : runner?.prefer[0];
+        if (profileId === undefined) throw new Error(`planning stage ${stage.id} has no profile`);
+        routes[stage.uses.slice("spec-kit.".length)] = profileId;
+        if (ports[profileId] === undefined) {
+          const profile = workflow.profiles.byId[profileId];
+          const managed = options.managedPiRuntime.managedProfiles[profileId];
+          if (profile === undefined || managed === undefined) throw new Error(`managed planning profile is unavailable: ${profileId}`);
+          ports[profileId] = new ChildPiPlanningPort({
+            root: planningBinding.path,
+            profile,
+            managed,
+            supervisor: options.managedPiRuntime.supervisor,
+            piExecutable: options.managedPiRuntime.piExecutable,
+            transportExtensionPath: options.managedPiRuntime.transportExtensionPath,
+            sessionRoot: join(initialized.paths.workers, initialized.manifest.runId, "planning-sessions"),
+            sealer,
+          });
+        }
+      }
+      planning = new RoutedChildPiPlanningPort(routes, ports);
+    }
+    if (planning === undefined) {
+      const planningPort = new PiSessionPlanningPort(options.pi, options.context);
+      const planningProfile = new PlanningProfileCoordinator(
+        new PiSessionModelPort(options.pi, options.context),
+        new PiSessionPlanningProfileStore(options.context),
+      );
+      planning = new PlanningAction({
         root: planningBinding.path,
         correlation: new PiPlanningCorrelation(planningPort, planningProfile),
-        sealer: new ProductionPlanningArtifactSealer(
-          initialized.manifest,
-          planningBinding,
-          worktrees,
-          git,
-        ),
+        sealer,
       });
+    }
     const records = new DurableRecordStore(initialized.paths.artifacts);
     let system: DurableHarnessSystem | undefined;
     const readState = async () => {
@@ -186,11 +220,12 @@ export async function composeProductionRun(
       taskVerification: [options.commands.task_verify ?? []].filter((argv) => argv.length > 0),
       profiles: workflow.profiles,
     });
+    const effectivePiRuntime = options.piWorkerRuntime ?? options.managedPiRuntime?.workerRuntime;
     const workerRuntime = options.workerRuntime ?? (
-      options.piWorkerRuntime === undefined
+      effectivePiRuntime === undefined
         ? unavailableWorkerRuntime
         : new ProductionPiWorkerRuntime({
-            runtime: options.piWorkerRuntime,
+            runtime: effectivePiRuntime,
             profiles: workflow.profiles,
             attempts,
             records,

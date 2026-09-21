@@ -195,3 +195,29 @@ export class ChildPiPlanningPort implements PlanningAgent {
     return observed.receipt;
   }
 }
+
+export class RoutedChildPiPlanningPort implements PlanningAgent {
+  public constructor(
+    private readonly routes: Readonly<Record<string, string>>,
+    private readonly ports: Readonly<Record<string, ChildPiPlanningPort>>,
+  ) {}
+
+  public enqueue(request: PlanningRequest, context?: PlanningEnqueueContext): Promise<PlanningRunReceipt> {
+    const profileId = this.routes[request.stage];
+    const port = profileId === undefined ? undefined : this.ports[profileId];
+    if (port === undefined) throw new Error(`no managed Pi planning profile for ${request.stage}`);
+    return port.enqueue(request, context);
+  }
+
+  public observe(receipt: PlanningRunReceipt): Promise<PlanningObservation> {
+    const port = receipt.profileId === undefined ? undefined : this.ports[receipt.profileId];
+    if (port === undefined) {
+      return Promise.resolve({
+        status: "blocked",
+        reason: "planning receipt references an unavailable profile",
+        evidence: [receipt.profileId ?? "missing-profile"],
+      });
+    }
+    return port.observe(receipt);
+  }
+}

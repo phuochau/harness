@@ -54,14 +54,14 @@ describe("harness init", () => {
       "final_pr",
     ]);
     expect(workflow.stages.find((stage: { id: string }) => stage.id === "implement").runner.prefer).toEqual([
-      "implementer-devin",
       "implementer-codex",
+      "implementer-devin",
       "implementer-claude",
     ]);
     expect(workflow.stages.find((stage: { id: string }) => stage.id === "review").runner.prefer).toEqual([
       "reviewer-codex",
-      "reviewer-claude",
       "reviewer-devin",
+      "reviewer-claude",
     ]);
     expect(() => validateWorkflow(workflow)).not.toThrow();
     const profiles = await yaml(join(root, ".harness/profiles.yaml"));
