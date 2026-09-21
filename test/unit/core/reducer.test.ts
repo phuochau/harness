@@ -68,3 +68,35 @@ it("rejects sequence gaps and illegal lifecycle transitions", () => {
     }),
   );
 });
+
+it("moves effect-backed verification and integration through VERIFYING", () => {
+  const base = initialRunState("F040", `sha256:${"a".repeat(64)}`);
+  const ready = reduceEvent(
+    base,
+    nextHarnessEvent(base, {
+      eventType: "job.ready",
+      entityId: "verify:T001",
+      idempotencyKey: "ready:verify:T001",
+      payload: {},
+    }),
+  );
+  const running = reduceEvent(
+    ready,
+    nextHarnessEvent(ready, {
+      eventType: "attempt.started",
+      entityId: "verify:T001",
+      idempotencyKey: "attempt:verify:T001:1",
+      payload: { attempt: 1, worker: "system" },
+    }),
+  );
+  const verified = reduceEvent(
+    running,
+    nextHarnessEvent(running, {
+      eventType: "verification.passed",
+      entityId: "verify:T001",
+      idempotencyKey: "verified:T001",
+      payload: { commit: "candidate", evidence: [] },
+    }),
+  );
+  expect(verified.jobs["verify:T001"]?.state).toBe("VERIFYING");
+});

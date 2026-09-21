@@ -14,12 +14,16 @@ stages:
     uses: spec-kit.specify
     runner: pi
     model_profile: chatgpt-planning
+    produces:
+      spec: specs/feature/spec.md
 
   - id: plan
     uses: spec-kit.plan
     runner: pi
     model_profile: chatgpt-planning
     needs: [{ stage: specify, scope: all }]
+    produces:
+      plan: specs/feature/plan.md
 
   - id: approve_plan
     uses: human.approval

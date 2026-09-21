@@ -233,14 +233,19 @@ function applyEvent(state: RunState, event: HarnessEvent): void {
       transitionJob(state, event.entityId, "VERIFYING", "RETRY");
       break;
     case "verification.passed":
+      if (ensureJob(state, event.entityId).state === "RUNNING") {
+        transitionJob(state, event.entityId, "RUNNING", "VERIFYING");
+      }
       ensureJob(state, event.entityId).verificationCommit = event.payload.commit;
       break;
     case "verification.failed":
-      transitionJob(state, event.entityId, "VERIFYING", "RETRY");
+      transitionJob(state, event.entityId, ["RUNNING", "VERIFYING"], "RETRY");
       break;
     case "integration.observed":
-      ensureJob(state, event.entityId).candidateCommit =
-        event.payload.candidateCommit;
+      if (ensureJob(state, event.entityId).state === "RUNNING") {
+        transitionJob(state, event.entityId, "RUNNING", "VERIFYING");
+      }
+      ensureJob(state, event.entityId).candidateCommit = event.payload.candidateCommit;
       state.integrationPipeline = {
         taskId: taskIdForJob(event.entityId) ?? event.entityId,
         status: "verifying_candidate",
@@ -251,6 +256,9 @@ function applyEvent(state: RunState, event: HarnessEvent): void {
       delete state.integrationPipeline;
       break;
     case "task.finalized":
+      if (ensureJob(state, event.entityId).state === "RUNNING") {
+        transitionJob(state, event.entityId, "RUNNING", "VERIFYING");
+      }
       state.finalizedTasks[event.payload.taskId] = {
         candidateCommit: event.payload.candidateCommit,
         targetCommit: event.payload.targetCommit,
