@@ -21,6 +21,9 @@ import { workerContract } from "./worker-contract.js";
 import { completedResultText } from "../support/worker-fixtures.js";
 import { assignmentFixture } from "../support/controller-fixtures.js";
 import { expect, it } from "vitest";
+import { CodexAdapter } from "../../src/runtime/workers/codex.js";
+import { DevinAdapter } from "../../src/runtime/workers/devin.js";
+import { ClaudeAdapter } from "../../src/runtime/workers/claude.js";
 
 class FakeAdapter implements WorkerAdapter {
   public readonly kind = "codex" as const;
@@ -98,6 +101,9 @@ class FakeAdapter implements WorkerAdapter {
 }
 
 workerContract("shared fake adapter", () => new FakeAdapter());
+workerContract("codex", () => new CodexAdapter());
+workerContract("devin", () => new DevinAdapter());
+workerContract("claude", () => new ClaudeAdapter());
 
 it("models final-diff review as a detached read-only assignment without a task", async () => {
   const base = assignmentFixture();
