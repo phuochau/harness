@@ -13,9 +13,17 @@ export function authCommand(input: {
   readonly piExecutable: string;
   readonly devinExecutable?: string;
   readonly claudeExecutable?: string;
+  readonly codexExecutable?: string;
 }): ProfileAuthCommand {
   const { profile } = input;
   if (profile.family === "codex") {
+    if (profile.provider === "pi-shell-acp") {
+      return {
+        executable: input.codexExecutable ?? "codex",
+        argv: ["login"],
+        env: input.managedEnvironment,
+      };
+    }
     return {
       executable: input.piExecutable,
       argv: [

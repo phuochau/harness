@@ -63,6 +63,7 @@ export interface PiWorkerRuntimeOptions {
   readonly managedProfiles: Readonly<Record<string, ManagedProfileView>>;
   readonly supervisor: PiProcessSupervisor;
   readonly piExecutable: string;
+  readonly piExecutableArgs?: readonly string[];
   readonly transportExtensionPath: string;
   readonly process?: ProcessRunner;
 }
@@ -164,26 +165,37 @@ export class PiWorkerRuntime {
         evidence: ["Pi capability process probe is unavailable", ...resourceCheck.evidence],
       };
     }
-    const version = await this.options.process.run(this.options.piExecutable, ["--version"], {
+    const executablePrefix = this.options.piExecutableArgs ?? [];
+    const version = await this.options.process.run(this.options.piExecutable, [...executablePrefix, "--version"], {
       env: managed.environment,
       shell: false,
     });
     const prefix = buildPiProbePrefix(profile, managed);
     const models = await this.options.process.run(
       this.options.piExecutable,
-      [...prefix, "--list-models", profile.model],
+      [...executablePrefix, ...prefix, "--list-models", profile.model],
       { env: managed.environment, shell: false },
     );
-    const auth = await this.options.process.run(
-      this.options.piExecutable,
-      [...prefix, "auth", "check", "--provider", profile.provider, "--json", "--no-refresh"],
-      { env: managed.environment, shell: false },
-    );
+    const auth = profile.family === "codex" && profile.provider === "pi-shell-acp"
+      ? await this.options.process.run("codex", ["login", "status"], { env: managed.environment, shell: false })
+      : profile.family === "devin"
+        ? await this.options.process.run("devin", ["auth", "status"], { env: managed.environment, shell: false })
+        : profile.family === "claude"
+          ? await this.options.process.run("claude", ["auth", "status"], { env: managed.environment, shell: false })
+          : await this.options.process.run(
+              this.options.piExecutable,
+              [...executablePrefix, ...prefix, "auth", "check", "--provider", profile.provider, "--json", "--no-refresh"],
+              { env: managed.environment, shell: false },
+            );
     const providerRegistered = models.exitCode === 0 && !/provider.+not found/i.test(models.stderr);
     const modelAvailable = providerRegistered && models.stdout.includes(profile.model.split("/").at(-1)!);
     let authenticated = false;
     try {
-      authenticated = auth.exitCode === 0 && JSON.parse(auth.stdout).status === "ready";
+      authenticated = auth.exitCode === 0 && (
+        /logged in/i.test(`${auth.stdout}\n${auth.stderr}`) ||
+        JSON.parse(auth.stdout).status === "ready" ||
+        JSON.parse(auth.stdout).loggedIn === true
+      );
     } catch {
       authenticated = false;
     }
@@ -243,6 +255,7 @@ export class PiWorkerRuntime {
       attemptId: id,
       attemptToken: randomUUID(),
       piExecutable: this.options.piExecutable,
+      ...(this.options.piExecutableArgs === undefined ? {} : { piExecutableArgs: this.options.piExecutableArgs }),
       profile,
       managed: this.resources(profile),
       transportExtensionPath: this.options.transportExtensionPath,
@@ -315,7 +328,7 @@ export class PiWorkerRuntime {
     const handle = this.handles.get(prepared.attemptId);
     if (handle === undefined) return { status: "invalid", reason: "Pi worker was not launched" };
     const exit = await this.options.supervisor.wait(handle.process);
-    if (exit.exitCode !== 0) {
+    if (exit.exitCode !== null && exit.exitCode !== 0) {
       return { status: "invalid", reason: `Pi process exited with code ${exit.exitCode}` };
     }
     return collectPiWorkerResult({

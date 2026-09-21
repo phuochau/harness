@@ -6,6 +6,7 @@ export interface BuildPiLaunchSpecInput {
   readonly attemptId: string;
   readonly attemptToken: string;
   readonly piExecutable: string;
+  readonly piExecutableArgs?: readonly string[];
   readonly profile: ResolvedProfile;
   readonly managed: ManagedProfileView;
   readonly transportExtensionPath: string;
@@ -25,6 +26,7 @@ function appendPaths(
 
 export function buildPiLaunchSpec(input: BuildPiLaunchSpecInput): PiLaunchSpec {
   const argv = [
+    ...(input.piExecutableArgs ?? []),
     "--mode", "json",
     "--print",
     "--no-extensions",

@@ -33,7 +33,7 @@ async function yaml(path: string) {
 }
 
 describe("harness init", () => {
-  it("creates the full runnable default and all three worker preferences", async () => {
+  it("creates the full runnable Codex and Devin default", async () => {
     const root = await fixture("node");
     await initProject({ root });
     const workflow = await yaml(join(root, ".harness/workflow.yaml"));
@@ -56,24 +56,23 @@ describe("harness init", () => {
     expect(workflow.stages.find((stage: { id: string }) => stage.id === "implement").runner.prefer).toEqual([
       "implementer-codex",
       "implementer-devin",
-      "implementer-claude",
     ]);
     expect(workflow.stages.find((stage: { id: string }) => stage.id === "review").runner.prefer).toEqual([
       "reviewer-codex",
       "reviewer-devin",
-      "reviewer-claude",
     ]);
     expect(() => validateWorkflow(workflow)).not.toThrow();
     const profiles = await yaml(join(root, ".harness/profiles.yaml"));
     expect(() => validateProfiles(profiles)).not.toThrow();
     expect(profiles.profiles["planner-codex"]).toMatchObject({
-      provider: "openai-codex",
+      provider: "pi-shell-acp",
       role: "planning",
     });
     expect(profiles.profiles["implementer-devin"]).toMatchObject({
       provider: "devin",
       role: "implementation",
     });
+    expect(profiles.profiles["implementer-devin"].tools).toContain("devin");
 
     const environment = await yaml(join(root, ".harness/environment.yaml"));
     const lock = await yaml(join(root, ".harness/harness.lock"));
@@ -95,10 +94,10 @@ describe("harness init", () => {
         resources: { extensions: ["index.ts"] },
       },
       {
-        id: "claude-bridge",
-        dependency: "pi-claude-bridge",
+        id: "codex-acp",
+        dependency: "pi-shell-acp",
         scope: "managed",
-        resources: { extensions: ["src/index.ts"] },
+        resources: { extensions: ["index.ts"] },
       },
     ]);
     expect(environment.agent_plugins).toBeUndefined();

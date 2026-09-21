@@ -2,64 +2,51 @@
 
 ## Preconditions
 
-- The `pi-multi-agent-harness` npm namespace already exists and the trusted
-  publishing actor is an owner. First-time namespace reservation is manual.
-- `package.json`, the tag (`vX.Y.Z`), defaults, lock, TypeScript release
-  manifest, and JSON release manifest agree on the version.
-- The pinned Pi, TypeBox, Spec Kit, Herdr, and worker compatibility environment
-  is disposable and authenticated only where the smoke requires it.
+- `package.json`, the tag, defaults, lock, TypeScript release manifest, and JSON
+  release manifest agree on the version and trusted sources.
+- Node is `>=22.22.2`.
+- Codex CLI and Devin CLI are authenticated with disposable development
+  subscription accounts for the opt-in real gate.
+- The npm package namespace and trusted publishing identity are already owned.
 
 ## Local gates
 
 ```bash
 npm ci
 npm run verify
-npm pack --dry-run --json
+PATH=/opt/homebrew/bin:$PATH npm run e2e:real
 ```
 
-Inspect the file list. It may contain npm-required metadata plus `dist/`,
-`bin/`, `presets/`, `src/defaults/`, README, SECURITY, and docs. It must not
-contain tests, run journals, receipts, credentials, `.harness-output/`, or
-source maps with embedded source text. The packed-consumer test installs exact
-peer versions, runs `harness --help`, imports the public module, and loads the
-extension through Pi's real resource loader.
+`verify` runs typecheck, build, the full fake/crash/isolation suite, and
+`npm pack --dry-run --json`. Inspect the tarball: it may contain the declared
+`dist`, `bin`, `presets`, `src/defaults`, README, SECURITY, and docs, but never
+tests, journals, credentials, `.harness-output`, or source maps containing
+embedded source text.
 
-The deterministic owned E2E always exercises the complete production
-composition using real Git worktrees, parallel/dependent tasks, all three
-worker adapters, evidence validation, verification, integration, push to a
-bare remote, and PR reconciliation. The subscription smoke is intentionally
-opt-in and uses the repository-owned driver—never an arbitrary external
-command—to launch authenticated Codex, Devin, and Claude sessions through the
-installed Herdr transport:
+The real gate is not a mock and must not pass by skipping. It creates a
+disposable Git repository, uses Pi with the authenticated Codex CLI to create a
+Spec Kit artifact, then uses Pi with the authenticated Devin CLI to implement,
+verify, commit, and emit structured evidence. `HARNESS_E2E_REAL=1` is set by the
+script.
 
-```bash
-HARNESS_E2E_REAL=1 HARNESS_E2E_DISPOSABLE=1 npm run e2e:real
-```
+Current release scope is Codex CLI plus Devin CLI. No Claude, remote-control,
+or second orchestration service is required by the default install or release
+gate.
 
-All three CLIs must already be authenticated with disposable development
-accounts. Authentication remains an explicit operator step; the harness never
-captures credentials or silently skips a declared worker.
-
-Publication is blocked unless this smoke passes on the `harness-e2e` runner.
-A skipped test does not satisfy the release gate.
+Also verify production source, active tests, scripts, and release workflows do
+not reference a removed secondary execution plane. Historical design documents
+may retain migration context; runtime behavior may not.
 
 ## Automated release
 
-Push an annotated `vX.Y.Z` tag. The release workflow:
+Push an annotated `vX.Y.Z` tag. The workflow must validate tag/version
+equality, rerun all non-subscription gates, verify npm ownership, publish with
+trusted publishing and provenance, query the registry integrity, and attach
+that digest as release evidence.
 
-1. validates tag/version equality;
-2. reruns typecheck, build, fake E2E, packed consumer, and pinned compatibility;
-3. verifies `npm whoami` and package ownership against the configured expected
-   owner;
-4. publishes with npm trusted publishing and `--provenance`;
-5. queries `npm view pi-multi-agent-harness@X.Y.Z dist.integrity`; and
-6. uploads that digest and workflow provenance as GitHub release evidence.
+The tarball cannot embed its own final digest. The immutable baseline
+authorizes package identity/version; setup resolves `dist.integrity`, binds it
+into the approved plan hash, and verifies it again immediately before install.
 
-The published tarball's digest cannot be embedded inside that same tarball.
-Instead the immutable baseline authorizes the exact package identity/version
-and requires live registry digest resolution. Bootstrap binds the resolved
-SHA-512 value into the user-approved plan and verifies it again immediately
-before invoking Pi.
-
-Never silently switch to a different package name, scope, registry, tag, or
-worker account when a release prerequisite fails.
+Never substitute a different package, registry, tag, CLI account, or billing
+path when a prerequisite fails.

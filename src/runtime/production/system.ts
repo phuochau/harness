@@ -184,6 +184,7 @@ export async function composeProductionRun(
             managed,
             supervisor: options.managedPiRuntime.supervisor,
             piExecutable: options.managedPiRuntime.piExecutable,
+            piExecutableArgs: options.managedPiRuntime.piExecutableArgs,
             transportExtensionPath: options.managedPiRuntime.transportExtensionPath,
             sessionRoot: join(initialized.paths.workers, initialized.manifest.runId, "planning-sessions"),
             sealer,

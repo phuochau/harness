@@ -8,7 +8,7 @@ function profile(family: "codex" | "devin" | "claude"): ResolvedProfile {
     id: `planner-${family}`,
     family,
     runtime: "pi",
-    provider: family === "codex" ? "openai-codex" : family === "devin" ? "devin" : "claude-bridge",
+    provider: family === "codex" ? "pi-shell-acp" : family === "devin" ? "devin" : "claude-bridge",
     model: `${family}/model`,
     role: "planning",
     environment: "isolated",
@@ -20,8 +20,7 @@ function profile(family: "codex" | "devin" | "claude"): ResolvedProfile {
 it("builds subscription-only auth commands inside the managed profile home", () => {
   const environment = { HOME: "/managed/home", PATH: "/bin" };
   const codex = authCommand({ profile: profile("codex"), managedEnvironment: environment, piExecutable: "/managed/pi" });
-  expect(codex).toMatchObject({ executable: "/managed/pi", env: environment });
-  expect(codex.argv).toEqual(expect.arrayContaining(["--provider", "openai-codex", "--no-skills"]));
+  expect(codex).toMatchObject({ executable: "codex", env: environment, argv: ["login"] });
   expect(codex.argv.join(" ")).not.toMatch(/api[-_ ]?key/i);
   expect(authCommand({ profile: profile("devin"), managedEnvironment: environment, piExecutable: "pi" })).toMatchObject({ executable: "devin", argv: ["auth", "login"] });
   expect(authCommand({ profile: profile("claude"), managedEnvironment: environment, piExecutable: "pi" })).toMatchObject({ executable: "claude", argv: ["auth", "login", "--claudeai"] });

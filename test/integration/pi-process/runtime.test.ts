@@ -1,8 +1,9 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { NodePiProcessSupervisor } from "../../../src/runtime/pi-process/process.js";
+import { processRecord, FakeProcessIdentity } from "../../support/pi-process-fixtures.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -64,9 +65,41 @@ describe("durable Pi process transport", () => {
         finalAssistantText: "RESULT",
       },
     });
-    expect(await readFile(record.stderrPath, "utf8")).toBe(
-      "Authorization=[REDACTED] Bearer [REDACTED] https://[REDACTED]@example.test\n",
-    );
+    expect(await readFile(record.stderrPath, "utf8")).toBe("");
+  });
+
+  it("accepts a settled terminal file after the owning controller disappears", async () => {
+    const sessionDir = await temporaryDirectory();
+    const eventsPath = join(sessionDir, "events.jsonl");
+    await writeFile(eventsPath, [
+      JSON.stringify({ type: "message_end", role: "assistant", content: "RESULT" }),
+      JSON.stringify({ type: "turn_end", stopReason: "stop" }),
+      JSON.stringify({ type: "agent_settled" }),
+      "",
+    ].join("\n"));
+    const record = processRecord({
+      sessionDir,
+      eventsPath,
+      stderrPath: join(sessionDir, "stderr.log"),
+      recordPath: join(sessionDir, "process.json"),
+    });
+    const supervisor = new NodePiProcessSupervisor({
+      identity: new FakeProcessIdentity(undefined),
+    });
+
+    expect(await supervisor.observe(record)).toMatchObject({
+      status: "exited",
+      exit: {
+        exitCode: null,
+        signal: null,
+        terminal: {
+          settled: true,
+          acceptedStopReason: true,
+          completeToolResults: true,
+          finalAssistantText: "RESULT",
+        },
+      },
+    });
   });
 
   it("observes a matching live process without launching a replacement", async () => {

@@ -95,6 +95,7 @@ describe("managed profile materialization", () => {
       .toBe("supporting");
     expect((await lstat(dirname(view.providerSkillPaths[0]!))).isSymbolicLink()).toBe(false);
     expect(view.environment.HOME).toBe(input.paths.profileHome);
+    expect(view.environment.PI_DEVIN_HEADLESS_PERMISSION).toBe("allow");
     expect(view.environment.SECRET_TOKEN).toBeUndefined();
     expect(view.receiptHash).toMatch(/^sha256:/);
   });

@@ -1,7 +1,8 @@
 # Workflow DSL
 
-Every initialized project has an editable `.harness/workflow.yaml`. The file is
-validated, compiled, and content-addressed before a run.
+Every initialized project receives an immediately runnable
+`.harness/workflow.yaml`. The controller validates, compiles, and hashes it
+before creating a run. Provider choice is expressed with profile IDs:
 
 ```yaml
 schema: harness/v1
@@ -12,18 +13,14 @@ task_model:
 stages:
   - id: specify
     uses: spec-kit.specify
-    runner: pi
-    model_profile: chatgpt-planning
-    produces:
-      spec: specs/feature/spec.md
+    runner: planner-codex
+    produces: { spec: specs/feature/spec.md }
 
   - id: plan
     uses: spec-kit.plan
-    runner: pi
-    model_profile: chatgpt-planning
+    runner: planner-codex
     needs: [{ stage: specify, scope: all }]
-    produces:
-      plan: specs/feature/plan.md
+    produces: { plan: specs/feature/plan.md }
 
   - id: approve_plan
     uses: human.approval
@@ -31,8 +28,7 @@ stages:
 
   - id: tasks
     uses: spec-kit.tasks
-    runner: pi
-    model_profile: chatgpt-planning
+    runner: planner-codex
     needs: [{ stage: approve_plan, scope: all }]
     produces:
       tasks: specs/feature/tasks.md
@@ -40,50 +36,29 @@ stages:
 
   - id: implement
     uses: worker.execute
-    runner: { prefer: [devin, codex, claude] }
+    runner: { prefer: [implementer-codex, implementer-devin] }
     needs: [{ stage: tasks, scope: all }]
     foreach: { source: stages.tasks.outputs.graph, key: task.id }
     gate: task.dependencies_done
     isolation: worktree
-    profile: disciplined-engineer
     retry: { max_attempts: 3, max_elapsed_seconds: 86400 }
 
   - id: review
     uses: worker.review
-    runner: { prefer: [codex, claude, devin] }
+    runner: { prefer: [reviewer-codex, reviewer-devin] }
     needs: [{ stage: implement, scope: same-item }]
     foreach: { source: stages.tasks.outputs.graph, key: task.id }
-    policies: { require_different_worker_kind: true, scope: task }
-    retry: { max_attempts: 3, max_elapsed_seconds: 86400 }
-    on_failure:
-      changes_requested: { retry_stage: implement }
+    policies: { require_different_profile_family: true, scope: task }
 
   - id: verify
     uses: command.run
     needs: [{ stage: review, scope: same-item }]
     foreach: { source: stages.tasks.outputs.graph, key: task.id }
     with: { argv: "${commands.task_verify}" }
-    retry: { max_attempts: 3, max_elapsed_seconds: 86400 }
-    on_failure:
-      verification_failed: { retry_stage: implement }
 
   - id: integrate
     uses: git.integrate
     needs: [{ stage: verify, scope: same-item }]
-    foreach: { source: stages.tasks.outputs.graph, key: task.id }
-
-  - id: post_integrate_verify
-    uses: command.run
-    needs: [{ stage: integrate, scope: same-item }]
-    foreach: { source: stages.tasks.outputs.graph, key: task.id }
-    with: { argv: "${commands.task_verify}" }
-    retry: { max_attempts: 3, max_elapsed_seconds: 86400 }
-    on_failure:
-      verification_failed: { retry_stage: implement }
-
-  - id: record_task_done
-    uses: git.project-task-status
-    needs: [{ stage: post_integrate_verify, scope: same-item }]
     foreach: { source: stages.tasks.outputs.graph, key: task.id }
 
   - id: final_verify
@@ -93,11 +68,9 @@ stages:
 
   - id: final_review
     uses: worker.review
-    runner: { prefer: [codex, claude, devin] }
+    runner: { prefer: [reviewer-codex, reviewer-devin] }
     needs: [{ stage: final_verify, scope: all }]
     policies: { scope: final_diff }
-    on_failure:
-      changes_requested: { block: final_review_remediation_required }
 
   - id: push
     uses: git.push
@@ -108,31 +81,38 @@ stages:
     needs: [{ stage: push, scope: all }]
 ```
 
-This is the complete generated default. The canonical packaged copy is
-`src/defaults/workflow.yaml`.
+The packaged default also contains `post_integrate_verify` and
+`record_task_done`; inspect `src/defaults/workflow.yaml` for the canonical full
+file.
 
-## Joins and fan-out
+## Change the workflow
 
-- `foreach` materializes one keyed job per task.
-- `scope: same-item` joins exactly the same task key and is valid only when both
-  stages use the same fan-out source and key.
-- `scope: all` is a barrier over every upstream materialized job.
-- `gate: task.dependencies_done` enforces the task DAG in addition to stage
-  dependencies.
-- Two parallel-eligible, unordered tasks may not claim overlapping owned paths.
+Edit `runner.prefer` to change routing without changing orchestration code. For
+example, `[implementer-devin, implementer-codex]` makes Devin the primary
+implementer. Profiles bind a family, provider, model, explicit tools,
+extensions, skills, prompt templates, and MCP resources. A new provider is
+added by declaring and locking its profile resources, then referencing that
+profile from the workflow.
 
-The accepted task graph is a canonical projection of `tasks.md`, bound to its
-semantic hash and acceptance references. The controller—not a worker—derives
-and validates it.
+The current default inventory declares Codex CLI and Devin CLI only. The core
+profile schema is intentionally provider-extensible; adding another provider
+does not create another global orchestrator.
 
-## Actions and recovery
+## DAG and concurrency rules
 
-Actions declare one recovery class:
+- `foreach` creates one keyed job per task.
+- `scope: same-item` joins the same task key.
+- `scope: all` waits for every upstream job.
+- `gate: task.dependencies_done` enforces the task DAG.
+- Independent tasks may run concurrently only in distinct worktrees.
+- Tasks with overlapping owned paths are not parallel-eligible.
+- Review must use a different profile family from implementation when the
+  policy is enabled.
 
-- `idempotent`: safe to retry after a definitive not-found reconciliation.
-- `reconcilable`: inspect external identity first; execute only if absent.
-- `non_retryable`: an unknown result becomes a blocker.
+Workers can report completion, failure, or a blocker, but only Pi can advance
+a task to `DONE` after evidence, tests, review, integration, and task projection
+all succeed.
 
-Workflow command values are argv arrays from `environment.yaml`; they are never
-shell strings. Changing worker preference, retry budgets, review policy, or
-commands changes the compiled workflow revision and therefore the run identity.
+Commands in `environment.yaml` are argv arrays, never shell strings. Changing
+the workflow, profiles, commands, retry policy, or review policy changes the
+compiled workflow revision and therefore the run identity.

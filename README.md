@@ -1,79 +1,64 @@
 # Pi Multi-Agent Orchestrator
 
-`pi-multi-agent-harness` turns a Spec Kit feature plan into a dependency-aware,
-multi-agent engineering run. Pi owns global orchestration; Codex, Devin, and
-Claude are workers; Superpowers is the engineering discipline inside workers;
-tests and CI decide correctness.
+`pi-multi-agent-harness` turns Spec Kit artifacts into a durable,
+dependency-aware engineering run. Pi is the only orchestrator. The shipped
+workflow uses locally authenticated Codex CLI and Devin CLI workers, injects
+selected Superpowers skills, isolates tasks in Git worktrees, and accepts
+completion only after structured evidence and verification pass.
 
-The default editable workflow prefers Devin → Codex → Claude for
-implementation, then Codex → Claude → Devin for independent review. Change
-those arrays in `.harness/workflow.yaml` or select one of the generated workflow
-variants—worker order is data, not hard-coded policy.
-
-> **Release status:** the Pi extension now composes the resident durable
-> controller, Spec Kit planning bridge, Herdr workers, isolated worktrees,
-> verification, integration, push, PR creation, auto-resume, and standalone
-> recovery. The deterministic owned E2E runs the complete diamond pipeline.
-> Publication remains gated on the opt-in authenticated Codex/Devin/Claude
-> transport smoke on a disposable machine/account set.
+Worker selection is data in `.harness/workflow.yaml`, not a hard-coded call
+chain. The ready-to-use default plans with Codex, prefers Codex then Devin for
+implementation, and requires review by a different provider family. The
+included `spec-kit-devin.yaml` preset flips implementation preference to Devin.
 
 ## Quick start
 
-Requirements: Node.js 22.19+, Git, Pi 0.86.1, Spec Kit 0.8.7, Superpowers
-6.4.1, Herdr 0.9.1, and whichever worker CLIs the selected workflow uses.
-
-Every initialized project declares its required agent plugins in
-`.harness/environment.yaml`. The default records the provider-specific
-Superpowers identity for Pi, Codex, Devin, and Claude. `harness doctor --json`
-probes each declaration independently, so a new computer reports the precise
-missing or wrong-version integration instead of one opaque global result.
+Requirements: Node.js `>=22.22.2`, Git, Codex CLI and Devin CLI. Codex and Devin
+must already be authenticated with the local subscription accounts you intend
+to use.
 
 ```bash
 cd your-project
-npm exec --yes --package pi-multi-agent-harness@0.1.0 -- harness init
-npm exec --yes --package pi-multi-agent-harness@0.1.0 -- harness bootstrap --dry-run .
-```
-
-Inspect the content-addressed plan. After resolving any manual blockers, run:
-
-```bash
-npm exec --yes --package pi-multi-agent-harness@0.1.0 -- harness bootstrap --yes .
+npm exec --yes --package pi-multi-agent-harness@0.1.0 -- harness init .
+npm exec --yes --package pi-multi-agent-harness@0.1.0 -- harness setup --dry-run .
+npm exec --yes --package pi-multi-agent-harness@0.1.0 -- harness setup --yes .
 harness doctor --json .
 harness start .
 ```
 
-Inside the dedicated Pi session, `/harness-run <feature-or-run-id>` displays an
-exact effect preview, asks for approval, creates the immutable run, and keeps
-the controller resident across disconnects. Read-only operational commands
-include `harness status`, `graph`, and `explain`; Pi also registers `/harness-status`,
-`/harness-graph`, `/harness-retry`, `/harness-reroute`, `/harness-pause`, and
-the related run commands.
+If doctor reports missing authentication, run `harness auth planner-codex .` or
+`harness auth implementer-devin .`. Credentials are projected into isolated
+managed profile homes; setup does not remove or edit global Pi packages,
+skills, plugins, or MCP configuration.
+
+Inside Pi, `/harness-run <feature-or-run-id>` previews effects and requests run
+approval. Operational commands include `harness status`, `graph`, `explain`,
+and `recover`, plus the corresponding `/harness-*` Pi commands.
 
 ## Runtime shape
 
 ```text
-Human + Spec Kit → spec / plan / tasks / task graph
-                 → Pi controller
-                 → Herdr workspaces and isolated worktrees
-                 → Codex / Devin / Claude + Superpowers
-                 → task tests → independent review → integration
-                 → final verification → final review → push → one PR
+Human + Spec Kit -> spec / plan / tasks / task graph
+                 -> durable Pi controller
+                 -> one worktree + branch + Pi child per READY task
+                 -> Codex CLI or Devin CLI + selected Superpowers skills
+                 -> tests -> independent review -> integration
+                 -> final verification -> push -> pull request
 ```
 
-Every task gets a separate branch, worktree, agent identity, assignment hash,
-and structured result. An agent result is not `DONE`; the controller requires
-evidence, verification, integration, and task-status projection first. Run
-state is a fenced, hash-chained journal under the repository's Git common
-directory, so linked worktrees share one durable run identity.
+Workers never decide `DONE`. Pi validates the assignment identity, allowed
+paths, candidate commit, evidence, terminal event, tests, and review result.
+Run state is a fenced, hash-chained journal under the repository Git common
+directory. Detached child attempts keep writing their own event files and can
+be reconciled after the controller restarts.
 
 ## Documentation
 
-- [Installation and bootstrap](docs/installation.md)
+- [Installation and setup](docs/installation.md)
 - [Workflow DSL](docs/workflow-dsl.md)
 - [Recovery and operations](docs/recovery.md)
 - [Security model](SECURITY.md)
 - [Release process](docs/releasing.md)
 
-This release intentionally excludes remote access/Tailscale setup. That is a
-separate deployment concern and does not belong in the orchestration trust
-boundary.
+Remote access, Tailscale, dashboards, and multi-machine execution are outside
+this release.

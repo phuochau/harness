@@ -30,6 +30,7 @@ export interface MaterializeProfileOptions {
   readonly ambient?: Readonly<Record<string, string | undefined>>;
   readonly forwardedKeys?: readonly string[];
   readonly executablePath?: string;
+  readonly retainExtensionSources?: boolean;
 }
 
 async function assertCopyableTree(path: string): Promise<void> {
@@ -56,8 +57,10 @@ async function copyResource(source: string, target: string): Promise<void> {
 const preservedCredentialPaths = [
   "pi-agent/auth.json",
   "xdg-config/devin/config.json",
+  "xdg-data/devin/credentials.toml",
   "home/.claude.json",
   "home/.claude/.credentials.json",
+  "home/.codex/auth.json",
 ] as const;
 
 async function preserveCredentials(profileRoot: string, staging: string): Promise<void> {
@@ -126,12 +129,18 @@ export async function materializeProfile(
   if (profile.mcp.length > 0) {
     throw new Error("MCP projection is not implemented for managed profiles");
   }
-  const environment = buildManagedEnvironment({
+  const baseEnvironment = buildManagedEnvironment({
     profile,
     paths,
     ambient: options.ambient ?? {},
     forwardedKeys: options.forwardedKeys ?? [],
     executablePath: options.executablePath ?? "/usr/bin:/bin",
+  });
+  const environment = deepFreeze({
+    ...baseEnvironment,
+    ...(profile.family === "devin"
+      ? { PI_DEVIN_HEADLESS_PERMISSION: "allow" }
+      : {}),
   });
 
   await mkdir(dirname(paths.profileRoot), { recursive: true, mode: 0o700 });
@@ -153,6 +162,11 @@ export async function materializeProfile(
 
     const extensionPaths: string[] = [];
     for (const [index, source] of profile.extensions.entries()) {
+      if (options.retainExtensionSources === true) {
+        await assertCopyableTree(source);
+        extensionPaths.push(source);
+        continue;
+      }
       const finalPath = join(
         paths.profileRoot,
         "resources",
@@ -222,6 +236,33 @@ export async function materializeProfile(
       };
       await writeFile(
         stagePath(staging, paths, join(paths.piAgentDir, "claude-bridge.json")),
+        `${JSON.stringify(configuration, null, 2)}\n`,
+        { encoding: "utf8", mode: 0o600 },
+      );
+    }
+    if (profile.family === "codex" && profile.provider === "pi-shell-acp") {
+      const configuration = {
+        compaction: { enabled: false },
+        piShellAcpProvider: {
+          backend: "codex",
+          appendSystemPrompt: false,
+          settingSources: [],
+          strictMcpConfig: true,
+          showToolNotifications: false,
+          tools: ["Read", "Bash", "Edit", "Write"],
+          skillPlugins: [],
+          permissionAllow: ["Read(*)", "Bash(*)", "Edit(*)", "Write(*)"],
+          mcpServers: {},
+          codexDisabledFeatures: [
+            "image_generation", "tool_suggest", "tool_search",
+            "multi_agent", "apps", "memories",
+          ],
+        },
+      };
+      const settingsPath = join(staging, "home", ".pi", "agent", "settings.json");
+      await mkdir(dirname(settingsPath), { recursive: true, mode: 0o700 });
+      await writeFile(
+        settingsPath,
         `${JSON.stringify(configuration, null, 2)}\n`,
         { encoding: "utf8", mode: 0o600 },
       );

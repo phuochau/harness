@@ -67,14 +67,11 @@ it("treats every missing required locked capability as unhealthy", async () => {
     .toBe(true);
 });
 
-it("does not require Herdr integration capabilities", async () => {
+it("does not require secondary execution-plane capabilities", async () => {
   const root = await maliciousProjectFixture();
   temporary.push(root);
   const capabilities = executableCapabilities(await readDeclarativeProject(root));
-  const integrations = capabilities.filter((item) =>
-    item.id.startsWith("herdr-integration:"),
-  );
-  expect(integrations).toEqual([]);
+  expect(capabilities.map((item) => item.id)).not.toContain("secondary-runtime");
 });
 
 it("does not probe user-global agent plugins for managed profiles", async () => {

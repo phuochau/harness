@@ -1,70 +1,73 @@
-# Installation and bootstrap
+# Installation and setup
 
-## 1. Install the supporting tools
+## Requirements
 
-Use exact versions from `.harness/harness.lock`. Pi is an npm package; Spec Kit
-supports a pinned `uv tool install ...@vX.Y.Z`; Herdr supports stable binaries
-and pinned Nix release refs. Worker authentication is separate from installing
-their CLIs.
+- Node.js `>=22.22.2`
+- Git and GitHub CLI
+- authenticated Codex CLI and Devin CLI subscriptions
 
-The harness divides setup into three approvals:
+The project lock pins Pi `0.86.1`, `@junghanacs/pi-shell-acp@0.11.1`,
+`@tian.zuo/pi-devin-acp@0.3.4`, TypeBox `1.3.34`, Spec Kit `0.8.7`, and
+Superpowers `6.4.1`. Setup uses those exact identities and integrity values.
 
-1. **Install approval** approves one content-addressed dependency plan.
-2. **Authentication** signs Pi, Codex, Devin, Claude, GitHub, or Herdr into
-   disposable development accounts. Bootstrap never captures tokens.
-3. **Run approval** approves the effects preview for a particular feature run.
-
-## 2. Initialize a project
+## Initialize
 
 ```bash
 npm exec --yes --package pi-multi-agent-harness@0.1.0 -- harness init .
 ```
 
-This creates `.harness/workflow.yaml`, `environment.yaml`, `policy.yaml`,
-`harness.lock`, three workflow variants, and `.pi/settings.json`. It refuses to
-overwrite existing files. The generated workflow DSL is meant to be edited and
-committed.
+Initialization creates a ready `.harness/workflow.yaml`, `profiles.yaml`,
+`environment.yaml`, `policy.yaml`, `harness.lock`, workflow presets, and
+`.pi/settings.json`. Existing customized files are never overwritten.
 
-`environment.yaml.agent_plugins` is the portable plugin inventory. The shipped
-default binds Superpowers to its provider-specific identity in Pi, Codex,
-Devin, and Claude. Doctor checks every declaration against the locked version;
-the aggregate `superpowers` capability is healthy only when all declared agent
-plugins are present and enabled.
+The default install inventory includes only the Pi harness, the Codex CLI ACP
+bridge, and the Devin CLI ACP bridge. Global Pi packages, skills, MCP servers,
+and unrelated agent configuration are not imported into worker profiles.
 
-## 3. Probe and approve installation
+## Review and apply setup
 
 ```bash
-npm exec --yes --package pi-multi-agent-harness@0.1.0 -- harness bootstrap --dry-run .
+harness setup --dry-run .
+harness setup --yes .
 ```
 
-Review `planHash`, every source/digest, argv, scope, mutation, and rollback
-hint. Floating Git refs, local paths, unknown sources, wrong-source installs,
-unexpected Pi packages, and unverifiable state are manual blockers.
+The dry run is content-addressed. Review the plan hash, sources, versions,
+digests, argv, scope, and rollback notes before approval. `--yes` authorizes
+only that exact plan. `bootstrap` remains an alias for `setup` for one release.
+
+Managed packages and profile homes live below:
+
+```text
+$XDG_DATA_HOME/pi-harness/runtimes/<harness-version>/
+  packages/
+  profiles/<profile-id>/
+```
+
+## Authenticate local CLI subscriptions
+
+Normal Codex and Devin CLI logins are reused through allowlisted credential
+projection. If an isolated profile still needs authentication, run:
 
 ```bash
-npm exec --yes --package pi-multi-agent-harness@0.1.0 -- harness bootstrap --yes .
+harness auth planner-codex .
+harness auth implementer-devin .
 ```
 
-`--yes` approves only the exact displayed hash; it does not broaden policy or
-bypass manual blockers. Use `--repair` only after inspecting a disabled or
-customized declared Pi package entry. Repair never deletes an undeclared
-package.
+The harness never prints or stores credential values in receipts. Codex uses
+`codex login`; Devin uses `devin auth login`. API-key billing is not selected as
+an automatic fallback.
 
-## 4. Diagnose
+## Diagnose and start
 
 ```bash
 harness doctor --json .
-```
-
-Doctor freshly checks required versions, project-local Pi resources, worker
-CLIs, authentication status, policy violations, and configuration. Receipts are
-diagnostics, not proof that the current machine is healthy.
-
-## 5. Start the controller
-
-```bash
 harness start .
 ```
 
-The command creates or reattaches one stable `pi` controller agent in Herdr. It
-never starts a duplicate with the same repository identity.
+Doctor freshly checks Node, Git, GitHub, the locked managed packages, both
+CLIs, subscription readiness, profile resources, and project configuration.
+Receipts are diagnostic history, not current-health proof.
+
+There is no remote-control service in this release. `start` runs the local Pi
+orchestrator; durable child sessions and repository state are recovered with
+`harness recover` after interruption.

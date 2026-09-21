@@ -66,15 +66,15 @@ dependencies:
       integrity: sha512-su1j4yDc8nSvHvx4eFvyXp2BAHFjArThdKUzEoy+v/AnLUKx6E39bFXzS0RZGTweueddKKdhiihEeK5yWaH1nQ==
     piSource: npm:@tian.zuo/pi-devin-acp@0.3.4
     dependsOn: [pi-coding-agent, typebox]
-  - id: pi-claude-bridge
+  - id: pi-shell-acp
     kind: pi-package
-    version: 0.8.0
+    version: 0.11.1
     source:
       kind: npm
-      identity: pi-claude-bridge
-      version: 0.8.0
-      integrity: sha512-CaSXdCdMWLGcvvG4IZuKeyUIyLio2m8nEO7cUFZdxKPdkwWuf8Eq46Ys2z3VlSjCidlIpasLwiCdJStXSt6EZQ==
-    piSource: npm:pi-claude-bridge@0.8.0
+      identity: "@junghanacs/pi-shell-acp"
+      version: 0.11.1
+      integrity: sha512-xGpMJtwN4AS8vu2ziuCpmRW0er2CoMA/IFCEbzLzTt2l++rTB5Zzvjxn70yDp4ASdQ422KygPAQoYeEftw7YPA==
+    piSource: npm:@junghanacs/pi-shell-acp@0.11.1
     dependsOn: [pi-coding-agent, typebox]
   - id: codex
     kind: integration
@@ -93,15 +93,6 @@ dependencies:
       identity: devin
       version: 3000.10.31
       integrity: version-output:devin-3000.10.31
-    dependsOn: []
-  - id: claude
-    kind: integration
-    version: 2.1.234
-    source:
-      kind: manual
-      identity: claude
-      version: 2.1.234
-      integrity: version-output:claude-2.1.234
     dependsOn: []
   - id: git
     kind: tool

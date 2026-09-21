@@ -14,12 +14,12 @@ it("keeps the packaged JSON release manifest identical to the built-in policy da
     expect.arrayContaining([
       "pi-coding-agent",
       "pi-devin-acp",
-      "pi-claude-bridge",
+      "pi-shell-acp",
       "superpowers",
       "spec-kit",
       "git",
       "github-cli",
     ]),
   );
-  expect(releaseManifest.some((entry) => entry.id.startsWith("herdr"))).toBe(false);
+  expect(new Set(releaseManifest.map((entry) => entry.id)).size).toBe(releaseManifest.length);
 });

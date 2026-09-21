@@ -13,8 +13,8 @@ pi_packages:
     scope: managed
     resources:
       extensions: [index.ts]
-  - id: claude-bridge
-    dependency: pi-claude-bridge
+  - id: codex-acp
+    dependency: pi-shell-acp
     scope: managed
     resources:
-      extensions: [src/index.ts]
+      extensions: [index.ts]

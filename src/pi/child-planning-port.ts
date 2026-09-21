@@ -25,6 +25,7 @@ export interface ChildPiPlanningPortOptions {
   readonly managed: ManagedProfileView;
   readonly supervisor: PiProcessSupervisor;
   readonly piExecutable: string;
+  readonly piExecutableArgs?: readonly string[];
   readonly transportExtensionPath: string;
   readonly sessionRoot: string;
   readonly sealer?: PlanningArtifactSealer;
@@ -78,6 +79,7 @@ export class ChildPiPlanningPort implements PlanningAgent {
       attemptId: `planning:${request.correlationId}:${generation}`,
       attemptToken: randomUUID(),
       piExecutable: this.options.piExecutable,
+      ...(this.options.piExecutableArgs === undefined ? {} : { piExecutableArgs: this.options.piExecutableArgs }),
       profile: this.options.profile,
       managed: this.options.managed,
       transportExtensionPath: this.options.transportExtensionPath,
@@ -131,7 +133,7 @@ export class ChildPiPlanningPort implements PlanningAgent {
     }
     const terminal = observation.exit.terminal;
     if (
-      observation.exit.exitCode !== 0 || !terminal.settled ||
+      (observation.exit.exitCode !== null && observation.exit.exitCode !== 0) || !terminal.settled ||
       !terminal.acceptedStopReason || !terminal.completeToolResults ||
       terminal.terminalEventHash === undefined
     ) {

@@ -2,46 +2,57 @@
 
 ## Trust boundary
 
-Before install approval, the launcher only parses the fixed declarative files
-under `.harness/`, inert `.pi/settings.json`, bounded metadata inside the
-project-local Pi cache, and Git metadata. It does not import project modules,
-load Pi extensions, execute workflow argv, run package lifecycle scripts, or
-start a model turn.
+Before setup approval, the launcher parses only bounded declarative files,
+inert `.pi/settings.json`, package metadata, and Git metadata. It does not load
+project modules, execute project scripts, start model turns, or import global
+Pi configuration.
 
-The immutable release baseline is a ceiling. Machine policy and project policy
-may narrow it; neither can authorize a new source. Npm sources bind exact
-identity and version. For the harness package itself, bootstrap resolves the
-registry's `dist.integrity` before presenting the plan, places the resulting
-SHA-512 digest inside `planHash`, and queries it again immediately before
-install. This avoids the impossible circular requirement that a tarball embed
-its own final digest.
+The release baseline is a ceiling. Project and machine policy may narrow it but
+cannot authorize a new source. Npm packages are bound to exact identity,
+version, registry, and integrity. Setup uses argv arrays with `shell: false` and
+installs only an explicitly approved content-addressed plan.
 
-All subprocess calls use argv arrays with `shell: false`. Generic npm recipes
-include `--ignore-scripts`. Pi packages are special: after explicit approval,
-Pi may execute package/extension code. The plan calls this out, installs only
-the locked source, atomically projects all four resource filters, performs an
-inert metadata probe, then loads resources in a bounded child process without a
-model turn. That child is fault containment, not a security sandbox.
+## Managed profiles
 
-## Credentials
+Every worker gets an isolated HOME, Pi agent directory, XDG config/data roots,
+explicit extension paths, selected skill paths, and an explicit tool surface.
+Global packages, skills, prompt templates, context files, plugins, and MCP
+servers are disabled by default.
 
-Do not provide production database credentials, production API keys, or
-production infrastructure credentials. Give each worker the minimum disposable
-development/test credentials required by its assignment. Receipts and doctor
-reports never persist stdout, stderr, environment variables, auth tokens, or
-credential-bearing URLs.
+Codex runs through the locally authenticated Codex CLI bridge; Devin runs
+through the locally authenticated Devin CLI ACP bridge. Only the credential
+files needed by the selected provider are copied into its managed profile, and
+an existing managed credential is never overwritten. The harness does not
+silently fall back to API-key billing.
+
+Devin headless permissions are auto-approved only inside the task's isolated
+worktree and allowed-path contract. Codex CLI native tools cannot be hidden by
+Pi without creating a false tool contract, so mutation safety is enforced by
+worktree isolation, protected paths, candidate diff validation, and evidence
+acceptance rather than by prompt claims alone.
+
+## Credentials and logs
+
+Never expose production databases, production API keys, or production
+infrastructure credentials. Use minimum disposable development/test access.
+Doctor and setup receipts do not persist credential values. Detached provider
+stderr is suppressed because it cannot be safely redacted after a controller
+crash; durable diagnostics come from 0600 Pi event and result files.
 
 ## Protected state
 
-Workers may read `spec.md`, `plan.md`, and `tasks.md`, but may not modify the
+Workers may read approved Spec Kit artifacts but may not modify the
 specification, architecture, `.harness/**`, `.pi/settings.json`, or controller
-state. Each assignment declares allowed paths, commit, worktree, role, required
-Superpowers evidence, and verification commands. Reviews run in detached,
-read-only worktrees and must use a different worker kind.
+state. Each assignment binds allowed paths, base commit, worktree, role,
+profile hash, required Superpowers disciplines, verification commands, and a
+structured result schema. Independent review uses a different provider family.
+
+Exact PID/start/executable/token identity is rechecked before cancellation.
+Ambiguous external effects and incomplete terminal evidence block or retry; they
+are never promoted to success.
 
 ## Reporting
 
-Report suspected vulnerabilities privately to the repository maintainers.
-Include the affected version, minimal reproduction, and whether secrets or
-external side effects were involved. Do not attach real credentials or target
-production systems while reproducing an issue.
+Report vulnerabilities privately to the maintainers with the affected version
+and a minimal reproduction. Do not attach real credentials or target production
+systems.

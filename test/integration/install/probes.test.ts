@@ -151,7 +151,7 @@ it("probes exact managed provider packages without importing their extensions", 
   const managed = join(root, "managed-packages");
   for (const [name, version, extension] of [
     ["@tian.zuo/pi-devin-acp", "0.3.4", "index.ts"],
-    ["pi-claude-bridge", "0.8.0", "src/index.ts"],
+    ["@junghanacs/pi-shell-acp", "0.11.1", "index.ts"],
   ] as const) {
     const packageRoot = join(managed, "node_modules", name);
     await mkdir(dirname(join(packageRoot, extension)), { recursive: true });
@@ -169,8 +169,8 @@ it("probes exact managed provider packages without importing their extensions", 
         "node_modules/@tian.zuo/pi-devin-acp": {
           integrity: "sha512-su1j4yDc8nSvHvx4eFvyXp2BAHFjArThdKUzEoy+v/AnLUKx6E39bFXzS0RZGTweueddKKdhiihEeK5yWaH1nQ==",
         },
-        "node_modules/pi-claude-bridge": {
-          integrity: "sha512-CaSXdCdMWLGcvvG4IZuKeyUIyLio2m8nEO7cUFZdxKPdkwWuf8Eq46Ys2z3VlSjCidlIpasLwiCdJStXSt6EZQ==",
+        "node_modules/@junghanacs/pi-shell-acp": {
+          integrity: "sha512-xGpMJtwN4AS8vu2ziuCpmRW0er2CoMA/IFCEbzLzTt2l++rTB5Zzvjxn70yDp4ASdQ422KygPAQoYeEftw7YPA==",
         },
       },
     }),
@@ -186,13 +186,13 @@ it("probes exact managed provider packages without importing their extensions", 
     status: "present",
     version: "0.3.4",
   });
-  expect(report.byId["pi-claude-bridge"]).toMatchObject({
+  expect(report.byId["pi-shell-acp"]).toMatchObject({
     status: "present",
-    version: "0.8.0",
+    version: "0.11.1",
   });
 
   const lock = JSON.parse(await readFile(join(managed, "package-lock.json"), "utf8"));
-  lock.packages["node_modules/pi-claude-bridge"].integrity = "sha512-tampered";
+  lock.packages["node_modules/@junghanacs/pi-shell-acp"].integrity = "sha512-tampered";
   await writeFile(join(managed, "package-lock.json"), JSON.stringify(lock), "utf8");
   const tampered = await probeEnvironment({
     root,
@@ -200,5 +200,5 @@ it("probes exact managed provider packages without importing their extensions", 
     process: new FakeProcessRunner(),
     capabilities: [],
   });
-  expect(tampered.byId["pi-claude-bridge"]?.status).toBe("wrong_source");
+  expect(tampered.byId["pi-shell-acp"]?.status).toBe("wrong_source");
 });

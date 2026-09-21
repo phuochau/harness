@@ -29,7 +29,7 @@ export async function runSpecKitCompatibilitySmoke(): Promise<void> {
       "init",
       project,
       "--integration",
-      "claude",
+      "codex",
       "--ignore-agent-tools",
       "--no-git",
     ]);

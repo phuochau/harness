@@ -13,10 +13,9 @@ export const releaseManifest: readonly ReleaseManifestEntry[] = [
   { id: "spec-kit", source: { kind: "signed-artifact", identity: "specify", version: "0.8.7", integrity: "version-output:specify-0.8.7" } },
   { id: "superpowers", source: { kind: "git", identity: "https://github.com/obra/superpowers.git", version: "5bf4e78011075bcfc0dc295f0724994cd123ee71", integrity: "git-commit:5bf4e78011075bcfc0dc295f0724994cd123ee71" } },
   { id: "pi-devin-acp", source: { kind: "npm", identity: "@tian.zuo/pi-devin-acp", version: "0.3.4", integrity: "sha512-su1j4yDc8nSvHvx4eFvyXp2BAHFjArThdKUzEoy+v/AnLUKx6E39bFXzS0RZGTweueddKKdhiihEeK5yWaH1nQ==", registry: "https://registry.npmjs.org/" } },
-  { id: "pi-claude-bridge", source: { kind: "npm", identity: "pi-claude-bridge", version: "0.8.0", integrity: "sha512-CaSXdCdMWLGcvvG4IZuKeyUIyLio2m8nEO7cUFZdxKPdkwWuf8Eq46Ys2z3VlSjCidlIpasLwiCdJStXSt6EZQ==", registry: "https://registry.npmjs.org/" } },
+  { id: "pi-shell-acp", source: { kind: "npm", identity: "@junghanacs/pi-shell-acp", version: "0.11.1", integrity: "sha512-xGpMJtwN4AS8vu2ziuCpmRW0er2CoMA/IFCEbzLzTt2l++rTB5Zzvjxn70yDp4ASdQ422KygPAQoYeEftw7YPA==", registry: "https://registry.npmjs.org/" } },
   { id: "codex", source: { kind: "signed-artifact", identity: "codex", version: "0.155.1", integrity: "version-output:codex-cli-0.155.1" } },
   { id: "devin", source: { kind: "signed-artifact", identity: "devin", version: "3000.10.31", integrity: "version-output:devin-3000.10.31" } },
-  { id: "claude", source: { kind: "signed-artifact", identity: "claude", version: "2.1.234", integrity: "version-output:claude-2.1.234" } },
   { id: "git", source: { kind: "formula", identity: "git", version: "system", integrity: "version-probe:git" } },
   { id: "github-cli", source: { kind: "formula", identity: "gh", version: "system", integrity: "version-probe:gh" } },
 ] as const;

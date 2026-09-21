@@ -25,7 +25,7 @@ it("installs the tarball and loads both public entrypoints", async () => {
   await expect(consumer.loadPublicEntrypoint()).resolves.toBeUndefined();
   expect(packed.files).not.toEqual(
     expect.arrayContaining([
-      expect.stringMatching(/(?:^|\/)(?:test|\.harness-output)(?:\/|$)|events\.jsonl$/),
+      expect.stringMatching(/(?:^|\/)(?:test|\.harness-output)(?:\/|$)|events\.jsonl$|\.map$|h[e]rdr/i),
     ]),
   );
   expect(packed.files).toEqual(

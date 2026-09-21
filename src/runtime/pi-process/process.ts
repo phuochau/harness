@@ -2,7 +2,6 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { link, mkdir, open, readFile, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { sha256 } from "../../shared/sha256.js";
-import { redactDiagnostic } from "../managed/redaction.js";
 import { PiEventStreamParser, reducePiEvents } from "./events.js";
 import {
   identityMismatchEvidence,
@@ -84,6 +83,10 @@ async function terminalFromFile(eventsPath: string) {
   return reducePiEvents(await readEventRecords(eventsPath)).terminal;
 }
 
+function isAcceptedTerminal(terminal: Awaited<ReturnType<typeof terminalFromFile>>): boolean {
+  return terminal.settled && terminal.acceptedStopReason && terminal.completeToolResults;
+}
+
 async function processExitFromFile(
   eventsPath: string,
 ): Promise<{ exitCode: number | null; signal: NodeJS.Signals | null } | undefined> {
@@ -150,30 +153,13 @@ export class NodePiProcessSupervisor implements PiProcessSupervisor {
       env: { ...spec.env, [ATTEMPT_TOKEN_ENV]: spec.attemptToken },
       shell: false,
       detached: true,
-      stdio: ["pipe", "pipe", "pipe"],
+      // Child-owned output descriptors keep the attempt alive if the
+      // controller process crashes. Diagnostics are suppressed because an
+      // unredacted provider stderr stream may contain credentials.
+      stdio: ["pipe", events.fd, "ignore"],
     });
     if (child.pid === undefined) throw new Error("Pi process did not receive a pid");
     const pid = child.pid;
-    let eventWrites = Promise.resolve();
-    let diagnosticWrites = Promise.resolve();
-    let diagnosticBuffer = "";
-    child.stdout?.on("data", (chunk: Buffer) => {
-      eventWrites = eventWrites.then(async () => {
-        await events.write(chunk);
-      });
-    });
-    child.stderr?.on("data", (chunk: Buffer) => {
-      diagnosticBuffer += chunk.toString("utf8");
-      const lines = diagnosticBuffer.split("\n");
-      diagnosticBuffer = lines.pop() ?? "";
-      const complete = lines.map((line) => `${redactDiagnostic(line)}\n`).join("");
-      if (complete !== "") {
-        diagnosticWrites = diagnosticWrites.then(async () => {
-          await diagnostics.write(complete, undefined, "utf8");
-        });
-      }
-    });
-
     try {
       this.signalProcess(pid, "SIGSTOP");
       const observed = await this.identity.capture(pid, spec.executable, spec.attemptToken);
@@ -199,14 +185,6 @@ export class NodePiProcessSupervisor implements PiProcessSupervisor {
         child.once("error", reject);
         child.once("close", (exitCode, signal) => {
           void (async () => {
-            await eventWrites;
-            if (diagnosticBuffer !== "") {
-              const tail = redactDiagnostic(diagnosticBuffer);
-              diagnosticWrites = diagnosticWrites.then(async () => {
-                await diagnostics.write(tail, undefined, "utf8");
-              });
-            }
-            await diagnosticWrites;
             await events.write(
               `${JSON.stringify({ type: "process_exit", exitCode, signal })}\n`,
               undefined,
@@ -253,6 +231,13 @@ export class NodePiProcessSupervisor implements PiProcessSupervisor {
       return {
         status: "exited",
         exit: { ...persistedExit, terminal: await terminalFromFile(record.eventsPath) },
+      };
+    }
+    const terminal = await terminalFromFile(record.eventsPath);
+    if (isAcceptedTerminal(terminal)) {
+      return {
+        status: "exited",
+        exit: { exitCode: null, signal: null, terminal },
       };
     }
     return { status: "missing" };

@@ -93,16 +93,6 @@ export function executableCapabilities(
     claude: "claude",
   };
   const auth: Readonly<Record<string, ExecutableCapability["auth"]>> = {
-    "pi-coding-agent": {
-      args: ["auth", "check", "--provider", "openai-codex", "--json", "--no-refresh"],
-      isAuthenticated: (stdout) => {
-        try {
-          return (JSON.parse(stdout) as { status?: unknown }).status === "ready";
-        } catch {
-          return false;
-        }
-      },
-    },
     codex: {
       args: ["login", "status"],
       isAuthenticated: (stdout, stderr) => /logged in/i.test(`${stdout}\n${stderr}`),
@@ -237,13 +227,13 @@ export async function defaultProbe(
     const result = byId[`pi-package:${requirement.id}`];
     if (result !== undefined) byId[requirement.dependency] = result;
   }
-  const planningAuth = byId["auth:pi-coding-agent"];
+  const planningAuth = byId["auth:codex"];
   byId["planning-profile:chatgpt"] = {
     id: "planning-profile:chatgpt",
     status: planningAuth?.status === "present" ? "present" : "unverifiable",
     ...(planningAuth?.status === "present"
       ? {}
-      : { evidence: ["Pi openai-codex credential readiness was not proven"] }),
+      : { evidence: ["Codex CLI subscription readiness was not proven"] }),
   };
   return { byId };
 }

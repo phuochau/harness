@@ -50,6 +50,7 @@ it("installs the approved project-local Pi package and verifies it", async () =>
     "spec-kit": "0.8.7",
     superpowers: "6.4.1",
     "pi-devin-acp": "0.3.4",
+    "pi-shell-acp": "0.11.1",
     "pi-claude-bridge": "0.8.0",
     codex: "0.155.1",
     devin: "3000.10.31",
