@@ -1,0 +1,17 @@
+schema: harness/policy/v1
+protected_paths:
+  - .harness/**
+  - .pi/settings.json
+  - .specify/**
+  - specs/**/spec.md
+  - specs/**/plan.md
+  - specs/**/tasks.md
+  - specs/**/task-graph.json
+forbidden_secret_scopes:
+  - production-database
+  - production-api
+  - production-infrastructure
+worker_defaults:
+  isolated_worktree: true
+  minimum_credentials: true
+  superpowers_profile: disciplined-engineer

@@ -1,0 +1,11 @@
+{
+  "packages": [
+    {
+      "source": "npm:pi-multi-agent-harness@0.1.0",
+      "extensions": ["+dist/pi/extension.js"],
+      "skills": [],
+      "prompts": [],
+      "themes": []
+    }
+  ]
+}

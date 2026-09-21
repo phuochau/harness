@@ -1,0 +1,21 @@
+import type { TrustedSource } from "./types.js";
+
+export interface ReleaseManifestEntry {
+  readonly id: string;
+  readonly source: TrustedSource;
+}
+
+export const releaseManifest: readonly ReleaseManifestEntry[] = [
+  { id: "node", source: { kind: "formula", identity: "node", version: "22.22.2", integrity: "semver-floor:22.22.2" } },
+  { id: "pi-multi-agent-harness", source: { kind: "npm", identity: "pi-multi-agent-harness", version: "0.1.0", integrity: "npm-registry:dist.integrity", registry: "https://registry.npmjs.org/" } },
+  { id: "pi-coding-agent", source: { kind: "npm", identity: "@earendil-works/pi-coding-agent", version: "0.86.1", integrity: "sha512-vZBuNfJnruxZyemZ3O05V0S/Ylze08ahFTIQ1Mik++gVdOevPl89gt/Uv0U97BPAJaj9cj6Vf9rcIgKtUrd0BA==", registry: "https://registry.npmjs.org/" } },
+  { id: "typebox", source: { kind: "npm", identity: "typebox", version: "1.3.34", integrity: "sha512-wbnzrXXDW8xEFHDZZs2jo1MkhaYlKAY4FRhpBc1+2LF1fZVBGCXGdLEhA/Z/NBbgzJMFfeM8m7elKPa/+KxaUQ==", registry: "https://registry.npmjs.org/" } },
+  { id: "spec-kit", source: { kind: "signed-artifact", identity: "specify", version: "0.8.7", integrity: "version-output:specify-0.8.7" } },
+  { id: "superpowers", source: { kind: "git", identity: "https://github.com/obra/superpowers.git", version: "5bf4e78011075bcfc0dc295f0724994cd123ee71", integrity: "git-commit:5bf4e78011075bcfc0dc295f0724994cd123ee71" } },
+  { id: "pi-devin-acp", source: { kind: "npm", identity: "@tian.zuo/pi-devin-acp", version: "0.3.4", integrity: "sha512-su1j4yDc8nSvHvx4eFvyXp2BAHFjArThdKUzEoy+v/AnLUKx6E39bFXzS0RZGTweueddKKdhiihEeK5yWaH1nQ==", registry: "https://registry.npmjs.org/" } },
+  { id: "pi-shell-acp", source: { kind: "npm", identity: "@junghanacs/pi-shell-acp", version: "0.11.1", integrity: "sha512-xGpMJtwN4AS8vu2ziuCpmRW0er2CoMA/IFCEbzLzTt2l++rTB5Zzvjxn70yDp4ASdQ422KygPAQoYeEftw7YPA==", registry: "https://registry.npmjs.org/" } },
+  { id: "codex", source: { kind: "signed-artifact", identity: "codex", version: "0.155.1", integrity: "version-output:codex-cli-0.155.1" } },
+  { id: "devin", source: { kind: "signed-artifact", identity: "devin", version: "3000.10.31", integrity: "version-output:devin-3000.10.31" } },
+  { id: "git", source: { kind: "formula", identity: "git", version: "system", integrity: "version-probe:git" } },
+  { id: "github-cli", source: { kind: "formula", identity: "gh", version: "system", integrity: "version-probe:gh" } },
+] as const;

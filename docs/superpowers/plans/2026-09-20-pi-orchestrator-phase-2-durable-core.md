@@ -1,0 +1,892 @@
+# Pi Orchestrator Phase 2: Durable State and Controller Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` or `superpowers:executing-plans`. Read the parent plan and spec before each task.
+
+**Goal:** Build the fenced event store, generic effect protocol, serialized controller queue, policy engine, and fake end-to-end scheduler.
+
+**Architecture:** The journal is authoritative, snapshots are disposable materializations, and a lock-directory lease plus fencing rejects stale writers. All wakeups enter one FIFO command queue after their normalized JSON command is durably received; restart drains received commands without processed boundaries before new input. The controller records effect intent before invoking an action handler and reconciles any intent without an observation before deciding whether execution is safe.
+
+**Tech Stack:** Node filesystem APIs, `proper-lockfile`, TypeScript, Vitest, fast-check.
+
+**Spec:** `docs/superpowers/specs/2026-09-20-pi-multi-agent-orchestrator-design.md`
+
+## Task 7: Resolve Shared Run Paths and Acquire a Fenced Lease
+
+**Files:**
+- Create: `src/state/paths.ts`, `lease.ts`, `types.ts`
+- Create: `test/support/state-fixtures.ts`
+- Test: `test/unit/state/lease.test.ts`
+
+**Interfaces:**
+- Produces `resolveRunPaths(repo, runId)` and `RunLease.acquire(paths, ownerId): Promise<LeaseHandle>`.
+- `LeaseHandle` exposes immutable `ownerId`, `fencingToken`, and `release()`.
+
+- [ ] **Step 1: Write contention and stale-token tests**
+
+```ts
+it("places state under the Git common directory and increments fencing", async () => {
+  const repo = await createTempRepoWithWorktree();
+  const paths = await resolveRunPaths(repo.worktree, "F023");
+  expect(paths.root).toBe(join(repo.commonDir, "harness/runs/F023"));
+  const first = await RunLease.acquire(paths, "controller-a");
+  await expect(RunLease.acquire(paths, "controller-b")).rejects.toThrow(/lease held/);
+  await first.release();
+  const second = await RunLease.acquire(paths, "controller-b");
+  expect(second.fencingToken).toBe(first.fencingToken + 1);
+});
+```
+
+- [ ] **Step 2: Run and observe missing lease implementation**
+
+Run: `npm test -- test/unit/state/lease.test.ts`
+
+Expected: FAIL with missing module.
+
+- [ ] **Step 3: Implement canonical paths and lock-directory lease**
+
+```ts
+export class RunLease {
+  static async acquire(paths: RunPaths, ownerId: string): Promise<LeaseHandle> {
+    await mkdir(paths.root, { recursive: true, mode: 0o700 });
+    const releaseLock = await lockfile.lock(paths.root, { lockfilePath: paths.lockDir, stale: 30_000, retries: 0, realpath: false });
+    try {
+      const previous = await readLeaseRecord(paths.lease).catch(() => ({ fencingToken: 0 }));
+      const record = { ownerId, fencingToken: previous.fencingToken + 1, acquiredAt: new Date().toISOString() };
+      await atomicJson(paths.lease, record, 0o600);
+      return new LeaseHandle(record, releaseLock);
+    } catch (error) {
+      await releaseLock();
+      throw error;
+    }
+  }
+}
+```
+
+The lock directory provides exclusion, not proof of ownership. Every later append rereads `lease.json` and compares the fencing token while the handle remains held.
+
+- [ ] **Step 4: Run lease tests including two child processes**
+
+Run: `npm test -- test/unit/state/lease.test.ts`
+
+Expected: PASS; exactly one child acquires the lease.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/state/paths.ts src/state/lease.ts src/state/types.ts test/unit/state/lease.test.ts
+git commit -m "feat: acquire fenced run leases"
+```
+
+## Task 8: Append Hash-Chained Events with Duplicate-Key Protection
+
+**Files:**
+- Create: `src/state/journal.ts`, `src/state/hash-chain.ts`
+- Modify: `test/support/state-fixtures.ts`
+- Test: `test/unit/state/journal.test.ts`
+
+**Interfaces:**
+- Produces `Journal.append(input, lease): Promise<{ event: HarnessEvent; inserted: boolean }>`.
+- Duplicate identity is `(runId, eventType, idempotencyKey)`; identical payload returns the existing event, conflicting payload throws.
+
+- [ ] **Step 1: Write duplicate and fencing tests**
+
+```ts
+it("deduplicates identical appends and rejects key reuse", async () => {
+  const { journal, lease } = await journalFixture();
+  const input = fixtureEventInput({ eventType: "effect.intent", idempotencyKey: "launch:T001:1" });
+  const first = await journal.append(input, lease);
+  const second = await journal.append(input, lease);
+  expect(first.inserted).toBe(true);
+  expect(second).toEqual({ event: first.event, inserted: false });
+  await expect(journal.append({ ...input, payload: { changed: true } }, lease)).rejects.toThrow(/idempotency collision/);
+});
+
+it("rejects a stale fencing token", async () => {
+  const fixture = await journalFixture();
+  const stale = fixture.lease;
+  await stale.release();
+  await RunLease.acquire(fixture.paths, "new-owner");
+  await expect(fixture.journal.append(fixtureEventInput(), stale)).rejects.toThrow(/stale fencing token/);
+});
+```
+
+- [ ] **Step 2: Run and observe missing journal**
+
+Run: `npm test -- test/unit/state/journal.test.ts`
+
+Expected: FAIL.
+
+- [ ] **Step 3: Implement append under the held lease**
+
+```ts
+async append(input: EventInput, lease: LeaseHandle): Promise<AppendResult> {
+  await lease.assertCurrent();
+  const index = await this.readIdentityIndex();
+  const identity = `${input.runId}\0${input.eventType}\0${input.idempotencyKey}`;
+  const existing = index.get(identity);
+  if (existing) {
+    if (canonicalJson(existing.payload) !== canonicalJson(input.payload)) throw new IdempotencyCollision(identity);
+    return { event: existing, inserted: false };
+  }
+  const previous = await this.lastEvent();
+  const unsigned = { ...input, sequence: (previous?.sequence ?? 0) + 1, fencingToken: lease.fencingToken, prevHash: previous?.eventHash ?? ZERO_HASH };
+  const event = { ...unsigned, eventHash: sha256(canonicalJson(unsigned)) };
+  await appendAndFsync(this.paths.events, `${JSON.stringify(event)}\n`);
+  return { event, inserted: true };
+}
+```
+
+- [ ] **Step 4: Add property tests for sequence/hash stability**
+
+```ts
+fc.assert(fc.asyncProperty(fc.array(eventInputArbitrary(), { minLength: 1, maxLength: 100 }), async (inputs) => {
+  const persisted = await appendInputs(inputs);
+  expect(await reopenAndVerify(persisted.paths)).toEqual(persisted.events);
+}));
+await expect(verifyMutatedInteriorRecord()).rejects.toThrow(/hash chain/);
+```
+
+Run: `npm test -- test/unit/state/journal.test.ts`
+
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/state/journal.ts src/state/hash-chain.ts test/unit/state/journal.test.ts
+git commit -m "feat: append fenced hash-chained events"
+```
+
+## Task 9: Write Snapshots and Recover from Torn Tails
+
+**Files:**
+- Create: `src/state/snapshot.ts`, `recovery.ts`
+- Modify: `test/support/state-fixtures.ts`
+- Test: `test/unit/state/recovery.test.ts`
+
+**Interfaces:**
+- Produces `writeSnapshot(paths, state, boundary, lease)` and `recoverJournal(paths, lease): RecoveryReport`.
+- Only an incomplete final JSON line is repairable automatically.
+
+- [ ] **Step 1: Write snapshot and corruption tests**
+
+```ts
+it("restores a snapshot boundary and truncates only an incomplete tail", async () => {
+  const fixture = await persistedRunFixture({ events: 4, snapshotAt: 2, tornTail: true });
+  const report = await recoverJournal(fixture.paths, fixture.lease);
+  expect(report.repairedTail).toBe(true);
+  expect(report.events.map((event) => event.sequence)).toEqual([1, 2, 3, 4]);
+});
+
+it("refuses interior corruption", async () => {
+  const fixture = await persistedRunFixture({ events: 4, corruptSequence: 2 });
+  await expect(recoverJournal(fixture.paths, fixture.lease)).rejects.toThrow(/interior corruption/);
+});
+
+it("rejects snapshot and repair writes after lease takeover", async () => {
+  const fixture = await persistedRunFixture({ tornTail: true });
+  const stale = fixture.lease;
+  await stale.release();
+  await RunLease.acquire(fixture.paths, "new-owner");
+  await expect(writeSnapshot(fixture.paths, fixture.state, fixture.boundary, stale)).rejects.toThrow(/stale fencing token/);
+  await expect(recoverJournal(fixture.paths, stale)).rejects.toThrow(/stale fencing token/);
+});
+```
+
+- [ ] **Step 2: Run and observe missing recovery**
+
+Run: `npm test -- test/unit/state/recovery.test.ts`
+
+Expected: FAIL.
+
+- [ ] **Step 3: Implement atomic snapshots and explicit tail repair**
+
+```ts
+export async function writeSnapshot(paths: RunPaths, state: RunState, boundary: EventBoundary, lease: LeaseHandle): Promise<void> {
+  const temp = `${paths.snapshot}.${process.pid}.tmp`;
+  await lease.assertCurrent();
+  await writeFile(temp, JSON.stringify({ schemaVersion: 1, boundary, state }), { mode: 0o600 });
+  await fsyncFile(temp);
+  await lease.assertCurrent();
+  await rename(temp, paths.snapshot);
+  await fsyncDirectory(dirname(paths.snapshot));
+}
+
+export async function recoverJournal(paths: RunPaths, lease: LeaseHandle): Promise<RecoveryReport> {
+  const bytes = await readFile(paths.events);
+  const parsed = parseCompleteJsonLines(bytes);
+  verifyHashChain(parsed.events);
+  if (parsed.incompleteTail) {
+    await lease.assertCurrent();
+    await copyFile(paths.events, `${paths.events}.diagnostic-${Date.now()}`);
+    await lease.assertCurrent();
+    await truncate(paths.events, parsed.completeByteLength);
+    await fsyncFile(paths.events);
+  }
+  return { events: parsed.events, repairedTail: Boolean(parsed.incompleteTail) };
+}
+```
+
+- [ ] **Step 4: Prove replay from zero equals snapshot-plus-tail**
+
+Run: `npm test -- test/unit/state/recovery.test.ts`
+
+Expected: PASS for empty journal, valid snapshot, stale snapshot, torn tail, bad hash, sequence gap, and interior invalid JSON.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/state/snapshot.ts src/state/recovery.ts test/unit/state/recovery.test.ts
+git commit -m "feat: recover durable run state"
+```
+
+## Task 10: Reduce Events into Deterministic Run State
+
+**Files:**
+- Create: `src/core/state.ts`, `reducer.ts`, `lifecycle.ts`
+- Modify: `test/support/state-fixtures.ts`
+- Test: `test/unit/core/reducer.test.ts`
+
+**Interfaces:**
+- Produces `initialRunState(runId, revision)` and pure `reduceEvent(state, event): RunState`.
+
+- [ ] **Step 1: Write lifecycle and replay tests**
+
+```ts
+it("cannot mark a job done without integrated verification evidence", () => {
+  const state = replay(fixtureEventsThroughWorkerCompletion());
+  expect(state.jobs["implement:T001"].state).toBe("VERIFYING");
+  expect(() => reduceEvent(state, fixtureEvent({ eventType: "job.done" }))).toThrow(/integration evidence/);
+});
+
+it("replay is deterministic", () => {
+  const events = fixtureSuccessfulTaskEvents();
+  expect(replay(events)).toEqual(replay(structuredClone(events)));
+});
+
+it("rejects a processed command whose sealed batch is incomplete", () => {
+  const state = replay(fixtureEventsThroughCommandDecision({ omitMember: 1 }));
+  expect(() => reduceEvent(state, fixtureCommandProcessedEvent())).toThrow(/decision batch incomplete/);
+});
+
+it("replays controller, effect, operator, and planning events", () => {
+  const state = replay(fixtureEventsWithIntentObservationPauseRetryAndPlanning());
+  expect(state.pendingCommands).toEqual({});
+  expect(state.outstandingEffects).toEqual({});
+  expect(state.operator.paused).toBe(false);
+  expect(state.planning.status).toBe("completed");
+});
+```
+
+- [ ] **Step 2: Run and observe missing reducer**
+
+Run: `npm test -- test/unit/core/reducer.test.ts`
+
+Expected: FAIL.
+
+- [ ] **Step 3: Implement an exhaustive event reducer**
+
+```ts
+export function reduceEvent(state: RunState, event: HarnessEvent): RunState {
+  if (event.sequence !== state.lastSequence + 1) throw new ReducerError("sequence gap");
+  const next = structuredClone(state);
+  switch (event.eventType) {
+    case "job.ready": transitionJob(next, event.entityId, "PENDING", "READY"); break;
+    case "attempt.started": startAttempt(next, event); break;
+    case "worker.routed": recordRouting(next, event); break;
+    case "worker.result_observed": observeWorkerResult(next, event); break;
+    case "review.approved": recordReview(next, event); break;
+    case "review.changes_requested": requestRemediation(next, event); break;
+    case "verification.passed": recordVerification(next, event); break;
+    case "verification.failed": recordVerificationFailure(next, event); break;
+    case "integration.observed": recordIntegration(next, event); break;
+    case "integration.conflicted": recordIntegrationConflict(next, event); break;
+    case "task.finalized": finalizeTaskAndReleasePipeline(next, event); break;
+    case "controller.command_received": recordPendingCommand(next, event); break;
+    case "controller.command_decided": recordPendingDecisionBatch(next, event); break;
+    case "controller.command_processed": completePendingCommand(next, event); break;
+    case "effect.intent": reserveEffect(next, event); break;
+    case "effect.observed": observeEffect(next, event); break;
+    case "effect.failed": failEffect(next, event); break;
+    case "operator.intent": applyOperatorIntent(next, event); break;
+    case "planning.queued": queuePlanning(next, event); break;
+    case "planning.agent_settled": settlePlanningRun(next, event); break;
+    case "planning.transcript_recovered": settlePlanningRun(next, event); break;
+    case "planning.completed": completePlanning(next, event); break;
+    case "planning.blocked": blockPlanning(next, event); break;
+    case "run.created": initializeRun(next, event); break;
+    case "job.done": assertDoneEvidence(next, event.entityId); transitionJob(next, event.entityId, "VERIFYING", "DONE"); break;
+    case "job.invalidated": invalidateJobAndDependents(next, event); break;
+    case "job.blocked": blockJob(next, event); break;
+    case "job.failed": failJob(next, event); break;
+    default: assertNever(event);
+  }
+  next.lastSequence = event.sequence;
+  next.lastEventHash = event.eventHash;
+  return deepFreeze(next);
+}
+```
+
+`completePlanning` requires the completed stage to match the outstanding
+correlation. The `tasks` variant is rejected unless it contains the non-empty
+planning seal commit; `specify` and `plan` variants cannot carry one.
+`recordPendingCommand` stores the normalized command together with the received
+event's timestamp and sequence. `recordPendingDecisionBatch` verifies its hash,
+immutable state revision, and exact accepted timestamp/sequence against that
+pending record;
+each draft must materialize into a valid non-`controller.*` `HarnessEvent`, and
+each effect input must pass the registered action schema before the batch enters
+state.
+`completePendingCommand` refuses the processed boundary until every event and
+effect-intent key in that sealed batch has appeared, then removes the command
+and batch from the pending maps while retaining the processed-key index.
+`integration.observed` records only a verified candidate identity and keeps the
+task in `VERIFYING`; `task.finalized` records the compare-and-swap run commit,
+releases the integration pipeline, and supplies the evidence required by the
+configured completion-stage `job.done` event. Invalidating or terminally
+blocking any job in that task's candidate pipeline also releases the reservation
+without moving the run branch.
+
+- [ ] **Step 4: Add property tests for illegal transitions**
+
+```ts
+fc.assert(fc.property(illegalTransitionArbitrary(), ({ state, event }) => {
+  expect(() => reduceEvent(state, event)).toThrow();
+}));
+```
+
+Run: `npm test -- test/unit/core/reducer.test.ts`.
+
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/core/state.ts src/core/reducer.ts src/core/lifecycle.ts test/unit/core/reducer.test.ts
+git commit -m "feat: reduce run events deterministically"
+```
+
+## Task 11: Define the Generic Effect Registry and Recovery Classes
+
+**Files:**
+- Create: `src/actions/types.ts`, `registry.ts`, `executor.ts`
+- Modify: `test/support/state-fixtures.ts`
+- Test: `test/unit/core/effects.test.ts`
+
+**Interfaces:**
+- Produces the parent plan's `ActionHandler`, `EffectIntent`, `ReconcileResult`, `ActionRegistry`, `EffectExecutor.runFresh(intent)`, and `EffectExecutor.recover(intent)`.
+
+- [ ] **Step 1: Write recovery-class tests**
+
+```ts
+it("executes a fresh non-retryable intent without reconciling", async () => {
+  const handler = fakeHandler({ recovery: () => "non_retryable", reconcile: { status: "indeterminate", evidence: ["not started"] } });
+  await effectExecutor(handler).runFresh(fixtureIntent({ recovery: "non_retryable" }));
+  expect(handler.reconcile).not.toHaveBeenCalled();
+  expect(handler.execute).toHaveBeenCalledOnce();
+});
+
+it("reconciles during recovery before considering execution", async () => {
+  const handler = fakeHandler({ recovery: () => "reconcilable", reconcile: { status: "observed", output: { agentId: "a1" } } });
+  const result = await effectExecutor(handler).recover(fixtureIntent());
+  expect(result).toEqual({ agentId: "a1" });
+  expect(handler.execute).not.toHaveBeenCalled();
+});
+
+it("blocks an indeterminate non-retryable effect", async () => {
+  const handler = fakeHandler({ recovery: () => "non_retryable", reconcile: { status: "indeterminate", evidence: ["exit status lost"] } });
+  await expect(effectExecutor(handler).recover(fixtureIntent({ recovery: "non_retryable" }))).rejects.toMatchObject({ code: "INDETERMINATE_EFFECT" });
+});
+```
+
+- [ ] **Step 2: Run and observe missing registry**
+
+Run: `npm test -- test/unit/core/effects.test.ts`
+
+Expected: FAIL.
+
+- [ ] **Step 3: Implement registry and executor**
+
+```ts
+export class ActionRegistry {
+  readonly #handlers = new Map<string, ActionHandler>();
+  register(handler: ActionHandler): void {
+    if (this.#handlers.has(handler.kind)) throw new Error(`duplicate action ${handler.kind}`);
+    this.#handlers.set(handler.kind, handler);
+  }
+  get(kind: string): ActionHandler {
+    const handler = this.#handlers.get(kind);
+    if (!handler) throw new Error(`unknown action ${kind}`);
+    return handler;
+  }
+}
+
+export class EffectExecutor {
+  async runFresh(intent: EffectIntent): Promise<unknown> {
+    const handler = this.registry.get(intent.action);
+    const recovery = handler.recovery(intent.input);
+    if (recovery !== intent.recovery) throw new Error(`recovery mismatch for ${intent.action}`);
+    return handler.execute(this.contextFor(false), intent);
+  }
+
+  async recover(intent: EffectIntent): Promise<unknown> {
+    const handler = this.registry.get(intent.action);
+    const recovery = handler.recovery(intent.input);
+    if (recovery !== intent.recovery) throw new Error(`recovery mismatch for ${intent.action}`);
+    const prior = await handler.reconcile(this.contextFor(true), intent);
+    if (prior.status === "observed") return prior.output;
+    if (prior.status === "indeterminate" || recovery === "non_retryable") {
+      throw new IndeterminateEffect(intent, prior.status === "indeterminate" ? prior.evidence : []);
+    }
+    return handler.execute(this.contextFor(true), intent);
+  }
+}
+```
+
+`contextFor(false)` and `contextFor(true)` create immutable contexts whose
+`isRecovery` flag matches the call path. Reject a mismatch between
+`intent.recovery` and the registered handler. An idempotent handler may execute
+after `not_found`; a reconcilable handler may execute only after a definitive
+`not_found`.
+
+- [ ] **Step 4: Run effect tests**
+
+Run: `npm test -- test/unit/core/effects.test.ts`
+
+Expected: PASS for all three recovery classes.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/actions test/unit/core/effects.test.ts
+git commit -m "feat: define recoverable effect protocol"
+```
+
+## Task 12: Serialize Every Controller Command Source
+
+**Files:**
+- Create: `src/controller/command-queue.ts`, `command-source.ts`, `effect-lanes.ts`
+- Create: `test/support/controller-fixtures.ts`
+- Test: `test/integration/controller-race.test.ts`
+
+**Interfaces:**
+- Produces `ControllerCommandQueue.enqueue(command): Promise<CommandResult>` and `reserveEffectLanes(state, candidates): readonly EffectIntent[]`.
+- Queue processing is FIFO and at most one reducer/decision transaction runs at a time.
+- `enqueue` durably accepts a normalized command before it can be acknowledged; `recoverPending()` replays accepted commands that have no processed boundary.
+
+- [ ] **Step 1: Write the timer/Herdr/operator race test**
+
+```ts
+it("serializes concurrent wakeups into one logical launch", async () => {
+  const fixture = await controllerQueueFixture();
+  const results = await Promise.all([
+    fixture.queue.enqueue(command("timer", "tick:1")),
+    fixture.queue.enqueue(command("herdr", "agent-idle:a1")),
+    fixture.queue.enqueue(command("operator", "retry:T001")),
+  ]);
+  expect(fixture.maxConcurrentTransactions).toBe(1);
+  expect(fixture.events.filter((event) => event.eventType === "effect.intent" && event.entityId === "implement:T001")).toHaveLength(1);
+  expect(results).toHaveLength(3);
+});
+
+it("holds one integration pipeline through candidate verification and promotion", async () => {
+  const fixture = await controllerQueueFixture({ readyIntegrations: ["T001", "T002"] });
+  await fixture.queue.enqueue(command("timer", "tick:integration"));
+  expect(fixture.integrationIntents()).toHaveLength(1);
+  await fixture.observeCandidateWithoutFinalizing();
+  await fixture.queue.enqueue(command("timer", "tick:integration:again"));
+  expect(fixture.integrationIntents()).toHaveLength(1);
+  expect(fixture.state.integrationPipeline).toMatchObject({ taskId: "T001", status: "verifying_candidate" });
+});
+
+it("deduplicates a controller command after restart", async () => {
+  const fixture = await controllerQueueFixture();
+  const retry = command("operator", "retry:T001:1");
+  await fixture.queue.enqueue(retry);
+  await fixture.restart();
+  await fixture.queue.enqueue(retry);
+  expect(fixture.events.filter((event) => event.eventType === "controller.command_processed" && event.payload.commandKey === retry.idempotencyKey)).toHaveLength(1);
+});
+
+it("replays a durably received command without the caller resubmitting it", async () => {
+  const fixture = await controllerQueueFixture({ crashAfterEvent: "controller.command_received" });
+  const retry = command("operator", "retry:T001:accepted");
+  await expect(fixture.queue.enqueue(retry)).rejects.toThrow(/injected crash/);
+  expect(fixture.eventsFor("controller.command_received", retry.idempotencyKey)).toHaveLength(1);
+  await fixture.restartAndRecoverPending();
+  expect(fixture.operatorIntents("retry", "T001")).toHaveLength(1);
+  expect(fixture.eventsFor("controller.command_processed", retry.idempotencyKey)).toHaveLength(1);
+});
+
+it("derives an undecided received command from its recorded time, not restart time", async () => {
+  const control = await controllerQueueFixture();
+  const crashed = await controllerQueueFixture({ crashAfterEvent: "controller.command_received" });
+  const retry = command("timer", "retry-window:T001");
+  await control.queue.enqueue(retry);
+  await expect(crashed.queue.enqueue(retry)).rejects.toThrow(/injected crash/);
+  await crashed.clock.advanceBy(86_400_000);
+  await crashed.restartAndRecoverPending();
+  expect(crashed.decisionBatch(retry.idempotencyKey).decisionHash)
+    .toBe(control.decisionBatch(retry.idempotencyKey).decisionHash);
+});
+
+it("replays the sealed decision batch instead of deriving on partially applied state", async () => {
+  const fixture = await controllerQueueFixture({ crashAfterBatchMember: 1 });
+  const command = fixture.multiDecisionOperatorCommand("retry-and-reroute:T001");
+  await expect(fixture.queue.enqueue(command)).rejects.toThrow(/injected crash/);
+  expect(fixture.derivationsFor(command.idempotencyKey)).toBe(1);
+  const sealedHash = fixture.decisionBatch(command.idempotencyKey).decisionHash;
+  await fixture.restartAndRecoverPending();
+  expect(fixture.derivationsFor(command.idempotencyKey)).toBe(1);
+  expect(fixture.decisionBatch(command.idempotencyKey).decisionHash).toBe(sealedHash);
+  expect(fixture.appliedDecisionKeys(command.idempotencyKey)).toEqual(
+    fixture.sealedDecisionKeys(command.idempotencyKey),
+  );
+});
+```
+
+- [ ] **Step 2: Run and observe missing queue**
+
+Run: `npm test -- test/integration/controller-race.test.ts`
+
+Expected: FAIL.
+
+- [ ] **Step 3: Implement a non-reentrant FIFO promise queue**
+
+```ts
+export class ControllerCommandQueue {
+  #tail: Promise<void> = Promise.resolve();
+
+  enqueue(command: ControllerCommand): Promise<CommandResult> {
+    const result = this.#tail.then(async () => {
+      const accepted = await this.processor.accept(command);
+      return this.processor.processReceived(accepted.commandKey);
+    });
+    this.#tail = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  recoverPending(): Promise<readonly CommandResult[]> {
+    const result = this.#tail.then(async () => {
+      const outputs: CommandResult[] = [];
+      for (const commandKey of await this.processor.pendingCommandKeysInSequenceOrder()) {
+        outputs.push(await this.processor.processReceived(commandKey));
+      }
+      return outputs;
+    });
+    this.#tail = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  async drain(): Promise<void> {
+    await this.#tail;
+  }
+}
+```
+
+`processor.accept` validates the closed `ControllerCommand` schema and appends
+and fsyncs `controller.command_received` with the complete normalized JSON
+command under `command-received:<commandKey>`. Only then is the command
+accepted. `processReceived` reloads the latest state after acquiring the lease,
+loads the command plus its accepted event timestamp and sequence from reduced
+`pendingCommands`, and checks the key against
+`controller.command_processed`. If the command has no decision batch, it derives
+once against that recorded logical time and state revision, reserves effect lanes, validates every
+event draft through the closed event factory, and appends one
+`controller.command_decided` containing the complete canonical event/effect
+batch plus `sha256(canonicalJson(batchWithoutHash))`. Only after that fsync does
+it append the batch's lifecycle events and effect intents, then
+`controller.command_processed`. Recovery scans received sequence order. A
+received command without a decision batch is derived once; a command with a
+batch replays that exact batch and never derives against partially applied state.
+Every member has a key derived from `(commandKey, batchIndex, semanticTarget)`,
+so already appended members deduplicate. Only an effect intent newly created by
+this invocation may use `dispatchFresh`; a replayed existing intent goes through
+Task 11 reconciliation after pending commands drain. A duplicate completed
+command returns the stored state revision without deriving again. A crash before
+the received event was fsynced never acknowledged acceptance; a caller retry
+uses the same key. The processor never holds a transaction open while an
+external effect runs; effect completion re-enters the queue as a new command.
+
+Decision derivation is a pure function of reduced state, frozen graph/policy,
+and the accepted command record. It never reads the live clock, randomness,
+filesystem, network, or process environment. Retry deadlines, attempt IDs, and
+other time-derived payloads use the command's recorded receive timestamp; stable
+IDs use canonical hashes. Event envelope timestamps may use the append clock but
+are excluded from the sealed decision hash.
+
+`reserveEffectLanes` is part of the pure decision transaction. Outstanding
+`effect.intent` events occupy their durable `laneKey` until a matching
+`effect.observed` or terminal `effect.failed` event is reduced. In addition, one
+durable `integration-pipeline:<runId>` reservation spans candidate preparation,
+candidate verification, and atomic task finalization; it is released only when
+that task is finalized, blocked, or invalidated. Task finalization, push, and PR
+creation use `run-mutation:<runId>`; planning uses
+`planning:<runId>`; worker lanes remain per job so independent tasks can run in
+parallel. Candidate selection is stable by materialized job order.
+
+- [ ] **Step 4: Repeat the race 100 times**
+
+```ts
+for (let iteration = 0; iteration < 100; iteration += 1) {
+  const result = await runConcurrentWakeupRace();
+  expect(result.maxConcurrentTransactions).toBe(1);
+  expect(result.launchIntentCount).toBe(1);
+}
+```
+
+Run: `npm test -- test/integration/controller-race.test.ts`
+
+Expected: PASS with max concurrency 1 and one launch intent per attempt.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/controller/command-queue.ts src/controller/command-source.ts src/controller/effect-lanes.ts test/integration/controller-race.test.ts
+git commit -m "feat: serialize controller wakeups"
+```
+
+## Task 13: Apply Routing, Retry, and Independent-Review Policy
+
+**Files:**
+- Create: `src/core/routing.ts`, `retry.ts`, `review-policy.ts`
+- Modify: `test/support/controller-fixtures.ts`
+- Test: `test/unit/core/policy.test.ts`
+
+**Interfaces:**
+- Produces `selectWorker`, `nextRetry`, and `selectReviewer` as pure functions.
+
+- [ ] **Step 1: Write fallback/reviewer tests**
+
+```ts
+it("uses Codex after Devin fails and Claude for independent review", () => {
+  const implementation = selectWorker(routeFixture({ unavailable: ["devin"] }));
+  expect(implementation.kind).toBe("codex");
+  expect(selectReviewer(reviewFixture({ implementationWorker: "codex" })).kind).toBe("claude");
+});
+
+it("blocks when no distinct reviewer is eligible", () => {
+  expect(() => selectReviewer(reviewFixture({ implementationWorker: "codex", unavailable: ["claude", "devin"] }))).toThrow(/independent reviewer/);
+});
+```
+
+- [ ] **Step 2: Run and observe missing policy functions**
+
+Run: `npm test -- test/unit/core/policy.test.ts`
+
+Expected: FAIL.
+
+- [ ] **Step 3: Implement ordered eligibility and bounded retry**
+
+```ts
+export function selectReviewer(input: ReviewSelection): WorkerProfile {
+  const eligible = input.preference
+    .map((kind) => input.profiles[kind])
+    .filter((profile): profile is WorkerProfile => Boolean(profile))
+    .filter((profile) => profile.kind !== input.implementationWorker)
+    .filter((profile) => satisfies(profile, input.requirements) && !input.unavailable.has(profile.kind));
+  if (!eligible[0]) throw new PolicyBlocker("NO_INDEPENDENT_REVIEWER");
+  return eligible[0];
+}
+```
+
+Retry consumes both attempt and elapsed-time budgets, never expands permissions, and records the reason for rerouting. Authentication, missing capability, spec conflict, and indeterminate effects block immediately.
+
+- [ ] **Step 4: Run policy tests**
+
+Run: `npm test -- test/unit/core/policy.test.ts`
+
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/core/routing.ts src/core/retry.ts src/core/review-policy.ts test/unit/core/policy.test.ts
+git commit -m "feat: enforce routing and review policy"
+```
+
+## Task 14: Build Immutable Assignments and Validate Evidence
+
+**Files:**
+- Create: `src/core/assignment.ts`, `evidence.ts`, `protected-paths.ts`
+- Modify: `test/support/controller-fixtures.ts`
+- Test: `test/unit/core/evidence.test.ts`
+
+**Interfaces:**
+- Produces `createAssignment(input): WorkerAssignment` and `validateEvidence(assignment, result, git): EvidenceDecision`.
+
+- [ ] **Step 1: Write evidence gate tests**
+
+```ts
+it("rejects protected-file edits and stale review commits", async () => {
+  const assignment = createAssignment(assignmentFixture({ commit: "abc123" }));
+  await expect(validateEvidence(assignment, completedResult(), fakeGit({ changed: ["spec.md"] }))).rejects.toThrow(/protected path/);
+  await expect(validateEvidence(reviewAssignment({ commit: "abc123" }), approvedReview({ commit: "def456" }), fakeGit())).rejects.toThrow(/reviewed commit/);
+});
+```
+
+- [ ] **Step 2: Run and observe missing assignment/evidence modules**
+
+Run: `npm test -- test/unit/core/evidence.test.ts`
+
+Expected: FAIL.
+
+- [ ] **Step 3: Implement content-addressed assignments**
+
+```ts
+export function createAssignment(input: AssignmentInput): WorkerAssignment {
+  const body = {
+    schemaVersion: 1 as const,
+    ...input,
+    protectedPaths: ["spec.md", "plan.md", "tasks.md", "task-graph.json", ".harness/**", ".pi/**"],
+  };
+  return deepFreeze({ ...body, assignmentHash: sha256(canonicalJson(body)) });
+}
+```
+
+Evidence requires assignment hash, exact base/head commits, clean result schema, required Superpowers records, declared tests, no protected edits, and for review: distinct worker kind, detached binding, unchanged pinned commit, and clean review worktree.
+
+- [ ] **Step 4: Run evidence tests**
+
+Run: `npm test -- test/unit/core/evidence.test.ts`
+
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/core/assignment.ts src/core/evidence.ts src/core/protected-paths.ts test/unit/core/evidence.test.ts
+git commit -m "feat: validate immutable worker evidence"
+```
+
+## Task 15: Run the Scheduler and Controller Against Fake Effects
+
+**Files:**
+- Create: `src/core/scheduler.ts`, `src/controller/controller.ts`, `decision.ts`
+- Create: `test/support/fake-action-registry.ts`
+- Modify: `test/support/controller-fixtures.ts`
+- Test: `test/e2e/fake-controller.test.ts`
+
+**Interfaces:**
+- Produces `HarnessController.enqueue(command)` and `deriveDecisions(state, graph, policy)`.
+- The fake registry implements every action used by the default workflow, not only worker launch.
+
+- [ ] **Step 1: Write a full fake diamond run**
+
+```ts
+it("runs a diamond graph through integration, task projection, final review, push, and PR", async () => {
+  const system = await createControllerFixture({ graph: diamondTaskGraph(), actionResults: successfulFakeResults() });
+  await system.runToQuiescence();
+  expect(system.state.tasks).toMatchObject({ T001: { state: "DONE" }, T002: { state: "DONE" }, T003: { state: "DONE" } });
+  expect(system.metrics.maxConcurrentImplementations).toBe(2);
+  expect(system.actionKinds()).toEqual(expect.arrayContaining([
+    "worker.execute", "worker.review", "command.run", "git.integrate",
+    "git.project-task-status", "git.push", "github.pull-request",
+  ]));
+});
+
+it("never overlaps a non-parallel task with another implementation", async () => {
+  const system = await createControllerFixture({ graph: graphWithIndependentNonParallelTask(), actionResults: successfulFakeResults() });
+  await system.runToQuiescence();
+  expect(system.metrics.overlapsInvolving("T002")).toEqual([]);
+});
+```
+
+- [ ] **Step 2: Run and observe missing controller wiring**
+
+Run: `npm test -- test/e2e/fake-controller.test.ts`
+
+Expected: FAIL.
+
+- [ ] **Step 3: Implement pure decisions and effect dispatch**
+
+```ts
+export class HarnessController {
+  enqueue(command: ControllerCommand): Promise<CommandResult> {
+    return this.queue.enqueue(command);
+  }
+
+  async accept(command: ControllerCommand): Promise<{ commandKey: string }> {
+    const normalized = validateControllerCommand(structuredClone(command));
+    await this.repository.append(commandReceivedEvent(normalized), this.lease);
+    return { commandKey: normalized.idempotencyKey };
+  }
+
+  async processReceived(commandKey: string): Promise<CommandResult> {
+    let state = await this.repository.load();
+    if (state.processedCommandKeys[commandKey]) return { accepted: false, duplicate: true, stateRevision: state.lastSequence };
+    const command = state.pendingCommands[commandKey];
+    if (!command) throw new ControllerInvariantError(`missing received command ${commandKey}`);
+    let batch = state.pendingDecisionBatches[commandKey];
+    if (!batch) {
+      const decisions = deriveDecisions(applyCommand(state, command.command, command.receivedAt), this.graph, this.policy);
+      const reserved = reserveEffectLanes(state, decisions.effects);
+      batch = sealDecisionBatch(commandKey, {
+        acceptedSequence: command.receivedSequence,
+        acceptedAt: command.receivedAt,
+        stateRevision: state.lastSequence,
+      }, decisions.events, reserved);
+      await this.repository.append(commandDecidedEvent(batch), this.lease);
+      state = this.repository.state;
+    }
+    assertDecisionHash(batch);
+    for (const draft of batch.events) await this.repository.append(materializeDecisionEvent(draft), this.lease);
+    const freshIntents: EffectIntent[] = [];
+    for (const intent of batch.effects) {
+      const appended = await this.repository.append(effectIntentEvent(intent), this.lease);
+      if (appended.inserted) freshIntents.push(intent);
+    }
+    await this.repository.append(commandProcessedEvent(command.command), this.lease);
+    await this.repository.snapshot(this.lease);
+    for (const intent of freshIntents) void this.dispatchFresh(intent);
+    return { accepted: true, stateRevision: this.repository.lastSequence };
+  }
+
+  private async dispatchFresh(intent: EffectIntent): Promise<void> {
+    try {
+      const output = await this.effects.runFresh(intent);
+      await this.enqueue(effectObservedCommand(intent, output));
+    } catch (error) {
+      await this.enqueue(effectFailedCommand(intent, error));
+    }
+  }
+}
+```
+
+At composition-root recovery, acquire the fenced lease, replay the journal,
+call `queue.recoverPending()`, and wait for those received commands to reach
+their processed boundaries before registering fresh timer, Pi, Herdr, or
+operator sources.
+
+`deriveDecisions` returns ordinary lifecycle events separately from effect
+candidates; it does not emit `effect.intent` itself. `reserveEffectLanes`
+selects candidates and the controller appends each corresponding intent exactly
+once before dispatch. `deriveDecisions` marks jobs ready only after every
+dependency is done, observes capacity, creates immutable attempts, chooses
+workers/reviewers, and never marks `DONE` directly from a worker claim. An
+implementation whose task has `parallelEligible: false` launches only when no
+other implementation is active, and while active prevents any other
+implementation launch. This conservative scheduler rule is independent of path
+overlap checks and worker capacity.
+
+- [ ] **Step 4: Add crash-before/after-observation cases and run phase gate**
+
+```ts
+for (const boundary of ["after-intent", "after-effect"] as const) {
+  const system = await createControllerFixture({ crashAt: boundary, actionResults: successfulFakeResults() });
+  await system.crashAndRestart();
+  expect(system.executeCount("worker.execute", "implement:T001:1")).toBe(1);
+  expect(system.observationCount("worker.execute", "implement:T001:1")).toBe(1);
+}
+```
+
+Run: `npm run check:phase2`
+
+Expected: PASS, including the repeated race test and fake end-to-end run.
+
+- [ ] **Step 5: Commit and stop for milestone review**
+
+```bash
+git add src/core src/controller test/support/fake-action-registry.ts test/support/controller-fixtures.ts test/e2e/fake-controller.test.ts package.json package-lock.json
+git commit -m "feat: run durable serialized controller"
+```

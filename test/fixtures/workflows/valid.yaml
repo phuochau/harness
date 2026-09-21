@@ -1,0 +1,7 @@
+schema: harness/v1
+name: valid
+stages:
+  - id: verify
+    uses: command.run
+    with:
+      argv: ${commands.task_verify}

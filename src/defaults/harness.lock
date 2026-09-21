@@ -1,0 +1,114 @@
+schema: harness/lock/v1
+harnessVersion: 0.1.0
+dependencies:
+  - id: node
+    kind: tool
+    version: ">=22.22.2"
+    source:
+      kind: formula
+      identity: node
+      version: 22.22.2
+      integrity: semver-floor:22.22.2
+    dependsOn: []
+  - id: pi-multi-agent-harness
+    kind: pi-package
+    version: 0.1.0
+    source:
+      kind: npm
+      identity: pi-multi-agent-harness
+      version: 0.1.0
+      integrity: npm-registry:dist.integrity
+    piSource: npm:pi-multi-agent-harness@0.1.0
+    dependsOn: [pi-coding-agent, typebox]
+  - id: pi-coding-agent
+    kind: tool
+    version: 0.86.1
+    source:
+      kind: npm
+      identity: "@earendil-works/pi-coding-agent"
+      version: 0.86.1
+      integrity: sha512-vZBuNfJnruxZyemZ3O05V0S/Ylze08ahFTIQ1Mik++gVdOevPl89gt/Uv0U97BPAJaj9cj6Vf9rcIgKtUrd0BA==
+    dependsOn: []
+  - id: typebox
+    kind: tool
+    version: 1.3.34
+    source:
+      kind: npm
+      identity: typebox
+      version: 1.3.34
+      integrity: sha512-wbnzrXXDW8xEFHDZZs2jo1MkhaYlKAY4FRhpBc1+2LF1fZVBGCXGdLEhA/Z/NBbgzJMFfeM8m7elKPa/+KxaUQ==
+    dependsOn: []
+  - id: spec-kit
+    kind: tool
+    version: 0.8.7
+    source:
+      kind: signed-artifact
+      identity: specify
+      version: 0.8.7
+      integrity: version-output:specify-0.8.7
+    dependsOn: []
+  - id: superpowers
+    kind: tool
+    version: 6.4.1
+    source:
+      kind: git
+      identity: https://github.com/obra/superpowers.git
+      version: 5bf4e78011075bcfc0dc295f0724994cd123ee71
+      integrity: git-commit:5bf4e78011075bcfc0dc295f0724994cd123ee71
+    dependsOn: []
+  - id: pi-devin-acp
+    kind: pi-package
+    version: 0.3.4
+    source:
+      kind: npm
+      identity: "@tian.zuo/pi-devin-acp"
+      version: 0.3.4
+      integrity: sha512-su1j4yDc8nSvHvx4eFvyXp2BAHFjArThdKUzEoy+v/AnLUKx6E39bFXzS0RZGTweueddKKdhiihEeK5yWaH1nQ==
+    piSource: npm:@tian.zuo/pi-devin-acp@0.3.4
+    dependsOn: [pi-coding-agent, typebox]
+  - id: pi-shell-acp
+    kind: pi-package
+    version: 0.11.1
+    source:
+      kind: npm
+      identity: "@junghanacs/pi-shell-acp"
+      version: 0.11.1
+      integrity: sha512-xGpMJtwN4AS8vu2ziuCpmRW0er2CoMA/IFCEbzLzTt2l++rTB5Zzvjxn70yDp4ASdQ422KygPAQoYeEftw7YPA==
+    piSource: npm:@junghanacs/pi-shell-acp@0.11.1
+    dependsOn: [pi-coding-agent, typebox]
+  - id: codex
+    kind: integration
+    version: 0.155.1
+    source:
+      kind: manual
+      identity: codex
+      version: 0.155.1
+      integrity: version-output:codex-cli-0.155.1
+    dependsOn: []
+  - id: devin
+    kind: integration
+    version: 3000.10.31
+    source:
+      kind: manual
+      identity: devin
+      version: 3000.10.31
+      integrity: version-output:devin-3000.10.31
+    dependsOn: []
+  - id: git
+    kind: tool
+    version: system
+    source:
+      kind: formula
+      identity: git
+      version: system
+      integrity: version-probe:git
+    dependsOn: []
+  - id: github-cli
+    kind: tool
+    version: system
+    source:
+      kind: formula
+      identity: gh
+      version: system
+      integrity: version-probe:gh
+    dependsOn: []

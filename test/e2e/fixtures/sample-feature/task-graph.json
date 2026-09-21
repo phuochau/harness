@@ -1,0 +1,36 @@
+{
+  "schema": "harness/task-graph/v1",
+  "tasksSemanticHash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "tasks": [
+    {
+      "id": "T001",
+      "description": "foundation one",
+      "phase": "foundation",
+      "labels": ["US1"],
+      "parallelEligible": true,
+      "dependsOn": [],
+      "acceptanceRefs": ["FR-001"],
+      "ownedPaths": ["src/one.ts"]
+    },
+    {
+      "id": "T002",
+      "description": "foundation two",
+      "phase": "foundation",
+      "labels": ["US1"],
+      "parallelEligible": true,
+      "dependsOn": [],
+      "acceptanceRefs": ["FR-002"],
+      "ownedPaths": ["src/two.ts"]
+    },
+    {
+      "id": "T003",
+      "description": "integration",
+      "phase": "integration",
+      "labels": ["US1"],
+      "parallelEligible": false,
+      "dependsOn": ["T001", "T002"],
+      "acceptanceRefs": ["SC-001"],
+      "ownedPaths": ["src/three.ts"]
+    }
+  ]
+}

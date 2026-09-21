@@ -1,0 +1,7 @@
+schema: harness/v1
+name: unknown-command
+stages:
+  - id: verify
+    uses: command.run
+    with:
+      argv: ${commands.missing}

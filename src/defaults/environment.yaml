@@ -1,0 +1,20 @@
+schema: harness/environment/v1
+commands:
+  task_verify: __TASK_VERIFY__
+  full_verify: __FULL_VERIFY__
+pi_packages:
+  - id: harness
+    dependency: pi-multi-agent-harness
+    scope: project
+    resources:
+      extensions: [dist/pi/extension.js]
+  - id: devin-acp
+    dependency: pi-devin-acp
+    scope: managed
+    resources:
+      extensions: [index.ts]
+  - id: codex-acp
+    dependency: pi-shell-acp
+    scope: managed
+    resources:
+      extensions: [index.ts]

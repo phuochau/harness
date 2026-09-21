@@ -1,0 +1,13 @@
+schema: harness/v1
+name: cycle
+stages:
+  - id: first
+    uses: worker.execute
+    needs:
+      - stage: second
+        scope: all
+  - id: second
+    uses: worker.review
+    needs:
+      - stage: first
+        scope: all

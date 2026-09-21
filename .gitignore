@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+.superpowers/
+.harness-output/
+.pi/npm/
+.pi/git/
+*.tgz

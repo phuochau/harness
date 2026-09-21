@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.2"
+          registry-url: https://registry.npmjs.org
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Verify tag matches package
+        run: |
+          test "${GITHUB_REF_NAME#v}" = "$(node -p "require('./package.json').version")"
+      - run: npm run verify
+      - run: npm pack --json > pack-manifest.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-package
+          path: |
+            pi-multi-agent-harness-*.tgz
+            pack-manifest.json
+
+  compatibility:
+    runs-on: [self-hosted, harness-compat]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.2"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run compat:pi
+      - run: npm run compat:speckit
+
+  real-e2e:
+    runs-on: [self-hosted, harness-e2e]
+    timeout-minutes: 40
+    env:
+      HARNESS_E2E_REAL: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.2"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run e2e:real
+
+  publish:
+    needs: [verify, compatibility, real-e2e]
+    runs-on: ubuntu-latest
+    environment: npm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.2"
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-package
+      - name: Verify npm owner
+        env:
+          EXPECTED_NPM_OWNER: ${{ vars.NPM_EXPECTED_OWNER }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          test -n "$EXPECTED_NPM_OWNER"
+          test "$(npm whoami)" = "$EXPECTED_NPM_OWNER"
+          npm owner ls pi-multi-agent-harness | grep -F "$EXPECTED_NPM_OWNER"
+      - name: Publish verified tarball
+        run: npm publish pi-multi-agent-harness-*.tgz --provenance --access public
+      - name: Record registry integrity
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          INTEGRITY="$(npm view "pi-multi-agent-harness@$VERSION" dist.integrity)"
+          node -e 'const fs=require("fs"); fs.writeFileSync("release-evidence.json", JSON.stringify({tag:process.env.GITHUB_REF_NAME, version:process.argv[1], integrity:process.argv[2], run:process.env.GITHUB_SERVER_URL+"/"+process.env.GITHUB_REPOSITORY+"/actions/runs/"+process.env.GITHUB_RUN_ID}, null, 2)+"\n")' "$VERSION" "$INTEGRITY"
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes
+          gh release upload "$GITHUB_REF_NAME" release-evidence.json --clobber

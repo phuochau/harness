@@ -1,0 +1,8 @@
+{
+  "name": "fixture-node-project",
+  "private": true,
+  "scripts": {
+    "test": "vitest run",
+    "verify": "npm run lint && npm test"
+  }
+}
