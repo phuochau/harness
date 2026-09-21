@@ -19,7 +19,12 @@ export interface HarnessSystem {
   runToQuiescence(): Promise<void>;
 }
 
-export function createHarnessSystem(ports: HarnessPorts): HarnessSystem {
+/**
+ * Deterministic in-memory runner for simulation and black-box tests.
+ * Production callers must use the durable composition root exported as
+ * `createHarnessSystem` from the package entrypoint.
+ */
+export function createInMemoryHarnessSystem(ports: HarnessPorts): HarnessSystem {
   const scheduler = new WorkflowScheduler(ports.workflow, ports.taskGraph);
   return Object.freeze({
     workflowRevision: ports.workflow.revision,

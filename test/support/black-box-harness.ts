@@ -1,4 +1,4 @@
-import { createHarnessSystem } from "../../src/composition-root.js";
+import { createInMemoryHarnessSystem } from "../../src/composition-root.js";
 import { compileWorkflow } from "../../src/config/compile.js";
 import type { TaskGraphDocument } from "../../src/contracts/task-graph.js";
 import type { SchedulerAction, SchedulerActionDispatcher } from "../../src/core/scheduler.js";
@@ -118,7 +118,7 @@ export async function createBlackBoxHarness(input: {
   const workflow = compileWorkflow(fixtureCompileInput());
   const validated = validateGraph(input.graph, fixtureGraphContextFor(input.graph));
   const actions = new BlackBoxActions(new Set(input.unavailable ?? []));
-  const system = createHarnessSystem({ workflow, taskGraph: validated, actions });
+  const system = createInMemoryHarnessSystem({ workflow, taskGraph: validated, actions });
   return {
     async runToQuiescence() {
       await system.runToQuiescence();

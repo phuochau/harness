@@ -5,6 +5,7 @@ export const ControllerCommandSchema = Type.Object(
   {
     schemaVersion: VersionSchema,
     source: Type.Union([
+      Type.Literal("controller"),
       Type.Literal("timer"),
       Type.Literal("herdr"),
       Type.Literal("pi"),
@@ -12,6 +13,7 @@ export const ControllerCommandSchema = Type.Object(
       Type.Literal("recovery"),
     ]),
     kind: Type.Union([
+      Type.Literal("effect_result"),
       Type.Literal("tick"),
       Type.Literal("runtime_event"),
       Type.Literal("operator_intent"),

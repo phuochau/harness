@@ -41,6 +41,7 @@ export type CommandDeriver = (
 export interface CommandProcessorHooks {
   afterAppend?(event: HarnessEvent): void | Promise<void>;
   afterBatchMember?(count: number, event: HarnessEvent): void | Promise<void>;
+  afterFreshEffectIntent?(intent: EffectIntent<string, JsonValue>): void;
 }
 
 export interface DurableCommandProcessorOptions {
@@ -201,12 +202,14 @@ export class DurableCommandProcessor
         await this.options.hooks?.afterBatchMember?.(memberCount, result.event);
       }
     }
+    const freshEffects: EffectIntent<string, JsonValue>[] = [];
     for (const [index, effect] of batch.effects.entries()) {
       const result = await this.append(
         this.effectInput(commandKey, batch.events.length + index, effect),
       );
       memberCount += 1;
       if (result.inserted) {
+        freshEffects.push(effect);
         await this.options.hooks?.afterBatchMember?.(memberCount, result.event);
       }
     }
@@ -219,6 +222,9 @@ export class DurableCommandProcessor
       eventType: "controller.command_processed",
       payload: { source: "controller", commandKey },
     });
+    for (const effect of freshEffects) {
+      this.options.hooks?.afterFreshEffectIntent?.(effect);
+    }
     state = await this.state();
     return { commandKey, stateRevision: state.lastSequence };
   }

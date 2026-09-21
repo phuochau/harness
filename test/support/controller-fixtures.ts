@@ -64,6 +64,7 @@ export function command(
   payload: JsonValue = {},
 ): ControllerCommand {
   const kindBySource = {
+    controller: "effect_result",
     timer: "tick",
     herdr: "runtime_event",
     pi: "planning_turn",
