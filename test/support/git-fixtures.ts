@@ -1,6 +1,6 @@
-import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { GitRepository } from "../../src/git/repository.js";
 import { NodeProcessRunner } from "../../src/git/process.js";
 
@@ -13,6 +13,7 @@ export interface TempGitRepository {
 
 export async function createTempGitRepository(
   suffix = "repo",
+  initialFiles: Readonly<Record<string, string>> = {},
 ): Promise<TempGitRepository> {
   const path = await realpath(
     await mkdtemp(join(tmpdir(), `pi harness ${suffix}-`)),
@@ -27,7 +28,11 @@ export async function createTempGitRepository(
   await run(["config", "user.name", "Harness Tests"]);
   await run(["config", "user.email", "harness@example.invalid"]);
   await writeFile(join(path, "README.md"), "# fixture\n", "utf8");
-  await run(["add", "README.md"]);
+  for (const [name, contents] of Object.entries(initialFiles)) {
+    await mkdir(dirname(join(path, name)), { recursive: true });
+    await writeFile(join(path, name), contents, "utf8");
+  }
+  await run(["add", "."]);
   await run(["commit", "-m", "initial fixture"]);
   const initialCommit = await run(["rev-parse", "HEAD"]);
   return {

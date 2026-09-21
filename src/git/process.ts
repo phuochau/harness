@@ -29,6 +29,7 @@ export class NodeProcessRunner implements ProcessRunner {
     const result = await execa(executable, [...argv], {
       reject: false,
       encoding: "buffer",
+      stripFinalNewline: false,
       ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
       ...(options.env === undefined ? {} : { env: options.env }),
       ...(options.stdin === undefined ? {} : { input: options.stdin }),
