@@ -1,6 +1,6 @@
 import type { EffectIntent } from "../actions/types.js";
 import type { JsonValue } from "../contracts/common.js";
-import type { HarnessEvent } from "../contracts/events.js";
+import type { DecisionEventDraft, HarnessEvent } from "../contracts/events.js";
 import { canonicalJson } from "../shared/canonical-json.js";
 import { Journal, type EventInput } from "../state/journal.js";
 import { RunLease, type LeaseHandle } from "../state/lease.js";
@@ -15,6 +15,12 @@ import { readFile, rmdir } from "node:fs/promises";
 export interface RecoveryDependencies {
   readonly ownerId: string;
   readonly effects: { recover(intent: EffectIntent<string, JsonValue>): Promise<JsonValue> };
+  readonly lifecycle?: {
+    observed(
+      intent: EffectIntent<string, JsonValue>,
+      output: unknown,
+    ): readonly DecisionEventDraft[];
+  };
   readonly commands?: {
     drain(input: {
       readonly paths: RunPaths;
@@ -73,6 +79,28 @@ function eventInput(
 
 function jsonValue(value: unknown): JsonValue {
   return JSON.parse(canonicalJson(value)) as JsonValue;
+}
+
+async function appendLifecycle(
+  journal: Journal,
+  lease: LeaseHandle,
+  now: Date,
+  runId: string,
+  drafts: readonly DecisionEventDraft[],
+): Promise<void> {
+  for (const draft of drafts) {
+    await journal.append(
+      eventInput(
+        now,
+        runId,
+        draft.entityId,
+        draft.idempotencyKey,
+        draft.eventType as HarnessEvent["eventType"],
+        draft.payload,
+      ),
+      lease,
+    );
+  }
 }
 
 function processIsAlive(pid: number): boolean {
@@ -143,6 +171,15 @@ export async function recoverRun(
       const entityId = entityFor(typedIntent, run.runId);
       try {
         const output = await dependencies.effects.recover(typedIntent);
+        // Persist lifecycle evidence first. If recovery dies before effect.observed,
+        // the intent stays outstanding and these idempotent records are replayed.
+        await appendLifecycle(
+          journal,
+          lease,
+          dependencies.now?.() ?? new Date(),
+          run.runId,
+          dependencies.lifecycle?.observed(typedIntent, output) ?? [],
+        );
         await journal.append(
           eventInput(
             dependencies.now?.() ?? new Date(),

@@ -13,6 +13,11 @@ import { NodeProcessRunner } from "../../git/process.js";
 import { WorktreeLifecycle } from "../../git/workspace-lifecycle.js";
 import { PiPlanningCorrelation } from "../../pi/planning-agent.js";
 import { PiSessionPlanningPort } from "../../pi/planning-port.js";
+import { PlanningProfileCoordinator } from "../../pi/planning-profile.js";
+import {
+  PiSessionModelPort,
+  PiSessionPlanningProfileStore,
+} from "../../pi/planning-profile-port.js";
 import { PlanningAction } from "../../speckit/planning-action.js";
 import type { ArtifactPaths } from "../../speckit/artifacts.js";
 import { Journal } from "../../state/journal.js";
@@ -27,6 +32,12 @@ import { loadRunTaskGraph, ProductionPlanningArtifactSealer } from "./planning-a
 import { DurableRecordStore } from "./records.js";
 import type { InitializedProductionRun } from "./run.js";
 import { GitWorkerAttemptPort } from "./worker-attempts.js";
+import { resolveRunPaths } from "../../state/paths.js";
+import { readRunManifest } from "../../state/run-manifest.js";
+import { GitRepository } from "../../git/repository.js";
+import { initialRunState } from "../../core/state.js";
+import { reduceEvent } from "../../core/reducer.js";
+import type { DurableEffectPort } from "../../durable-composition-root.js";
 
 export interface ProductionRunSystem extends DurableHarnessSystem {
   readonly graph: () => ValidatedTaskGraph;
@@ -41,6 +52,11 @@ export interface ComposeProductionRunOptions {
   readonly context: ExtensionContext;
   readonly ownerId?: string;
   readonly ensureHerdr?: () => Promise<HerdrClient>;
+}
+
+export interface StandaloneProductionEffects {
+  readonly effects: DurableEffectPort;
+  dispose(): Promise<void>;
 }
 
 const systemClock: Clock = { now: () => new Date() };
@@ -111,9 +127,13 @@ export async function composeProductionRun(
       // A new run has no task graph until the correlated Spec Kit tasks stage seals it.
     }
     const planningPort = new PiSessionPlanningPort(options.pi, options.context);
+    const planningProfile = new PlanningProfileCoordinator(
+      new PiSessionModelPort(options.pi, options.context),
+      new PiSessionPlanningProfileStore(options.context),
+    );
     const planning = new PlanningAction({
       root: planningBinding.path,
-      correlation: new PiPlanningCorrelation(planningPort),
+      correlation: new PiPlanningCorrelation(planningPort, planningProfile),
       sealer: new ProductionPlanningArtifactSealer(
         initialized.manifest,
         planningBinding,
@@ -200,4 +220,92 @@ export async function composeProductionRun(
     await lease.release().catch(() => undefined);
     throw error;
   }
+}
+
+export async function createStandaloneProductionEffects(input: {
+  readonly root: string;
+  readonly runId: string;
+  readonly workflow: CompiledWorkflow;
+  readonly commands: Readonly<Record<string, readonly string[]>>;
+}): Promise<StandaloneProductionEffects> {
+  const paths = await resolveRunPaths(input.root, input.runId);
+  const manifest = await readRunManifest(paths.manifest);
+  if (manifest.workflowRevision !== input.workflow.revision) {
+    throw new Error("installed workflow revision does not match the durable run");
+  }
+  const repository = await GitRepository.open(manifest.repositoryRoot);
+  const journal = new Journal(paths);
+  const git = new NativeGitActionPort(manifest.repositoryRoot);
+  const worktrees = await WorktreeLifecycle.open({
+    repository,
+    workspaceRoot: paths.workers,
+  });
+  const planningBinding = await worktrees.openPlanning({
+    runId: manifest.runId,
+    runBranch: manifest.planningRef.replace(/^refs\/heads\//, ""),
+    artifactPaths: Object.values(manifest.artifactPaths),
+  });
+  let graph = emptyTaskGraph();
+  try {
+    graph = await loadRunTaskGraph(git, manifest);
+  } catch {
+    // Pending planning effects are deliberately unrecoverable without their Pi session.
+  }
+  const readState = async () => {
+    let state = initialRunState(manifest.runId, manifest.workflowRevision);
+    for (const event of await journal.read()) state = reduceEvent(state, event);
+    return state;
+  };
+  const client = await ensureInstalledHerdr();
+  const records = new DurableRecordStore(paths.artifacts);
+  const attempts = new GitWorkerAttemptPort({
+    manifest,
+    repository,
+    worktrees,
+    records,
+    graph: () => graph,
+    readState,
+    taskVerification: [input.commands.task_verify ?? []].filter((argv) => argv.length > 0),
+  });
+  const registry = createProductionActionRegistry({
+    manifest,
+    repository,
+    worktrees,
+    records,
+    readState,
+    tasksSemanticHash: () => graph.graph.tasksSemanticHash,
+    planningRoot: planningBinding.path,
+    planning: {
+      enqueue: async () => {
+        throw new Error("standalone recovery cannot dispatch a Pi planning turn");
+      },
+      observe: async () => ({
+        status: "blocked",
+        reason: "standalone recovery requires the original Pi session for planning",
+        evidence: [manifest.runId],
+      }),
+    },
+    workerRuntime: new HerdrProductionWorkerRuntime({
+      adapters: workerAdapters(),
+      herdr: new HerdrRuntime(client),
+      attempts,
+    }),
+    verificationObservations: new JournalVerificationObservations(journal),
+  });
+  const abort = new AbortController();
+  const executor = new EffectExecutor(registry, {
+    process: new NodeProcessRunner(),
+    git,
+    approvals: { get: async () => undefined },
+    clock: systemClock,
+    signal: abort.signal,
+  });
+  return {
+    effects: executor,
+    async dispose() {
+      abort.abort();
+      client.close();
+      await worktrees.cleanupAll();
+    },
+  };
 }

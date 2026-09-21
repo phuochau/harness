@@ -18,6 +18,12 @@ import { explain } from "./explain.js";
 import { graph } from "./graph.js";
 import { installedStartDependencies, start } from "./start.js";
 import { status } from "./status.js";
+import { recover } from "./recover.js";
+import { loadEnvironment, loadWorkflow } from "../config/load.js";
+import { compileWorkflow } from "../config/compile.js";
+import { createStandaloneProductionEffects } from "../runtime/production/system.js";
+import type { JsonValue } from "../contracts/common.js";
+import { createWorkflowLifecycle } from "../core/workflow-lifecycle.js";
 
 function semver(stdout: string): string | undefined {
   return /(?:^|\s|v)(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/.exec(stdout)?.[1];
@@ -508,10 +514,37 @@ export async function main(argv: readonly string[]): Promise<number> {
   program
     .command("recover <run-id> [path]")
     .description("Reconcile a run using installed production action adapters")
-    .action(async (_runId: string, _path: string | undefined) => {
-      throw new Error(
-        "standalone recovery is unavailable until production action adapters are connected; journal was not modified",
-      );
+    .action(async (runId: string, path: string | undefined) => {
+      const root = path ?? ".";
+      const environment = await loadEnvironment(join(root, ".harness/environment.yaml"));
+      const workflow = compileWorkflow({
+        workflow: await loadWorkflow(join(root, ".harness/workflow.yaml")),
+        environment,
+      });
+      let production: Awaited<ReturnType<typeof createStandaloneProductionEffects>> | undefined;
+      try {
+        const summary = await recover(
+          { root, runId },
+          {
+            ownerId: `recover:${process.pid}:${crypto.randomUUID()}`,
+            lifecycle: createWorkflowLifecycle(),
+            effects: {
+              recover: async (intent) => {
+                production ??= await createStandaloneProductionEffects({
+                  root,
+                  runId,
+                  workflow,
+                  commands: environment.commands,
+                });
+                return await production.effects.recover(intent) as JsonValue;
+              },
+            },
+          },
+        );
+        process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+      } finally {
+        await production?.dispose();
+      }
     });
   await program.parseAsync([...argv], { from: "user" });
   return 0;

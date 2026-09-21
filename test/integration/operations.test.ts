@@ -121,6 +121,90 @@ it("recovers effects but does not schedule without Pi", async () => {
   expect(events).not.toContainEqual(expect.objectContaining({ eventType: "attempt.started" }));
 });
 
+it("materializes lifecycle evidence while reconciling an outstanding effect", async () => {
+  const fixture = await journalFixture();
+  cleanups.push(fixture.cleanup);
+  await fixture.journal.append(
+    {
+      schemaVersion: 1,
+      timestamp: "2026-09-21T00:00:00.000Z",
+      runId: "F023",
+      entityId: "run:F023",
+      idempotencyKey: "run:create",
+      eventType: "run.created",
+      payload: { workflowRevision: `sha256:${"a".repeat(64)}` },
+    },
+    fixture.lease,
+  );
+  await fixture.journal.append(
+    {
+      schemaVersion: 1,
+      timestamp: "2026-09-21T00:00:00.500Z",
+      runId: "F023",
+      entityId: "implement:T001",
+      idempotencyKey: "ready:T001",
+      eventType: "job.ready",
+      payload: {},
+    },
+    fixture.lease,
+  );
+  await fixture.journal.append(
+    {
+      schemaVersion: 1,
+      timestamp: "2026-09-21T00:00:00.750Z",
+      runId: "F023",
+      entityId: "implement:T001",
+      idempotencyKey: "attempt:T001:1",
+      eventType: "attempt.started",
+      payload: { attempt: 1, worker: "codex" },
+    },
+    fixture.lease,
+  );
+  await fixture.journal.append(
+    {
+      schemaVersion: 1,
+      timestamp: "2026-09-21T00:00:01.000Z",
+      runId: "F023",
+      entityId: "implement:T001",
+      idempotencyKey: "effect:execute:T001",
+      eventType: "effect.intent",
+      payload: {
+        action: "worker.execute",
+        idempotencyKey: "effect:execute:T001",
+        recovery: "reconcilable",
+        laneKey: "worker:T001",
+        input: {
+          jobId: "implement:T001",
+          stageId: "implement",
+          taskId: "T001",
+          worker: "codex",
+        },
+      },
+    },
+    fixture.lease,
+  );
+  await fixture.lease.release();
+  await recoverRun(
+    { root: fixture.paths.repository, runId: "F023" },
+    {
+      ownerId: "recover:test",
+      effects: { recover: async () => ({ outcome: "completed" } as JsonValue) },
+      lifecycle: {
+        observed: (intent) => [{
+          eventType: "job.done",
+          entityId: "implement:T001",
+          idempotencyKey: `done:${intent.idempotencyKey}`,
+          payload: { requiresTaskFinalization: false },
+        }],
+      },
+      now: () => new Date("2026-09-21T00:00:02.000Z"),
+    },
+  );
+  expect((await fixture.journal.read()).map((event) => event.eventType)).toEqual(
+    expect.arrayContaining(["job.done", "effect.observed"]),
+  );
+});
+
 it("records an indeterminate non-retryable effect as a blocker", async () => {
   const fixture = await journalFixture();
   cleanups.push(fixture.cleanup);

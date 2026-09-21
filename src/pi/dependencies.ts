@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type {
   ExtensionAPI,
@@ -26,6 +26,10 @@ import {
   type ProductionRunSystem,
 } from "../runtime/production/system.js";
 import type { ArtifactPaths } from "../speckit/artifacts.js";
+import { resolveRunPaths } from "../state/paths.js";
+import { readRunManifest } from "../state/run-manifest.js";
+import { Journal } from "../state/journal.js";
+import { replayRunEvents } from "../cli/status.js";
 
 export interface HarnessSessionDependencies {
   readonly cwd: string;
@@ -303,6 +307,47 @@ class ProjectCommandBackend implements HarnessCommandBackend {
     return (this.active?.controller ?? this.controller).enqueue(command);
   }
 
+  public async resume(): Promise<void> {
+    if (this.configuration === undefined || this.active !== undefined) return;
+    const repository = await GitRepository.open(this.cwd);
+    const inspection = await repository.inspect();
+    const runRoot = join(inspection.commonDir, "harness", "runs");
+    let runIds: readonly string[];
+    try {
+      runIds = (await readdir(runRoot, { withFileTypes: true }))
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    const candidates = [];
+    for (const runId of runIds) {
+      try {
+        const paths = await resolveRunPaths(inspection.root, runId);
+        const manifest = await readRunManifest(paths.manifest);
+        if (manifest.workflowRevision !== this.configuration.workflow.revision) continue;
+        const state = replayRunEvents(await new Journal(paths).read(), runId);
+        if (state.jobs.final_pr?.state === "DONE") continue;
+        candidates.push({ manifest, paths });
+      } catch {
+        // Invalid or differently-versioned runs remain inspectable but are not auto-resumed.
+      }
+    }
+    candidates.sort((left, right) => right.manifest.createdAt.localeCompare(left.manifest.createdAt));
+    const selected = candidates[0];
+    if (selected === undefined) return;
+    this.active = await composeProductionRun({
+      initialized: { repository, paths: selected.paths, manifest: selected.manifest },
+      workflow: this.configuration.workflow,
+      artifactPaths: selected.manifest.artifactPaths,
+      commands: this.configuration.commands,
+      pi: this.pi,
+      context: this.context,
+    });
+    await this.active.recover();
+  }
+
   public async dispose(): Promise<void> {
     const active = this.active;
     this.active = undefined;
@@ -333,6 +378,7 @@ export function createPiExtensionDependencies(
         configuration,
         configurationError,
       );
+      await backend.resume();
       const sessionFile = context.sessionManager.getSessionFile();
       return {
         cwd: context.cwd,

@@ -197,3 +197,15 @@ it("durably blocks a planning generation when its selected model drifts", async 
   });
   expect(pi.entries.filter((entry) => entry.type === "harness:planning-profile-drift")).toHaveLength(1);
 });
+
+it("detects model drift at settlement even when no model-select event was routed", async () => {
+  const store = new FakeProfileStore();
+  const pi = new FakeModelPort(store);
+  const profile = new PlanningProfileCoordinator(pi, store);
+  await profile.begin("planning-specify");
+  pi.model = { provider: "anthropic", modelId: "changed-out-of-band" };
+  const drift = await profile.settle("planning-specify", 2);
+  expect(drift).toMatch(/model drift/);
+  expect(pi.model.modelId).toBe("interactive-model");
+  expect(pi.thinking).toBe("medium");
+});

@@ -138,6 +138,10 @@ export class PlanningProfileCoordinator implements PlanningProfileLifecycle {
     if (lease?.correlationId !== correlationId) {
       throw new PlanningProfilePolicyError("missing correlation-bound planning profile lease");
     }
+    await this.observeIdentity(
+      await this.pi.currentModel(),
+      await this.pi.currentThinkingLevel(),
+    );
     const drift = await this.store.driftReason(correlationId);
     await this.restoreAfterSettlement(lease, {
       correlationId,
