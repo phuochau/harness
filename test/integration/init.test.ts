@@ -75,6 +75,12 @@ describe("harness init", () => {
         resources: { extensions: ["dist/pi/extension.js"] },
       },
     ]);
+    expect(environment.agent_plugins).toEqual([
+      { id: "superpowers-pi", dependency: "superpowers", agent: "pi", plugin_id: "superpowers" },
+      { id: "superpowers-codex", dependency: "superpowers", agent: "codex", plugin_id: "superpowers-dev/superpowers" },
+      { id: "superpowers-devin", dependency: "superpowers", agent: "devin", plugin_id: "superpowers" },
+      { id: "superpowers-claude", dependency: "superpowers", agent: "claude", plugin_id: "superpowers@superpowers-dev" },
+    ]);
     expect(() => validateEnvironmentAndLock(environment, lock)).not.toThrow();
 
     const settings = JSON.parse(await readFile(join(root, ".pi/settings.json"), "utf8"));

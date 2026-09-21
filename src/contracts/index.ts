@@ -46,9 +46,22 @@ export function validateEnvironmentAndLock(
 ): { environment: EnvironmentDocument; lock: HarnessLock } {
   const environment = validateEnvironment(environmentValue);
   const lock = validateHarnessLock(lockValue);
+  const agentPlugins = environment.agent_plugins ?? [];
   assertUnique(
     environment.pi_packages.map((item) => item.id),
     "Pi package IDs",
+  );
+  assertUnique(
+    agentPlugins.map((item) => item.id),
+    "agent plugin IDs",
+  );
+  assertUnique(
+    agentPlugins.map((item) => `${item.agent}\0${item.plugin_id}`),
+    "agent plugin targets",
+  );
+  assertUnique(
+    agentPlugins.map((item) => `${item.agent}\0${item.dependency}`),
+    "agent plugin dependencies",
   );
   assertUnique(
     lock.dependencies.map((item) => item.id),
@@ -79,6 +92,22 @@ export function validateEnvironmentAndLock(
     ) {
       throw new Error(
         `lock dependency ${requirement.dependency} is not an exact Pi package source projection`,
+      );
+    }
+  }
+  for (const requirement of agentPlugins) {
+    if (
+      requirement.plugin_id.startsWith("/") ||
+      requirement.plugin_id.split("/").some((segment) => segment === "." || segment === "..")
+    ) {
+      throw new Error(`unsafe agent plugin ID: ${requirement.plugin_id}`);
+    }
+    const matches = lock.dependencies.filter(
+      (dependency) => dependency.id === requirement.dependency,
+    );
+    if (matches.length !== 1) {
+      throw new Error(
+        `agent plugin ${requirement.id} requires exactly one lock dependency ${requirement.dependency}`,
       );
     }
   }

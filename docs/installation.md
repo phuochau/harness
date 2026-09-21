@@ -25,6 +25,12 @@ This creates `.harness/workflow.yaml`, `environment.yaml`, `policy.yaml`,
 overwrite existing files. The generated workflow DSL is meant to be edited and
 committed.
 
+`environment.yaml.agent_plugins` is the portable plugin inventory. The shipped
+default binds Superpowers to its provider-specific identity in Pi, Codex,
+Devin, and Claude. Doctor checks every declaration against the locked version;
+the aggregate `superpowers` capability is healthy only when all declared agent
+plugins are present and enabled.
+
 ## 3. Probe and approve installation
 
 ```bash

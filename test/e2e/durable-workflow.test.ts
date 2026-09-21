@@ -51,6 +51,7 @@ it("runs a durable task DAG to quiescence and resumes scheduling after every obs
       schema: "harness/environment/v1",
       commands: { verify: ["npm", "test"] },
       pi_packages: [],
+      agent_plugins: [],
     },
     workflow: {
       schema: "harness/v1",

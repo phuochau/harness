@@ -124,6 +124,7 @@ export const fixtureEnvironment = fixture<EnvironmentDocument>(() => ({
       resources: { extensions: ["dist/pi/extension.js"] },
     },
   ],
+  agent_plugins: [],
 }));
 
 export const fixtureHarnessLock = fixture<HarnessLock>(() => ({

@@ -56,6 +56,7 @@ it("rejects Pi package requirements that are not exact lock projections", () => 
       {
         schema: "harness/environment/v1",
         commands: {},
+        agent_plugins: [],
         pi_packages: [
           {
             id: "harness",
@@ -72,6 +73,41 @@ it("rejects Pi package requirements that are not exact lock projections", () => 
       },
     ),
   ).toThrow(/lock dependency/);
+});
+
+it("keeps environment/v1 backward compatible while validating declared agent plugins", () => {
+  const lock = {
+    schema: "harness/lock/v1",
+    harnessVersion: "0.1.0",
+    dependencies: [],
+  };
+  expect(() => validateEnvironmentAndLock({
+    schema: "harness/environment/v1",
+    commands: {},
+    pi_packages: [],
+  }, lock)).not.toThrow();
+  expect(() => validateEnvironmentAndLock({
+    schema: "harness/environment/v1",
+    commands: {},
+    pi_packages: [],
+    agent_plugins: [{
+      id: "superpowers-codex",
+      dependency: "superpowers",
+      agent: "codex",
+      plugin_id: "../../escape",
+    }],
+  }, lock)).toThrow();
+  expect(() => validateEnvironmentAndLock({
+    schema: "harness/environment/v1",
+    commands: {},
+    pi_packages: [],
+    agent_plugins: [{
+      id: "superpowers-codex",
+      dependency: "superpowers",
+      agent: "codex",
+      plugin_id: "superpowers-dev/superpowers",
+    }],
+  }, lock)).toThrow(/lock dependency/);
 });
 
 it("accepts only the exact task graph version and closed shape", () => {

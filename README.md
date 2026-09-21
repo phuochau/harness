@@ -23,6 +23,12 @@ variants—worker order is data, not hard-coded policy.
 Requirements: Node.js 22.19+, Git, Pi 0.86.1, Spec Kit 0.8.7, Superpowers
 6.4.1, Herdr 0.9.1, and whichever worker CLIs the selected workflow uses.
 
+Every initialized project declares its required agent plugins in
+`.harness/environment.yaml`. The default records the provider-specific
+Superpowers identity for Pi, Codex, Devin, and Claude. `harness doctor --json`
+probes each declaration independently, so a new computer reports the precise
+missing or wrong-version integration instead of one opaque global result.
+
 ```bash
 cd your-project
 npm exec --yes --package pi-multi-agent-harness@0.1.0 -- harness init

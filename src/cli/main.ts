@@ -35,6 +35,14 @@ function npmVersion(packageName: string, stdout: string): string | undefined {
   }
 }
 
+function regexLiteral(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function agentPluginCapabilityId(id: string): string {
+  return `agent-plugin:${id}`;
+}
+
 export function executableCapabilities(
   project: DeclarativeProject,
 ): readonly ExecutableCapability[] {
@@ -135,31 +143,34 @@ export function executableCapabilities(
     (dependency) => dependency.id === "superpowers",
   )?.version;
   if (superpowersVersion !== undefined) {
+    const declared = (project.environment.agent_plugins ?? []).filter(
+      (plugin) => plugin.dependency === "superpowers",
+    );
+    const codexRequirement = declared.find((plugin) => plugin.agent === "codex");
     const codexPlugin = join(
       process.env.CODEX_HOME ?? join(homedir(), ".codex"),
       "plugins",
       "cache",
-      "superpowers-dev",
-      "superpowers",
+      ...(codexRequirement?.plugin_id.split("/") ?? ["superpowers-dev", "superpowers"]),
       superpowersVersion,
       ".codex-plugin",
       "plugin.json",
     );
-    const probes: readonly ExecutableCapability[] = [
-      {
-        id: "superpowers:pi",
+    const probes: readonly ExecutableCapability[] = declared.map((requirement) => {
+      if (requirement.agent === "pi") return {
+        id: agentPluginCapabilityId(requirement.id),
         command: "pi",
         versionArgs: ["list", "--no-approve"],
         expectedVersion: superpowersVersion,
         parseVersion: (stdout) =>
           new RegExp(
-            `[\\\\/]superpowers[\\\\/]${superpowersVersion.replace(/\./g, "\\.")}(?:[\\\\/]|\\s|$)`,
+            `[\\\\/]${regexLiteral(requirement.plugin_id)}[\\\\/]${regexLiteral(superpowersVersion)}(?:[\\\\/]|\\s|$)`,
           ).test(stdout)
             ? superpowersVersion
             : undefined,
-      },
-      {
-        id: "superpowers:codex",
+      };
+      if (requirement.agent === "codex") return {
+        id: agentPluginCapabilityId(requirement.id),
         command: process.execPath,
         versionArgs: [
           "--input-type=module",
@@ -168,19 +179,19 @@ export function executableCapabilities(
         ],
         expectedVersion: superpowersVersion,
         parseVersion: (stdout) => stdout.trim() || undefined,
-      },
-      {
-        id: "superpowers:devin",
+      };
+      if (requirement.agent === "devin") return {
+        id: agentPluginCapabilityId(requirement.id),
         command: "devin",
         versionArgs: ["plugins", "list"],
         expectedVersion: superpowersVersion,
         parseVersion: (stdout) =>
-          new RegExp(`superpowers\\s+v${superpowersVersion.replace(/\./g, "\\.")}(?:\\s|$)`).test(stdout)
+          new RegExp(`${regexLiteral(requirement.plugin_id)}\\s+v${regexLiteral(superpowersVersion)}(?:\\s|$)`).test(stdout)
             ? superpowersVersion
             : undefined,
-      },
-      {
-        id: "superpowers:claude",
+      };
+      return {
+        id: agentPluginCapabilityId(requirement.id),
         command: "claude",
         versionArgs: ["plugin", "list", "--json"],
         expectedVersion: superpowersVersion,
@@ -193,7 +204,7 @@ export function executableCapabilities(
             }[];
             return plugins.some(
               (plugin) =>
-                plugin.id === "superpowers@superpowers-dev" &&
+                plugin.id === requirement.plugin_id &&
                 plugin.version === superpowersVersion &&
                 plugin.enabled === true,
             )
@@ -203,12 +214,9 @@ export function executableCapabilities(
             return undefined;
           }
         },
-      },
-    ];
-    const requiredAgents = new Set([...herdrTargets, "codex", "devin", "claude"]);
-    result.push(...probes.filter((probe) =>
-      requiredAgents.has(probe.id.slice("superpowers:".length)),
-    ));
+      };
+    });
+    result.push(...probes);
   }
   return result;
 }
@@ -231,9 +239,10 @@ async function defaultProbe(
     (dependency) => dependency.id === "superpowers",
   );
   if (superpowers !== undefined) {
-    const required = Object.values(byId).filter((result) =>
-      result.id.startsWith("superpowers:"),
-    );
+    const required = (project.environment.agent_plugins ?? [])
+      .filter((plugin) => plugin.dependency === "superpowers")
+      .map((plugin) => byId[agentPluginCapabilityId(plugin.id)])
+      .filter((result): result is NonNullable<typeof result> => result !== undefined);
     byId.superpowers = required.length > 0 && required.every(
       (result) => result.status === "present" && result.version === superpowers.version,
     )

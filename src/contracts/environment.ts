@@ -30,6 +30,21 @@ export const PiPackageRequirementSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const AgentPluginRequirementSchema = Type.Object(
+  {
+    id: Type.String({ pattern: "^[a-z][a-z0-9-]*$" }),
+    dependency: Type.String({ pattern: "^[a-z][a-z0-9-]*$" }),
+    agent: Type.Union([
+      Type.Literal("pi"),
+      Type.Literal("codex"),
+      Type.Literal("devin"),
+      Type.Literal("claude"),
+    ]),
+    plugin_id: Type.String({ pattern: "^[A-Za-z0-9@._/-]+$" }),
+  },
+  { additionalProperties: false },
+);
+
 export const EnvironmentSchema = Type.Object(
   {
     schema: Type.Literal("harness/environment/v1"),
@@ -38,6 +53,7 @@ export const EnvironmentSchema = Type.Object(
       Type.Array(Type.String(), { minItems: 1 }),
     ),
     pi_packages: Type.Array(PiPackageRequirementSchema),
+    agent_plugins: Type.Optional(Type.Array(AgentPluginRequirementSchema)),
   },
   { additionalProperties: false },
 );

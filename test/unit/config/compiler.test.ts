@@ -63,6 +63,9 @@ it("hashes normalized content deterministically and includes command changes", (
           actionSchemas: left.actionSchemas!,
           environment: {
             pi_packages: left.environment.pi_packages,
+            ...(left.environment.agent_plugins === undefined
+              ? {}
+              : { agent_plugins: left.environment.agent_plugins }),
             commands: { ...left.environment.commands },
             schema: left.environment.schema,
           },
