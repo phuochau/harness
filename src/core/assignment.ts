@@ -18,6 +18,9 @@ export interface AssignmentInput {
   readonly jobId: string;
   readonly itemKey: string;
   readonly taskId?: string;
+  readonly reviewScope?: "task" | "final_diff";
+  readonly frozenBase?: string;
+  readonly runHead?: string;
   readonly attempt: number;
   readonly role: "implementation" | "review";
   readonly workerKind: WorkerKind;
@@ -30,16 +33,81 @@ export interface AssignmentInput {
   readonly worktree: WorktreeBinding;
 }
 
-export interface WorkerAssignment extends AssignmentInput {
+interface WorkerAssignmentBase extends AssignmentInput {
   readonly schemaVersion: 1;
   readonly protectedPaths: readonly string[];
   readonly assignmentHash: `sha256:${string}`;
 }
 
+export type WorkerAssignment =
+  | (WorkerAssignmentBase & {
+      readonly role: "implementation";
+      readonly scope: "task";
+      readonly taskId: string;
+    })
+  | (WorkerAssignmentBase & {
+      readonly role: "review";
+      readonly scope: "task";
+      readonly taskId: string;
+      readonly reviewScope?: "task";
+    })
+  | (WorkerAssignmentBase & {
+      readonly role: "review";
+      readonly scope: "final_diff";
+      readonly reviewScope: "final_diff";
+      readonly taskId?: never;
+      readonly frozenBase: string;
+      readonly runHead: string;
+    });
+
 export function createAssignment(input: AssignmentInput): WorkerAssignment {
+  const scope = input.role === "implementation"
+    ? "task"
+    : input.reviewScope ?? "task";
+  if (input.role === "implementation") {
+    if (input.reviewScope !== undefined) {
+      throw new Error("implementation assignment cannot declare review scope");
+    }
+    if (
+      !input.worktree.writable ||
+      (input.worktree.role !== "implementation" &&
+        input.worktree.role !== "remediation")
+    ) {
+      throw new Error("implementation assignment requires a writable implementation worktree");
+    }
+  } else if (
+    input.worktree.role !== "review" ||
+    input.worktree.branch !== null ||
+    input.worktree.writable
+  ) {
+    throw new Error("review assignment requires a detached read-only worktree");
+  }
+  if (scope === "task" && (input.taskId === undefined || input.taskId === "")) {
+    throw new Error("task assignment requires taskId");
+  }
+  if (scope === "final_diff") {
+    if (input.taskId !== undefined) {
+      throw new Error("final-diff review must not carry taskId");
+    }
+    if (
+      input.frozenBase === undefined ||
+      input.runHead === undefined ||
+      input.commit !== input.runHead
+    ) {
+      throw new Error("final-diff review requires frozen base and matching run head");
+    }
+    if (
+      input.worktree.branch !== null ||
+      input.worktree.writable ||
+      input.allowedPaths.length > 0
+    ) {
+      throw new Error("final-diff review requires a detached read-only worktree");
+    }
+  }
   const body = {
     schemaVersion: 1 as const,
     ...structuredClone(input),
+    scope,
     protectedPaths: [...DefaultProtectedPaths],
   };
   return deepFreeze({
