@@ -28,6 +28,11 @@ export interface ProductionWorkerRuntime {
     prepared: PreparedWorkerAttempt,
     intent: EffectIntent<ProductionWorkerKind, ProductionWorkerInput>,
   ): Promise<ReconcileResult<WorkerResult>>;
+  afterCompleted?(
+    prepared: PreparedWorkerAttempt,
+    output: WorkerResult,
+    intent: EffectIntent<ProductionWorkerKind, ProductionWorkerInput>,
+  ): Promise<void>;
 }
 
 export interface DurableWorkerActionOptions {
@@ -71,7 +76,13 @@ export class DurableWorkerAction<K extends ProductionWorkerKind>
     intent: EffectIntent<K, ProductionWorkerInput>,
   ): Promise<WorkerResult> {
     const completed = await this.completed(intent);
-    if (completed !== undefined) return completed;
+    if (completed !== undefined) {
+      const prepared = await this.prepared(intent);
+      if (prepared !== undefined) {
+        await this.options.runtime.afterCompleted?.(prepared, completed, intent);
+      }
+      return completed;
+    }
     const prepared = await this.prepared(intent) ?? await this.options.records.put(
       "worker-prepared",
       intent.idempotencyKey,
@@ -80,11 +91,13 @@ export class DurableWorkerAction<K extends ProductionWorkerKind>
     const output = validateWorkerResult(
       await this.options.runtime.execute(prepared, intent),
     );
-    return this.options.records.put(
+    const persisted = await this.options.records.put(
       "worker-completed",
       intent.idempotencyKey,
       output,
     );
+    await this.options.runtime.afterCompleted?.(prepared, persisted, intent);
+    return persisted;
   }
 
   public async reconcile(
@@ -92,13 +105,20 @@ export class DurableWorkerAction<K extends ProductionWorkerKind>
     intent: EffectIntent<K, ProductionWorkerInput>,
   ): Promise<ReconcileResult<WorkerResult>> {
     const completed = await this.completed(intent);
-    if (completed !== undefined) return { status: "observed", output: completed };
+    if (completed !== undefined) {
+      const prepared = await this.prepared(intent);
+      if (prepared !== undefined) {
+        await this.options.runtime.afterCompleted?.(prepared, completed, intent);
+      }
+      return { status: "observed", output: completed };
+    }
     const prepared = await this.prepared(intent);
     if (prepared === undefined) return { status: "not_found" };
     const result = await this.options.runtime.reconcile(prepared, intent);
     if (result.status !== "observed") return result;
     const output = validateWorkerResult(result.output);
     await this.options.records.put("worker-completed", intent.idempotencyKey, output);
+    await this.options.runtime.afterCompleted?.(prepared, output, intent);
     return { status: "observed", output };
   }
 }

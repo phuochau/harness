@@ -77,3 +77,29 @@ it("never re-prepares or re-executes a completed worker attempt", async () => {
   await expect(action.execute(actionContext(), intent)).resolves.toEqual(result);
   expect({ prepares, executions }).toEqual({ prepares: 1, executions: 1 });
 });
+
+it("persists completion before running idempotent workspace cleanup", async () => {
+  const root = await mkdtemp(join(tmpdir(), "harness-worker-action-"));
+  temporary.push(root);
+  const records = new DurableRecordStore(root);
+  let cleanupCalls = 0;
+  const action = new DurableWorkerAction("worker.execute", {
+    records,
+    runtime: {
+      prepare: async () => ({ assignmentHash: result.assignmentHash }),
+      execute: async () => result,
+      reconcile: async () => ({ status: "not_found" }),
+      afterCompleted: async (_prepared, completed, completedIntent) => {
+        cleanupCalls += 1;
+        expect(completed).toEqual(result);
+        await expect(
+          records.get("worker-completed", completedIntent.idempotencyKey),
+        ).resolves.toEqual(result);
+      },
+    },
+  });
+
+  await expect(action.execute(actionContext(), intent)).resolves.toEqual(result);
+  await expect(action.execute(actionContext(), intent)).resolves.toEqual(result);
+  expect(cleanupCalls).toBe(2);
+});

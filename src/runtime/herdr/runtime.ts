@@ -418,6 +418,29 @@ export class HerdrRuntime {
     }
   }
 
+  public async waitForAgent(
+    handle: WorkerHandle,
+    timeoutMs = 86_400_000,
+  ): Promise<void> {
+    await this.client.request("agent.wait", {
+      target: handle.agentName,
+      until: ["idle", "blocked", "done"],
+      timeout_ms: timeoutMs,
+    });
+  }
+
+  public async closeWorkspace(workspaceId: string): Promise<void> {
+    const existing = records(
+      await this.client.request("workspace.list", {}),
+      "workspaces",
+    ).some((workspace) => workspace.workspace_id === workspaceId);
+    if (!existing) return;
+    await this.client.request("workspace.close", {
+      workspace_id: workspaceId,
+      close_group: false,
+    });
+  }
+
   public async stopAgent(handle: WorkerHandle): Promise<void> {
     await this.client.request("agent.send_keys", {
       target: handle.agentName,
