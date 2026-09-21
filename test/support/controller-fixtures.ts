@@ -16,6 +16,12 @@ import {
   type CommandDecision,
 } from "../../src/controller/command-source.js";
 import { reduceEvent } from "../../src/core/reducer.js";
+import {
+  createAssignment,
+  type AssignmentInput,
+  type WorkerAssignment,
+} from "../../src/core/assignment.js";
+import type { EvidenceGit } from "../../src/core/evidence.js";
 import { initialRunState, type RunState } from "../../src/core/state.js";
 import type {
   ReviewSelection,
@@ -30,6 +36,8 @@ import { RunLease, type LeaseHandle } from "../../src/state/lease.js";
 import { resolveRunPaths } from "../../src/state/paths.js";
 import type { RunPaths } from "../../src/state/types.js";
 import { FakeClock } from "./fake-clock.js";
+import type { DeepPartial } from "./fixture.js";
+import { deepMerge, fixture } from "./fixture.js";
 import { createTempRepoWithWorktree } from "./state-fixtures.js";
 
 const revision = `sha256:${"a".repeat(64)}`;
@@ -446,5 +454,93 @@ export function reviewFixture(
       preference: overrides.preference ?? ["codex", "claude", "devin"],
     }),
     implementationWorker: overrides.implementationWorker ?? "devin",
+  };
+}
+
+export const assignmentFixture = fixture<AssignmentInput>(() => ({
+  runId: "F023",
+  stageId: "implement",
+  jobId: "implement:T001",
+  itemKey: "T001",
+  taskId: "T001",
+  attempt: 1,
+  role: "implementation",
+  workerKind: "devin",
+  commit: "abc123",
+  allowedPaths: ["src/**", "test/**"],
+  requiredDisciplines: [
+    "test-driven-development",
+    "verification-before-completion",
+  ],
+  verificationCommands: [["npm", "test"]],
+  planningArtifacts: ["spec.md", "plan.md", "tasks.md"],
+  worktree: {
+    role: "implementation",
+    path: "/tmp/harness-implementation",
+    branch: "harness/F023-T001",
+    commit: "abc123",
+    writable: true,
+  },
+}));
+
+export function reviewAssignment(
+  overrides: DeepPartial<AssignmentInput> = {},
+): WorkerAssignment {
+  const base: AssignmentInput = {
+    ...assignmentFixture(),
+    stageId: "review",
+    jobId: "review:T001",
+    role: "review",
+    workerKind: "codex",
+    implementationWorkerKind: "devin",
+    requiredDisciplines: ["requesting-code-review"],
+    verificationCommands: [],
+    worktree: {
+      role: "review",
+      path: "/tmp/harness-review",
+      branch: null,
+      commit: "abc123",
+      writable: false,
+    },
+  };
+  return createAssignment(deepMerge(base, overrides));
+}
+
+const evidenceHash = `sha256:${"b".repeat(64)}` as const;
+
+export function approvedReview(
+  overrides: Record<string, unknown> = {},
+): JsonValue {
+  return {
+    schemaVersion: 1,
+    assignmentHash: `sha256:${"a".repeat(64)}`,
+    role: "review",
+    outcome: "approved",
+    reviewedCommit: "abc123",
+    findings: [],
+    evidence: [
+      {
+        kind: "superpower:requesting-code-review",
+        path: ".harness-output/review.json",
+        sha256: evidenceHash,
+      },
+    ],
+    ...overrides,
+  } as JsonValue;
+}
+
+interface FakeEvidenceGitOptions {
+  readonly changed?: readonly string[];
+  readonly status?: readonly string[];
+  readonly worktreeCommit?: string;
+}
+
+export function fakeEvidenceGit(
+  options: FakeEvidenceGitOptions = {},
+): EvidenceGit {
+  return {
+    changedPaths: async () => options.changed ?? ["src/feature.ts"],
+    worktreeStatus: async () => options.status ?? [],
+    worktreeCommit: async () => options.worktreeCommit ?? "abc123",
   };
 }

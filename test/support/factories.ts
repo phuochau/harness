@@ -215,7 +215,21 @@ export const completedResult = fixture<WorkerResult>(() => ({
   outcome: "completed",
   commit: "0123456789abcdef0123456789abcdef01234567",
   evidence: [
-    { kind: "test", path: ".harness-output/test.log", sha256: hashB },
+    {
+      kind: "superpower:test-driven-development",
+      path: ".harness-output/tdd.json",
+      sha256: hashB,
+    },
+    {
+      kind: "superpower:verification-before-completion",
+      path: ".harness-output/verification.json",
+      sha256: hashB,
+    },
+    {
+      kind: "command:npm test",
+      path: ".harness-output/test.log",
+      sha256: hashB,
+    },
   ],
 }));
 
