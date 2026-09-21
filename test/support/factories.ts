@@ -6,6 +6,10 @@ import type {
   WorkerResult,
   WorkflowDocument,
 } from "../../src/contracts/index.js";
+import {
+  BuiltInActionInputSchemas,
+} from "../../src/config/action-inputs.js";
+import type { CompileInput } from "../../src/config/compile.js";
 import type { DeepPartial } from "./fixture.js";
 import { fixture } from "./fixture.js";
 
@@ -21,9 +25,15 @@ export const fixtureWorkflow = fixture<WorkflowDocument>(() => ({
   },
   stages: [
     {
+      id: "prepare",
+      uses: "command.run",
+      with: { argv: "${commands.task_verify}" },
+    },
+    {
       id: "tasks",
       uses: "spec-kit.tasks",
       runner: "pi",
+      needs: [{ stage: "prepare", scope: "all" }],
       produces: { graph: "specs/fixture/task-graph.json" },
     },
     {
@@ -197,3 +207,23 @@ export const completedResult = fixture<WorkerResult>(() => ({
     { kind: "test", path: ".harness-output/test.log", sha256: hashB },
   ],
 }));
+
+export const fixtureCompileInput = fixture<CompileInput>(() => ({
+  workflow: fixtureWorkflow(),
+  environment: fixtureEnvironment(),
+  actionSchemas: BuiltInActionInputSchemas,
+}));
+
+export function compileInputCase(
+  kind: "unknown_command" | "cycle",
+): CompileInput {
+  const input = structuredClone(fixtureCompileInput());
+  if (kind === "unknown_command") {
+    input.workflow.stages[0]!.with = { argv: "${commands.missing}" };
+  } else {
+    input.workflow.stages[1]!.needs = [
+      { stage: input.workflow.stages[1]!.id, scope: "all" },
+    ];
+  }
+  return input;
+}
