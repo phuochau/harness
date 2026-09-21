@@ -61,7 +61,7 @@ export function buildWorkerPrompt(
       `- Write exactly one schemaVersion 1 JSON result to ${resultPath}.`,
       "- Every evidence item is {kind,path,sha256}; path must be a regular file below .harness-output and sha256 must equal the file bytes.",
       "- Keep .harness-output untracked. Never commit evidence artifacts.",
-      "- Terminal prose, Herdr idle/done state, and an uncommitted working tree are not completion.",
+      "- Terminal prose, Pi process exit, and an uncommitted working tree are not completion.",
       "- Commit the implementation before reporting completion and leave no changes outside .harness-output.",
       `- Completed result shape: {"schemaVersion":1,"assignmentHash":"${assignment.assignmentHash}","role":"implementation","outcome":"completed","commit":"<git HEAD>","evidence":[{"kind":"<required kind>","path":".harness-output/<file>","sha256":"sha256:<64 lowercase hex>"}]}.`,
     );
