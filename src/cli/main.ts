@@ -43,6 +43,17 @@ function agentPluginCapabilityId(id: string): string {
   return `agent-plugin:${id}`;
 }
 
+const legacySuperpowersPlugins = [
+  { id: "superpowers-pi", dependency: "superpowers", agent: "pi", plugin_id: "superpowers" },
+  { id: "superpowers-codex", dependency: "superpowers", agent: "codex", plugin_id: "superpowers-dev/superpowers" },
+  { id: "superpowers-devin", dependency: "superpowers", agent: "devin", plugin_id: "superpowers" },
+  { id: "superpowers-claude", dependency: "superpowers", agent: "claude", plugin_id: "superpowers@superpowers-dev" },
+] as const;
+
+function declaredAgentPlugins(project: DeclarativeProject) {
+  return project.environment.agent_plugins ?? legacySuperpowersPlugins;
+}
+
 export function executableCapabilities(
   project: DeclarativeProject,
 ): readonly ExecutableCapability[] {
@@ -143,7 +154,7 @@ export function executableCapabilities(
     (dependency) => dependency.id === "superpowers",
   )?.version;
   if (superpowersVersion !== undefined) {
-    const declared = (project.environment.agent_plugins ?? []).filter(
+    const declared = declaredAgentPlugins(project).filter(
       (plugin) => plugin.dependency === "superpowers",
     );
     const codexRequirement = declared.find((plugin) => plugin.agent === "codex");
@@ -239,7 +250,7 @@ async function defaultProbe(
     (dependency) => dependency.id === "superpowers",
   );
   if (superpowers !== undefined) {
-    const required = (project.environment.agent_plugins ?? [])
+    const required = declaredAgentPlugins(project)
       .filter((plugin) => plugin.dependency === "superpowers")
       .map((plugin) => byId[agentPluginCapabilityId(plugin.id)])
       .filter((result): result is NonNullable<typeof result> => result !== undefined);

@@ -1,4 +1,4 @@
-import { rm } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { afterEach, expect, it } from "vitest";
 import { doctor } from "../../src/cli/doctor.js";
 import { executableCapabilities } from "../../src/cli/main.js";
@@ -108,4 +108,18 @@ it("requires the locked Superpowers version in Pi and every supported worker", a
   expect(probes["agent-plugin:superpowers-claude"]?.parseVersion(JSON.stringify([
     { id: "superpowers@superpowers-dev", version: "6.4.1", enabled: false },
   ]))).toBeUndefined();
+});
+
+it("keeps the four Superpowers probes for legacy environment/v1 files", async () => {
+  const root = await maliciousProjectFixture();
+  temporary.push(root);
+  const environmentPath = `${root}/.harness/environment.yaml`;
+  const contents = await readFile(environmentPath, "utf8");
+  await writeFile(
+    environmentPath,
+    contents.replace(/\nagent_plugins:\n(?:  .+\n|    .+\n)+$/, "\n"),
+    "utf8",
+  );
+  const capabilities = executableCapabilities(await readDeclarativeProject(root));
+  expect(capabilities.filter((item) => item.id.startsWith("agent-plugin:"))).toHaveLength(4);
 });
