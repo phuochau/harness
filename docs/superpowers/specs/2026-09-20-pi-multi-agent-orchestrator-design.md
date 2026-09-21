@@ -2,7 +2,10 @@
 
 **Date:** 2026-09-20
 
-**Status:** Approved design; implementation-ready plan
+**Status:** Superseded by `2026-09-21-pi-native-multi-agent-orchestrator-design.md`
+
+This document records the earlier Herdr-based architecture. It is retained for
+decision history only and is not an implementation source of truth.
 
 ## 1. Purpose
 
