@@ -29,6 +29,7 @@ export async function resolveRunPaths(
     repository: canonicalRepository,
     commonDir,
     root,
+    manifest: join(root, "run.json"),
     events: join(root, "events.jsonl"),
     state: join(root, "state.json"),
     lease: join(root, "lease.json"),

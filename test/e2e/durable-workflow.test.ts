@@ -28,6 +28,7 @@ function runPaths(root: string): RunPaths {
     repository: root,
     commonDir: root,
     root,
+    manifest: join(root, "run.json"),
     events: join(root, "events.jsonl"),
     state: join(root, "state.json"),
     lease: join(root, "lease.json"),

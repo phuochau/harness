@@ -13,8 +13,21 @@ import type { WorkerKind } from "./routing.js";
 
 export interface WorkflowCommandDeriverOptions {
   readonly workflow: CompiledWorkflow;
-  readonly graph: ValidatedTaskGraph;
+  readonly graph: ValidatedTaskGraph | (() => ValidatedTaskGraph);
   readonly maxNewEffects?: number;
+}
+
+export function emptyTaskGraph(): ValidatedTaskGraph {
+  return Object.freeze({
+    graph: {
+      schema: "harness/task-graph/v1" as const,
+      tasksSemanticHash: `sha256:${"0".repeat(64)}` as const,
+      tasks: [],
+    },
+    byId: new Map(),
+    order: [],
+    reachability: new Map(),
+  });
 }
 
 function workerPreference(stage: CompiledStage): readonly WorkerKind[] {
@@ -106,11 +119,12 @@ function runningImplementation(
 export function createWorkflowCommandDeriver(
   options: WorkflowCommandDeriverOptions,
 ): CommandDeriver {
-  const materialized = materializeJobs(options.workflow, options.graph);
   const stages = new Map(options.workflow.stages.map((stage) => [stage.id, stage]));
   const maximum = options.maxNewEffects ?? 32;
 
   return (state: RunState, accepted: AcceptedCommandRecord) => {
+    const graph = typeof options.graph === "function" ? options.graph() : options.graph;
+    const materialized = materializeJobs(options.workflow, graph);
     const prefixEvents: DecisionEventDraft[] = [];
     const forcedRetries = new Set<string>();
     let resuming = false;
@@ -184,7 +198,7 @@ export function createWorkflowCommandDeriver(
       return (
         (status === "PENDING" || status === "RETRY" || forcedRetries.has(job.id)) &&
         dependenciesDone(state, job) &&
-        taskDependenciesDone(state, options.graph, job, stage)
+        taskDependenciesDone(state, graph, job, stage)
       );
     });
 
@@ -199,7 +213,7 @@ export function createWorkflowCommandDeriver(
     let selected = ready;
     if (implementationCandidates.length > 0) {
       const nonParallel = implementationCandidates.find(
-        (job) => job.taskId && !options.graph.byId.get(job.taskId)?.parallelEligible,
+        (job) => job.taskId && !graph.byId.get(job.taskId)?.parallelEligible,
       );
       if (activeImplementation !== undefined) {
         selected = ready.filter(

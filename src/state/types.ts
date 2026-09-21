@@ -2,6 +2,7 @@ export interface RunPaths {
   readonly repository: string;
   readonly commonDir: string;
   readonly root: string;
+  readonly manifest: string;
   readonly events: string;
   readonly state: string;
   readonly lease: string;
