@@ -23,11 +23,13 @@ PATH=/opt/homebrew/bin:$PATH npm run e2e:real
 tests, journals, credentials, `.harness-output`, or source maps containing
 embedded source text.
 
-The real gate is not a mock and must not pass by skipping. It creates a
-disposable Git repository, uses Pi with the authenticated Codex CLI to create a
-Spec Kit artifact, then uses Pi with the authenticated Devin CLI to implement,
-verify, commit, and emit structured evidence. `HARNESS_E2E_REAL=1` is set by the
-script.
+The real gate is not a mock and must not pass by skipping. It installs the
+packed harness, creates a disposable Git repository, uses Pi with authenticated
+Codex CLI sessions for Spec Kit specification and planning, then uses Pi with
+the authenticated Devin CLI to implement in an isolated worktree. It restarts
+the runtime and recovers the completed attempt, obtains an independent Codex
+review, fast-forward integrates the exact candidate, and runs final tests.
+`HARNESS_E2E_REAL=1` is set by the script.
 
 Current release scope is Codex CLI plus Devin CLI. No Claude, remote-control,
 or second orchestration service is required by the default install or release

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { lstat, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ResolvedProfile } from "../config/profiles.js";
 import type {
@@ -13,7 +13,7 @@ import type {
   PlanningRunReceipt,
 } from "../ports/planning.js";
 import type { ManagedProfileView } from "../runtime/managed/materialize.js";
-import type { PiProcessSupervisor } from "../runtime/pi-process/types.js";
+import type { PiProcessRecord, PiProcessSupervisor } from "../runtime/pi-process/types.js";
 import { buildPiLaunchSpec } from "../runtime/pi-worker/launch-spec.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 import { sha256 } from "../shared/sha256.js";
@@ -68,39 +68,78 @@ export class ChildPiPlanningPort implements PlanningAgent {
     }
   }
 
-  public async enqueue(
+  public async prepare(
     request: PlanningRequest,
     context: PlanningEnqueueContext = {},
   ): Promise<PlanningRunReceipt> {
     const generation = 1;
     const sessionId = randomUUID();
     const sessionPath = join(this.options.sessionRoot, `${request.correlationId}-${generation}`);
-    const launch = buildPiLaunchSpec({
-      attemptId: `planning:${request.correlationId}:${generation}`,
+    const attemptId = `planning:${request.correlationId}:${generation}`;
+    return deepFreeze({
+      correlationId: request.correlationId,
+      generation,
+      sessionFile: join(sessionPath, "events.jsonl"),
+      requestEntryId: attemptId,
+      profileId: this.options.profile.id,
+      profileHash: this.options.profile.hash,
+      sessionId,
+      sessionPath,
       attemptToken: randomUUID(),
+      request,
+      instruction: context.instruction,
+    } as PlanningRunReceipt & { readonly instruction?: string });
+  }
+
+  private async processFor(receipt: PlanningRunReceipt): Promise<PiProcessRecord | undefined> {
+    if (receipt.process !== undefined) return receipt.process;
+    try {
+      const path = join(receipt.sessionPath!, "process.json");
+      const info = await lstat(path);
+      if (info.isSymbolicLink() || !info.isFile() || info.size > 1024 * 1024) {
+        throw new Error("planning process record is not a bounded regular file");
+      }
+      const process = JSON.parse(await readFile(path, "utf8")) as PiProcessRecord;
+      if (
+        process.attemptId !== receipt.requestEntryId ||
+        process.attemptToken !== receipt.attemptToken ||
+        process.sessionId !== receipt.sessionId ||
+        process.sessionDir !== receipt.sessionPath
+      ) throw new Error("planning process record identity mismatch");
+      return process;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw error;
+    }
+  }
+
+  public async launchPrepared(receipt: PlanningRunReceipt): Promise<PlanningRunReceipt> {
+    this.validateReceipt(receipt);
+    const existing = await this.processFor(receipt);
+    if (existing !== undefined) return deepFreeze({ ...receipt, process: existing });
+    const extended = receipt as PlanningRunReceipt & { readonly instruction?: string };
+    const launch = buildPiLaunchSpec({
+      attemptId: receipt.requestEntryId,
+      attemptToken: receipt.attemptToken,
       piExecutable: this.options.piExecutable,
       ...(this.options.piExecutableArgs === undefined ? {} : { piExecutableArgs: this.options.piExecutableArgs }),
       profile: this.options.profile,
       managed: this.options.managed,
       transportExtensionPath: this.options.transportExtensionPath,
       cwd: this.options.root,
-      sessionId,
-      sessionDir: sessionPath,
-      prompt: planningPrompt(request, context.instruction),
+      sessionId: receipt.sessionId,
+      sessionDir: receipt.sessionPath,
+      prompt: planningPrompt(receipt.request, extended.instruction),
     });
     const process = await this.options.supervisor.launch(launch);
-    return deepFreeze({
-      correlationId: request.correlationId,
-      generation,
-      sessionFile: join(sessionPath, "events.jsonl"),
-      requestEntryId: launch.attemptId,
-      profileId: this.options.profile.id,
-      profileHash: this.options.profile.hash,
-      sessionId,
-      sessionPath,
-      process,
-      request,
-    });
+    return deepFreeze({ ...receipt, process });
+  }
+
+  public async enqueue(
+    request: PlanningRequest,
+    context: PlanningEnqueueContext = {},
+  ): Promise<PlanningRunReceipt> {
+    return this.launchPrepared(await this.prepare(request, context));
   }
 
   private validateReceipt(receipt: PlanningRunReceipt): asserts receipt is PlanningRunReceipt & {
@@ -108,25 +147,26 @@ export class ChildPiPlanningPort implements PlanningAgent {
     readonly profileHash: string;
     readonly sessionId: string;
     readonly sessionPath: string;
-    readonly process: NonNullable<PlanningRunReceipt["process"]>;
     readonly request: PlanningRequest;
+    readonly attemptToken: string;
   } {
     if (
       receipt.profileId !== this.options.profile.id ||
       receipt.profileHash !== this.options.profile.hash ||
-      receipt.process === undefined || receipt.request === undefined ||
+      receipt.request === undefined || typeof receipt.attemptToken !== "string" ||
       receipt.sessionId === undefined || receipt.sessionPath === undefined ||
-      receipt.process.sessionId !== receipt.sessionId ||
       receipt.request.correlationId !== receipt.correlationId
     ) throw new Error("invalid or mismatched child planning receipt");
   }
 
   public async observe(receipt: PlanningRunReceipt): Promise<PlanningObservation> {
     this.validateReceipt(receipt);
-    const observation = await this.options.supervisor.observe(receipt.process);
+    const process = await this.processFor(receipt);
+    if (process === undefined) return { status: "pending" };
+    const observation = await this.options.supervisor.observe(process);
     if (observation.status === "running") return { status: "pending" };
     if (observation.status === "missing") {
-      return { status: "blocked", reason: "planning process disappeared without terminal evidence", evidence: [receipt.process.recordPath] };
+      return { status: "blocked", reason: "planning process disappeared without terminal evidence", evidence: [process.recordPath] };
     }
     if (observation.status === "identity_mismatch") {
       return { status: "blocked", reason: "planning process identity mismatch", evidence: observation.evidence };
@@ -140,7 +180,7 @@ export class ChildPiPlanningPort implements PlanningAgent {
       return {
         status: "blocked",
         reason: "planning attempt has no accepted terminal boundary",
-        evidence: [receipt.process.eventsPath],
+        evidence: [process.eventsPath],
       };
     }
     try {
@@ -181,7 +221,7 @@ export class ChildPiPlanningPort implements PlanningAgent {
       return deepFreeze({
         status: "blocked" as const,
         reason: error instanceof Error ? error.message : String(error),
-        evidence: [receipt.process.eventsPath, receipt.sessionPath],
+        evidence: [process.eventsPath, receipt.sessionPath],
       });
     }
   }
@@ -203,6 +243,19 @@ export class RoutedChildPiPlanningPort implements PlanningAgent {
     private readonly routes: Readonly<Record<string, string>>,
     private readonly ports: Readonly<Record<string, ChildPiPlanningPort>>,
   ) {}
+
+  public prepare(request: PlanningRequest, context?: PlanningEnqueueContext): Promise<PlanningRunReceipt> {
+    const profileId = this.routes[request.stage];
+    const port = profileId === undefined ? undefined : this.ports[profileId];
+    if (port === undefined) throw new Error(`no managed Pi planning profile for ${request.stage}`);
+    return port.prepare(request, context);
+  }
+
+  public launchPrepared(receipt: PlanningRunReceipt): Promise<PlanningRunReceipt> {
+    const port = receipt.profileId === undefined ? undefined : this.ports[receipt.profileId];
+    if (port === undefined) throw new Error("prepared planning receipt references an unavailable profile");
+    return port.launchPrepared(receipt);
+  }
 
   public enqueue(request: PlanningRequest, context?: PlanningEnqueueContext): Promise<PlanningRunReceipt> {
     const profileId = this.routes[request.stage];

@@ -10,9 +10,10 @@
 
 Build an installable, local-first harness that can execute a large feature over
 hours or days from Spec Kit artifacts to a verified pull request. Pi is the
-only harness-facing agent host and the only global orchestrator. Codex, Devin,
-and Claude are capabilities selected inside Pi worker profiles rather than
-separate top-level runtimes. A provider package may retain its native inner
+only harness-facing agent host and the only global orchestrator. Codex CLI and
+Devin CLI are the release providers selected inside Pi worker profiles rather
+than separate top-level runtimes. The profile and workflow contracts remain
+extensible to later providers. A provider package may retain its native inner
 agent loop, but that loop receives one bounded assignment and has no global
 scheduling authority.
 
@@ -53,8 +54,9 @@ true:
    commands are ready without exposing credentials.
 4. Planning runs through Pi with the `openai-codex` provider and a local
    ChatGPT subscription, and Spec Kit remains the planning source of truth.
-5. Implementation can run through Pi with Devin, review can run through Pi
-   with Codex or Claude, and any role can be reassigned through profile data.
+5. Implementation can run through Pi with Devin or Codex, review can run
+   through Pi with Codex or Devin, and any role can be reassigned through
+   profile data.
 6. Independent tasks run concurrently in distinct branches and worktrees;
    dependent tasks start only after their dependencies are `DONE`.
 7. A worker never marks its own task `DONE`. Only controller-owned review,
@@ -66,7 +68,7 @@ true:
 9. No undeclared global Pi extension, skill, prompt template, context file,
    Devin plugin, or MCP server appears in a worker context.
 10. A real disposable end-to-end test proves Spec Kit planning through Codex,
-    implementation through Devin, independent review through Codex or Claude,
+    implementation through Devin, independent review through Codex,
     Git integration, final verification, package installation, and restart
     recovery using the user's local subscriptions.
 
@@ -80,7 +82,7 @@ true:
 | Harness core | Deterministic workflow compiler, scheduler, state machine, policies, and effect protocol |
 | PiWorkerRuntime | Launch and observe every planner, implementer, and reviewer as a Pi session |
 | Pi profile | Select provider, model, resources, tools, environment, and role policy |
-| Codex/Devin/Claude | Perform the assigned planning, coding, or review work inside Pi |
+| Codex/Devin | Perform the assigned planning, coding, or review work inside Pi |
 | Superpowers | TDD, debugging, review, and verification discipline inside coding workers |
 | Git/tests/CI | Isolation, integration, and executable correctness evidence |
 
@@ -102,11 +104,9 @@ Devin support initially uses pinned package
 loop through Pi. It is hidden behind the harness profile/runtime interface, so
 the package can be upgraded, forked, or replaced without changing workflows.
 
-Claude support initially uses pinned package `pi-claude-bridge@0.8.0`, which
-exposes Claude Code through Pi and forwards Pi tools and selected skills into
-the Claude Agent SDK session. Its strict MCP mode is mandatory. Subscription
-eligibility is a capability checked by doctor and the real compatibility
-suite; the harness never silently falls back to an API-key-billed path.
+Claude and other providers are deferred. They may later use the same profile
+and runtime contracts, but no Claude package, authentication, profile, or
+release gate is installed by this Codex-and-Devin release.
 
 This approach preserves actual Devin behavior, keeps Pi in control of all
 worker sessions, and was proven by the feasibility spike.
@@ -152,7 +152,7 @@ Orchestrator Pi process
             |- implementer-devin profile
             |- implementer-codex profile
             |- reviewer-codex profile
-            `- reviewer-claude profile
+            `- reviewer-codex profile
 ```
 
 The publishable unit is one TypeScript npm package containing the Pi extension,
@@ -241,7 +241,7 @@ schema: harness/v1
 name: spec-kit-default
 
 defaults:
-  runner_preference: [codex, devin, claude]
+  runner_preference: [codex, devin]
 
 task_model:
   source: stages.tasks.outputs.graph
@@ -274,7 +274,7 @@ stages:
 
   - id: implement
     uses: worker.execute
-    runner: { prefer: [implementer-devin, implementer-codex, implementer-claude] }
+    runner: { prefer: [implementer-devin, implementer-codex] }
     needs: [{ stage: tasks, scope: all }]
     foreach: { source: stages.tasks.outputs.graph, key: task.id }
     gate: task.dependencies_done
@@ -282,7 +282,7 @@ stages:
 
   - id: review
     uses: worker.review
-    runner: { prefer: [reviewer-codex, reviewer-claude, reviewer-devin] }
+    runner: { prefer: [reviewer-codex, reviewer-devin] }
     needs: [{ stage: implement, scope: same-item }]
     foreach: { source: stages.tasks.outputs.graph, key: task.id }
     policies: { require_different_profile_family: true }
@@ -320,7 +320,7 @@ stages:
 
   - id: final_review
     uses: worker.review
-    runner: { prefer: [reviewer-codex, reviewer-claude] }
+    runner: { prefer: [reviewer-codex, reviewer-devin] }
     needs: [{ stage: final_verify, scope: all }]
     policies: { scope: final_diff }
 
@@ -333,7 +333,7 @@ stages:
     needs: [{ stage: push, scope: all }]
 ```
 
-The global fallback order is Codex, Devin, Claude. The ready-to-use workflow
+The global fallback order is Codex, then Devin. The ready-to-use workflow
 intentionally chooses Devin first for implementation and Codex first for
 planning/review. This satisfies the desired initial use case while keeping the
 engine and all preferences editable.
@@ -398,22 +398,6 @@ profiles:
     prompt_templates: []
     mcp: []
 
-  reviewer-claude:
-    family: claude
-    runtime: pi
-    provider: claude-bridge
-    model: claude-bridge/claude-sonnet-5
-    thinking: high
-    role: review
-    environment: isolated
-    tools: [read, bash, grep, find, ls]
-    extensions: [npm:pi-claude-bridge@0.8.0]
-    skills:
-      - id: superpowers:verification-before-completion
-        targets: [pi, provider]
-    context_files: false
-    prompt_templates: []
-    mcp: []
 ```
 
 The lock resolves symbolic resources such as `spec-kit` and `superpowers:*` to
@@ -421,18 +405,16 @@ exact sources and integrity hashes. A workflow references profile IDs, never a
 package path or credential. `targets: [pi]` passes a skill explicitly to Pi.
 `targets: [provider]` additionally materializes that exact skill into a
 provider-native managed location when the provider has its own skill loader.
-For Devin this is the managed profile's `.agents/skills`; for Claude bridge the
-selected Pi skill block is forwarded into the isolated Claude session. The
-resolver rejects a target unsupported by the profile provider.
+For Devin this is the managed profile's `.agents/skills`. The resolver rejects
+a target unsupported by the profile provider.
 
-The release ships planner, implementer, and reviewer variants for all three
-families even when the ready-to-use workflow references only a subset:
+The release ships planner, implementer, and reviewer variants for Codex and
+Devin:
 
 | Family | Pi provider | Locked integration | Subscription path |
 |---|---|---|---|
 | Codex | `openai-codex` | Pi built-in provider | ChatGPT OAuth through managed Pi auth |
 | Devin | `devin` | `@tian.zuo/pi-devin-acp@0.3.4` | Native Devin CLI/ACP login |
-| Claude | `claude-bridge` | `pi-claude-bridge@0.8.0` | Claude Code/Agent SDK subscription login |
 
 Each family must pass the same worker contract. A missing or unauthorized
 family is reported as unavailable and routing proceeds only when the workflow
@@ -441,8 +423,8 @@ permits a fallback; it never changes billing mode implicitly.
 ## 8. Managed Runtime and Installation
 
 Node.js `>=22.22.2` is required. Pi `0.86.1`,
-`@tian.zuo/pi-devin-acp@0.3.4`, and `pi-claude-bridge@0.8.0` are pinned for the
-initial release. The Node floor is intentional: the Devin extension's
+`@junghanacs/pi-shell-acp@0.11.1`, and `@tian.zuo/pi-devin-acp@0.3.4` are pinned
+for the initial release. The Node floor is intentional: the Devin extension's
 transitive `which@7` dependency declares
 `^22.22.2 || ^24.15.0 || >=26.0.0`.
 
@@ -485,17 +467,16 @@ the managed `HOME` and XDG roots so it cannot discover the user's global
 
 Provider-native resource projection is likewise allowlisted. For Devin, setup
 creates only the selected managed `.agents/skills` entries and no plugins or
-MCP config. For Claude bridge, setup writes a closed bridge configuration with
-`strictMcpConfig: true`, AskClaude delegation disabled, and only the profile's
-forwarded skill text. The managed Claude state directory is separate from the
-user's global `~/.claude` estate.
+MCP config.
 
 Authentication is machine-local and never committed or copied into evidence.
 `harness auth <profile>` runs the provider's normal interactive login inside
 the managed profile. Existing OS-keychain credentials may be reused when the
 provider supports it; otherwise the user logs into the same subscription once
-for the managed profile. Setup never imports or prints bearer tokens
-automatically. Doctor uses non-credential readiness checks.
+for the managed profile. `harness auth <profile> --reuse-local` is the explicit
+opt-in path for copying the selected provider's allowlisted local credential;
+opening the extension never imports credentials. Doctor uses non-credential
+readiness checks.
 
 ## 9. PiWorkerRuntime Contract
 
@@ -663,7 +644,7 @@ Testing is layered:
 1. Unit tests for schemas, compiler, graph, scheduler, reducer, profile
    resolution, result parsing, and recovery decisions.
 2. Contract tests that run the same `PiWorkerRuntime` behavior against fake
-   Codex, Devin, and Claude profiles.
+   provider profiles, with Codex and Devin required by the release gate.
 3. Integration tests for managed HOME/XDG isolation, explicit resource
    allowlists, Pi JSON streams, process observation/cancellation, Git
    worktrees, Spec Kit artifacts, install receipts, and package integrity.

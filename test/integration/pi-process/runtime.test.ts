@@ -153,4 +153,23 @@ describe("durable Pi process transport", () => {
     expect(await recoveredSupervisor.observe(record)).toEqual({ status: "running", record });
     await recoveredSupervisor.cancel(record, 50);
   });
+
+  it("continues an exactly matching process left stopped by a controller crash", async () => {
+    const record = processRecord();
+    const identity = new FakeProcessIdentity({
+      pid: record.pid,
+      startIdentity: record.startIdentity,
+      executable: record.executable,
+      attemptToken: record.attemptToken,
+      stopped: true,
+    });
+    const signals: string[] = [];
+    const supervisor = new NodePiProcessSupervisor({
+      identity,
+      signalProcess: (_pid, signal) => signals.push(signal),
+    });
+
+    await expect(supervisor.observe(record)).resolves.toEqual({ status: "running", record });
+    expect(signals).toEqual(["SIGCONT"]);
+  });
 });

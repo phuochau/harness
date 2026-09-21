@@ -21,6 +21,7 @@ import { recover } from "./recover.js";
 import { loadEnvironment, loadWorkflow } from "../config/load.js";
 import { compileWorkflow } from "../config/compile.js";
 import { createStandaloneProductionEffects } from "../runtime/production/system.js";
+import { createManagedPiRuntime } from "../runtime/managed/factory.js";
 import type { JsonValue } from "../contracts/common.js";
 import { createWorkflowLifecycle } from "../core/workflow-lifecycle.js";
 import { managedRuntimePaths } from "../runtime/managed/paths.js";
@@ -28,6 +29,7 @@ import { authCommand, runInteractive } from "./auth.js";
 import { findPackageRoot } from "./package-root.js";
 import { readDeclarativeProject } from "./trusted-project-reader.js";
 import { buildManagedEnvironment } from "../runtime/managed/environment.js";
+import { projectLocalSubscriptionCredentials } from "../runtime/managed/credentials.js";
 import type { ResolvedProfile } from "../config/profiles.js";
 import { canonicalJson } from "../shared/canonical-json.js";
 import { sha256 } from "../shared/sha256.js";
@@ -334,7 +336,15 @@ async function verifyPiResourcesInChild(
   return result.exitCode === 0;
 }
 
-export async function main(argv: readonly string[]): Promise<number> {
+export interface MainDependencies {
+  readonly createManagedRuntime?: typeof createManagedPiRuntime;
+  readonly createStandaloneEffects?: typeof createStandaloneProductionEffects;
+}
+
+export async function main(
+  argv: readonly string[],
+  dependencies: MainDependencies = {},
+): Promise<number> {
   const program = new Command()
     .name("harness")
     .description("Pi multi-agent orchestrator");
@@ -419,7 +429,12 @@ export async function main(argv: readonly string[]): Promise<number> {
   program
     .command("auth <profile> [path]")
     .description("Authenticate one isolated managed Pi profile using subscription login")
-    .action(async (profileId: string, path: string | undefined) => {
+    .option("--reuse-local", "explicitly copy the allowlisted local CLI subscription credential")
+    .action(async (
+      profileId: string,
+      path: string | undefined,
+      flags: { reuseLocal?: boolean },
+    ) => {
       const root = path ?? ".";
       const project = await readDeclarativeProject(root);
       const declared = project.profiles.profiles[profileId];
@@ -445,6 +460,18 @@ export async function main(argv: readonly string[]): Promise<number> {
         mkdir(paths.xdgConfigHome, { recursive: true, mode: 0o700 }),
         mkdir(paths.xdgDataHome, { recursive: true, mode: 0o700 }),
       ]);
+      if (flags.reuseLocal === true) {
+        const projected = await projectLocalSubscriptionCredentials({
+          profile,
+          paths,
+          ambient: process.env,
+        });
+        if (projected.length === 0) {
+          throw new Error(`no allowlisted local subscription credential found for ${profileId}`);
+        }
+        process.stdout.write(`projected ${projected.length} credential file(s) into ${profileId}\n`);
+        return;
+      }
       const environment = buildManagedEnvironment({
         profile,
         paths,
@@ -520,10 +547,17 @@ export async function main(argv: readonly string[]): Promise<number> {
     .description("Reconcile a run using installed production action adapters")
     .action(async (runId: string, path: string | undefined) => {
       const root = path ?? ".";
+      const project = await readDeclarativeProject(root);
+      const managed = await (dependencies.createManagedRuntime ?? createManagedPiRuntime)({
+        profiles: project.profiles,
+        runtimeVersion: project.lock.harnessVersion,
+        packageRoot: await findPackageRoot(import.meta.url, "pi-multi-agent-harness"),
+      });
       const environment = await loadEnvironment(join(root, ".harness/environment.yaml"));
       const workflow = compileWorkflow({
         workflow: await loadWorkflow(join(root, ".harness/workflow.yaml")),
         environment,
+        profiles: managed.profiles,
       });
       let production: Awaited<ReturnType<typeof createStandaloneProductionEffects>> | undefined;
       try {
@@ -534,11 +568,12 @@ export async function main(argv: readonly string[]): Promise<number> {
             lifecycle: createWorkflowLifecycle(),
             effects: {
               recover: async (intent) => {
-                production ??= await createStandaloneProductionEffects({
+                production ??= await (dependencies.createStandaloneEffects ?? createStandaloneProductionEffects)({
                   root,
                   runId,
                   workflow,
                   commands: environment.commands,
+                  piWorkerRuntime: managed.workerRuntime,
                 });
                 return await production.effects.recover(intent) as JsonValue;
               },

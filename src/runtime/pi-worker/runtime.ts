@@ -296,6 +296,18 @@ export class PiWorkerRuntime {
         return { status: "indeterminate", evidence: observation.evidence };
       }
       if (observation.status === "exited") {
+        if (observation.exit.exitCode !== null && observation.exit.exitCode !== 0) {
+          return {
+            status: "retry",
+            reason: `Pi process exited with code ${observation.exit.exitCode}`,
+          };
+        }
+        if (observation.exit.signal !== null) {
+          return {
+            status: "retry",
+            reason: `Pi process exited from signal ${observation.exit.signal}`,
+          };
+        }
         this.handles.set(prepared.attemptId, {
           attemptId: prepared.attemptId,
           process: record.process,

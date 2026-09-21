@@ -4,9 +4,13 @@
 
 **Goal:** Replace the existing Herdr execution layer with a profile-driven direct Pi runtime while preserving the green durable controller, Spec Kit, Git/worktree, verification, integration, and release behavior.
 
-**Architecture:** A common `PiAttemptRuntime` launches every planner, implementer, and reviewer as an isolated Pi child process. Declarative profiles resolve provider/model/resources into exact launch specifications, while the existing durable action protocol persists identities, observes results, reconciles crashes, and owns completion. Managed profile roots prevent global Pi, Devin, Claude, skill, plugin, and MCP leakage.
+**Architecture:** A common `PiAttemptRuntime` launches every planner, implementer, and reviewer as an isolated Pi child process. Declarative profiles resolve provider/model/resources into exact launch specifications, while the existing durable action protocol persists identities, observes results, reconciles crashes, and owns completion. Managed profile roots prevent global Pi, provider, skill, plugin, and MCP leakage.
 
-**Tech Stack:** Node.js `>=22.22.2`, TypeScript ESM, `@earendil-works/pi-coding-agent@0.86.1`, `@tian.zuo/pi-devin-acp@0.3.4`, `pi-claude-bridge@0.8.0`, TypeBox, Ajv, YAML, Vitest, fast-check, Spec Kit, Git CLI, GitHub CLI.
+**Tech Stack:** Node.js `>=22.22.2`, TypeScript ESM, `@earendil-works/pi-coding-agent@0.86.1`, `@junghanacs/pi-shell-acp@0.11.1`, `@tian.zuo/pi-devin-acp@0.3.4`, TypeBox, Ajv, YAML, Vitest, fast-check, Spec Kit, Git CLI, GitHub CLI.
+
+**Final release-scope amendment:** The install, ready workflow, and release
+gate require only Codex CLI and Devin CLI. Claude-specific steps below record
+earlier implementation exploration and are non-normative for this release.
 
 **Spec:** `docs/superpowers/specs/2026-09-21-pi-native-multi-agent-orchestrator-design.md`
 
@@ -14,11 +18,11 @@
 
 - Pi is the only harness-facing agent host and global orchestrator; provider inner loops receive one bounded assignment and no scheduling authority.
 - Every planning, implementation, and review attempt launches through the shared Pi process seam.
-- The global fallback family order is `codex`, `devin`, `claude`; the shipped workflow explicitly prefers Devin for implementation and Codex for planning/review.
-- Node.js `>=22.22.2`, Pi `0.86.1`, `@tian.zuo/pi-devin-acp@0.3.4`, and `pi-claude-bridge@0.8.0` are exact initial release versions.
+- The global fallback family order is `codex`, `devin`; the shipped workflow explicitly prefers Devin for implementation and Codex for planning/review.
+- Node.js `>=22.22.2`, Pi `0.86.1`, `@junghanacs/pi-shell-acp@0.11.1`, and `@tian.zuo/pi-devin-acp@0.3.4` are exact initial release versions.
 - Worker discovery starts disabled and loads only resolved `--extension`, `--skill`, `--prompt-template`, and `--tools` values.
 - Worker `HOME`, `PI_CODING_AGENT_DIR`, `PI_CODING_AGENT_SESSION_DIR`, `XDG_CONFIG_HOME`, and `XDG_DATA_HOME` always point into managed or attempt-owned paths.
-- Setup never deletes or edits user-global Pi packages, Devin plugins, Claude configuration, skills, MCP servers, or shell configuration.
+- Setup never deletes or edits user-global Pi packages, Devin plugins, skills, MCP servers, or shell configuration.
 - Provider authentication is interactive and machine-local; credentials never enter project files, events, evidence, logs, or command diagnostics.
 - Superpowers is coding-worker discipline only. Delegation, global planning, parallel dispatch, worktree management, and branch-finishing skills are excluded from worker profiles.
 - Workers may read but not modify sealed Spec Kit artifacts or harness configuration. Only controller-owned gates mark tasks `DONE`.
@@ -28,12 +32,12 @@
 
 ## Review Focus
 
-- A global Superpowers/Devin/Claude skill or MCP server exists: the worker sees only declared resources. Covered by Tasks 2, 3, and 8.
+- A global Superpowers or provider skill/MCP server exists: the worker sees only declared resources. Covered by Tasks 2, 3, and 8.
 - The controller dies after Pi spawn but before launch observation: recovery identifies the exact process/session and never launches a duplicate. Covered by Tasks 3, 5, and 8.
 - An interrupted Devin ACP turn cannot resume the same native session: recovery preserves Git/transcript evidence and creates a new attempt instead of claiming continuation. Covered by Tasks 4, 5, and 8.
 - A PID is reused after restart: cancellation and reattachment reject it unless start identity, executable, and attempt token all match. Covered by Tasks 3 and 5.
 - A profile changes while a run is active: execution uses the frozen profile hash from `resolved-profiles.json`; changed source creates a new run revision. Covered by Tasks 1 and 5.
-- Claude bridge or Devin ACP silently changes billing/auth mode: doctor marks the profile unavailable and routing uses only declared fallbacks. Covered by Tasks 2 and 7.
+- Codex or Devin silently changes billing/auth mode: doctor marks the profile unavailable and routing uses only declared fallbacks. Covered by Tasks 2 and 7.
 - A worker emits a terminal Pi event without a valid assignment-bound result: the attempt remains unaccepted and retries or blocks according to policy. Covered by Tasks 4 and 5.
 - A provider process writes secrets to stderr: persisted diagnostics redact bearer tokens, credentials, userinfo, and configured secret names. Covered by Tasks 3 and 7.
 - Independent tasks run concurrently: each launch receives a distinct worktree, profile/session directory, and process identity. Covered by Tasks 5 and 8.
@@ -965,7 +969,7 @@ The fake supervisor emits real-shaped Pi JSONL events and process records. Do no
 
 - [ ] **Step 2: Add the managed isolation E2E**
 
-Create fixture-global Pi extension, Superpowers skill, Devin plugin, Claude MCP config, prompt template, and `AGENTS.md` markers containing unique forbidden strings. Run all three profiles and assert none of those markers appear in startup context, prompts, tool inventories, provider config, or transcripts unless explicitly declared.
+Create fixture-global Pi extension, Superpowers skill, Devin plugin, prompt template, and `AGENTS.md` markers containing unique forbidden strings. Run the release profiles and assert none of those markers appear in startup context, prompts, tool inventories, provider config, or transcripts unless explicitly declared.
 
 - [ ] **Step 3: Complete the crash/race matrix**
 
@@ -989,7 +993,7 @@ Expected: all active tests pass, package inspection passes, and only explicitly 
 HARNESS_E2E_REAL=1 npm test -- test/e2e/pi-native-real.test.ts
 ```
 
-The test creates a disposable repository, initializes the harness, uses managed profile auth readiness, asks planner-codex/Spec Kit for a two-task dependency graph, runs one Devin implementation using Superpowers RED-GREEN TDD, runs an independent Codex review and a Claude compatibility review, verifies and integrates the exact commits, kills/restarts the controller at one running-attempt boundary, resumes from durable state, runs final verification, and writes redacted evidence. If a required subscription is unavailable, the release gate fails with an exact auth instruction; it is not recorded as a passing skip.
+The test installs the packed harness, creates a disposable repository, uses managed profile auth readiness, asks planner-codex/Spec Kit for specification and plan artifacts, runs one Devin implementation in an isolated worktree using Superpowers discipline, restarts the runtime and recovers the attempt from durable evidence, runs an independent Codex review, integrates the exact commit, and runs final verification. If a required subscription is unavailable, the release gate fails with an exact auth instruction; it is not recorded as a passing skip.
 
 - [ ] **Step 6: Document installation, DSL, security, and recovery exactly**
 

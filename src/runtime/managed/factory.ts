@@ -62,6 +62,7 @@ export async function createManagedPiRuntime(input: {
   readonly packageRoot: string;
   readonly dataHome?: string;
   readonly ambient?: Readonly<Record<string, string | undefined>>;
+  readonly projectCredentials?: boolean;
 }): Promise<ManagedPiRuntimeBundle> {
   const ambient = input.ambient ?? process.env;
   const userHome = ambient.HOME ?? homedir();
@@ -117,11 +118,9 @@ export async function createManagedPiRuntime(input: {
       executablePath,
       retainExtensionSources: true,
     });
-    await projectLocalSubscriptionCredentials({
-      profile,
-      paths,
-      ambient,
-    });
+    if (input.projectCredentials === true) {
+      await projectLocalSubscriptionCredentials({ profile, paths, ambient });
+    }
   }
   const supervisor = new NodePiProcessSupervisor();
   const piCli = await existing([

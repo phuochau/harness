@@ -10,6 +10,9 @@ import { Journal } from "../../src/state/journal.js";
 import { RunLease } from "../../src/state/lease.js";
 import { initializeProductionRun } from "../../src/runtime/production/run.js";
 import { createTempGitRepository } from "../support/git-fixtures.js";
+import { fixtureResolvedProfiles } from "../support/factories.js";
+import type { ManagedPiRuntimeBundle } from "../../src/runtime/managed/factory.js";
+import type { JsonValue } from "../../src/contracts/common.js";
 
 const cleanup: Array<() => Promise<void>> = [];
 
@@ -40,6 +43,7 @@ it("runs standalone recovery with scheduling disabled for an existing durable ru
   const workflow = compileWorkflow({
     workflow: await loadWorkflow(join(repo.path, ".harness/workflow.yaml")),
     environment,
+    profiles: fixtureResolvedProfiles(),
   });
   const initialized = await initializeProductionRun({
     root: repo.path,
@@ -65,9 +69,43 @@ it("runs standalone recovery with scheduling disabled for an existing durable ru
     eventType: "run.created",
     payload: { workflowRevision: workflow.revision },
   }, lease);
+  await new Journal(initialized.paths).append({
+    schemaVersion: 1,
+    timestamp: "2026-09-21T00:00:01.000Z",
+    runId: "F023",
+    entityId: "verify:T001",
+    idempotencyKey: "verify:T001:1",
+    eventType: "effect.intent",
+    payload: {
+      action: "command.run",
+      idempotencyKey: "verify:T001:1",
+      recovery: "reconcilable",
+      laneKey: "verify:T001",
+      input: { jobId: "verify:T001", argv: ["node", "--version"] },
+    },
+  }, lease);
   await lease.release();
   vi.spyOn(process.stdout, "write").mockImplementation(() => true);
 
-  await expect(main(["recover", "F023", repo.path])).resolves.toBe(0);
+  const workerRuntime = {} as ManagedPiRuntimeBundle["workerRuntime"];
+  const managed = {
+    profiles: fixtureResolvedProfiles(),
+    workerRuntime,
+  } as ManagedPiRuntimeBundle;
+  let receivedWorker: unknown;
+  await expect(main(["recover", "F023", repo.path], {
+    createManagedRuntime: async () => managed,
+    createStandaloneEffects: async (input) => {
+      receivedWorker = input.piWorkerRuntime;
+      return {
+        effects: {
+          runFresh: async () => ({} as JsonValue),
+          recover: async () => ({ recovered: true } as JsonValue),
+        },
+        dispose: async () => undefined,
+      };
+    },
+  })).resolves.toBe(0);
+  expect(receivedWorker).toBe(workerRuntime);
   await expect(access(initialized.paths.state)).resolves.toBeUndefined();
 });

@@ -104,6 +104,17 @@ for (const family of ["codex", "devin", "claude"] as const) {
       };
 
       await expect(runtime.collect(prepared)).resolves.toMatchObject({ status: "valid" });
+      supervisor.exit = {
+        ...supervisor.exit,
+        exitCode: 1,
+      };
+      await expect(runtime.recover(prepared, {
+        attemptId: prepared.attemptId,
+        process: handle.process,
+      })).resolves.toMatchObject({
+        status: "retry",
+        reason: expect.stringMatching(/exited with code 1/),
+      });
       expect(handle.process).toBe(supervisor.record);
       expect(supervisor.lastSpec?.executable).toBe("/managed/bin/pi");
       expect(supervisor.lastSpec?.argv).toContain("json");

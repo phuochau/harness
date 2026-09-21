@@ -54,8 +54,8 @@ describe("harness init", () => {
       "final_pr",
     ]);
     expect(workflow.stages.find((stage: { id: string }) => stage.id === "implement").runner.prefer).toEqual([
-      "implementer-codex",
       "implementer-devin",
+      "implementer-codex",
     ]);
     expect(workflow.stages.find((stage: { id: string }) => stage.id === "review").runner.prefer).toEqual([
       "reviewer-codex",

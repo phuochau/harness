@@ -229,7 +229,10 @@ export class NodePiProcessSupervisor implements PiProcessSupervisor {
     const observed = await this.identity.inspect(record);
     if (observed !== undefined) {
       const evidence = identityMismatchEvidence(observed, record);
-      if (evidence.length === 0) return { status: "running", record };
+      if (evidence.length === 0) {
+        if (observed.stopped === true) this.signalProcess(record.pid, "SIGCONT");
+        return { status: "running", record };
+      }
       const terminal = await terminalFromFile(record.eventsPath);
       return isAcceptedTerminal(terminal)
         ? { status: "exited", exit: { exitCode: null, signal: null, terminal } }

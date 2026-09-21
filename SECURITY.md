@@ -20,9 +20,10 @@ Global packages, skills, prompt templates, context files, plugins, and MCP
 servers are disabled by default.
 
 Codex runs through the locally authenticated Codex CLI bridge; Devin runs
-through the locally authenticated Devin CLI ACP bridge. Only the credential
-files needed by the selected provider are copied into its managed profile, and
-an existing managed credential is never overwritten. The harness does not
+through the locally authenticated Devin CLI ACP bridge. Credentials enter a
+managed profile only through interactive `harness auth` or the explicit
+`--reuse-local` option, which copies only the selected provider's allowlisted
+file and never overwrites an existing managed login. The harness does not
 silently fall back to API-key billing.
 
 Devin headless permissions are auto-approved only inside the task's isolated

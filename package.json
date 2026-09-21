@@ -39,7 +39,7 @@
     "verify": "npm run typecheck && npm run build && vitest run && npm pack --dry-run --json",
     "compat:speckit": "HARNESS_COMPAT_SPECKIT=1 vitest run test/integration/speckit/preset.test.ts",
     "compat:pi": "HARNESS_COMPAT_PI=1 vitest run test/integration/pi-loader.test.ts",
-    "e2e:real": "HARNESS_E2E_REAL=1 vitest run test/e2e/pi-native-real.test.ts"
+    "e2e:real": "npm run build && HARNESS_E2E_REAL=1 vitest run test/e2e/pi-native-real.test.ts"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "0.86.1",

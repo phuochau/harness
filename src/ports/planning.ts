@@ -32,6 +32,7 @@ export interface PlanningRunReceipt {
   readonly profileHash?: string;
   readonly sessionId?: string;
   readonly sessionPath?: string;
+  readonly attemptToken?: string;
   readonly process?: PiProcessRecord;
   readonly request?: PlanningRequest;
 }
@@ -67,6 +68,11 @@ export type PlanningObservation =
     };
 
 export interface PlanningAgent {
+  prepare?(
+    request: PlanningRequest,
+    context?: PlanningEnqueueContext,
+  ): Promise<PlanningRunReceipt>;
+  launchPrepared?(receipt: PlanningRunReceipt): Promise<PlanningRunReceipt>;
   enqueue(
     request: PlanningRequest,
     context?: PlanningEnqueueContext,

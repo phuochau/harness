@@ -7,9 +7,9 @@ selected Superpowers skills, isolates tasks in Git worktrees, and accepts
 completion only after structured evidence and verification pass.
 
 Worker selection is data in `.harness/workflow.yaml`, not a hard-coded call
-chain. The ready-to-use default plans with Codex, prefers Codex then Devin for
+chain. The ready-to-use default plans with Codex, prefers Devin then Codex for
 implementation, and requires review by a different provider family. The
-included `spec-kit-devin.yaml` preset flips implementation preference to Devin.
+included `spec-kit-codex.yaml` preset makes Codex the primary implementer.
 
 ## Quick start
 
@@ -27,9 +27,10 @@ harness start .
 ```
 
 If doctor reports missing authentication, run `harness auth planner-codex .` or
-`harness auth implementer-devin .`. Credentials are projected into isolated
-managed profile homes; setup does not remove or edit global Pi packages,
-skills, plugins, or MCP configuration.
+`harness auth implementer-devin .`. To explicitly reuse an existing local CLI
+login, add `--reuse-local`; simply opening the extension never copies a
+credential. Setup does not remove or edit global Pi packages, skills, plugins,
+or MCP configuration.
 
 Inside Pi, `/harness-run <feature-or-run-id>` previews effects and requests run
 approval. Operational commands include `harness status`, `graph`, `explain`,

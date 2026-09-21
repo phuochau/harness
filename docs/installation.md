@@ -45,12 +45,19 @@ $XDG_DATA_HOME/pi-harness/runtimes/<harness-version>/
 
 ## Authenticate local CLI subscriptions
 
-Normal Codex and Devin CLI logins are reused through allowlisted credential
-projection. If an isolated profile still needs authentication, run:
+Managed profiles do not import credentials merely because a project is opened.
+Authenticate interactively inside each isolated profile with:
 
 ```bash
 harness auth planner-codex .
 harness auth implementer-devin .
+```
+
+Or explicitly copy only the provider's allowlisted local CLI credential:
+
+```bash
+harness auth planner-codex . --reuse-local
+harness auth implementer-devin . --reuse-local
 ```
 
 The harness never prints or stores credential values in receipts. Codex uses

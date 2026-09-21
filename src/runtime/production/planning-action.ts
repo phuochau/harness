@@ -156,11 +156,28 @@ export class DurablePlanningAction<K extends PlanningActionKind>
         artifactPaths: this.options.artifactPaths,
         baseline: await baseline(this.options.root, this.options.artifactPaths),
       };
-      durableReceipt = receipt(await this.options.records.put(
-        "planning-receipt",
-        intent.idempotencyKey,
-        await this.options.planning.enqueue(request),
-      ));
+      if (
+        this.options.planning.prepare !== undefined &&
+        this.options.planning.launchPrepared !== undefined
+      ) {
+        durableReceipt = receipt(await this.options.records.put(
+          "planning-receipt",
+          intent.idempotencyKey,
+          await this.options.planning.prepare(request),
+        ));
+      } else {
+        durableReceipt = receipt(await this.options.records.put(
+          "planning-receipt",
+          intent.idempotencyKey,
+          await this.options.planning.enqueue(request),
+        ));
+      }
+    }
+    if (
+      durableReceipt.process === undefined &&
+      this.options.planning.launchPrepared !== undefined
+    ) {
+      durableReceipt = receipt(await this.options.planning.launchPrepared(durableReceipt));
     }
     const deadline = Date.now() + (this.options.timeoutMs ?? 86_400_000);
     while (true) {

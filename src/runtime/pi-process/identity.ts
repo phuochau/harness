@@ -11,6 +11,7 @@ export interface LiveProcessIdentity {
   readonly startIdentity: string;
   readonly executable: string;
   readonly attemptToken: string;
+  readonly stopped?: boolean;
 }
 
 export interface ProcessIdentityPort {
@@ -42,7 +43,7 @@ async function normalizedExecutable(path: string): Promise<string> {
   return realpath(path).catch(() => path);
 }
 
-async function linuxIdentity(pid: number): Promise<{ start: string; executable: string }> {
+async function linuxIdentity(pid: number): Promise<{ start: string; executable: string; stopped: boolean }> {
   const [stat, executable] = await Promise.all([
     readFile(`/proc/${pid}/stat`, "utf8"),
     realpath(`/proc/${pid}/exe`),
@@ -53,21 +54,26 @@ async function linuxIdentity(pid: number): Promise<{ start: string; executable: 
   if (closingParenthesis < 0 || startTime === undefined) {
     throw new Error(`cannot derive process start identity for pid ${pid}`);
   }
-  return { start: startTime, executable };
+  return { start: startTime, executable, stopped: fields[0] === "T" || fields[0] === "t" };
 }
 
-async function darwinIdentity(pid: number): Promise<{ start: string; executable: string }> {
-  const [{ stdout: start }, { stdout: executable }] = await Promise.all([
+async function darwinIdentity(pid: number): Promise<{ start: string; executable: string; stopped: boolean }> {
+  const [{ stdout: start }, { stdout: executable }, { stdout: state }] = await Promise.all([
     execFileAsync("/bin/ps", ["-p", String(pid), "-o", "lstart="]),
     execFileAsync("/bin/ps", ["-p", String(pid), "-o", "comm="]),
+    execFileAsync("/bin/ps", ["-p", String(pid), "-o", "state="]),
   ]);
   const marker = start.trim();
   const command = executable.trim();
   if (marker === "" || command === "") throw new Error(`process ${pid} is missing`);
-  return { start: marker, executable: await normalizedExecutable(command) };
+  return {
+    start: marker,
+    executable: await normalizedExecutable(command),
+    stopped: state.trim().startsWith("T"),
+  };
 }
 
-async function liveIdentity(pid: number): Promise<{ start: string; executable: string }> {
+async function liveIdentity(pid: number): Promise<{ start: string; executable: string; stopped: boolean }> {
   if (process.platform === "linux") return linuxIdentity(pid);
   if (process.platform === "darwin") return darwinIdentity(pid);
   throw new Error(`unsupported process identity platform: ${process.platform}`);
@@ -99,6 +105,7 @@ export class SystemProcessIdentity implements ProcessIdentityPort {
       pid,
       executable: observed.executable,
       attemptToken,
+      stopped: observed.stopped,
       startIdentity: computeStartIdentity(pid, observed.start, observed.executable, attemptToken),
     };
   }
@@ -110,6 +117,7 @@ export class SystemProcessIdentity implements ProcessIdentityPort {
         pid: record.pid,
         executable: observed.executable,
         attemptToken: record.attemptToken,
+        stopped: observed.stopped,
         startIdentity: computeStartIdentity(
           record.pid,
           observed.start,

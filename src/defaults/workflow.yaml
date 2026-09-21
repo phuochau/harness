@@ -27,7 +27,7 @@ stages:
       graph: specs/feature/task-graph.json
   - id: implement
     uses: worker.execute
-    runner: { prefer: [implementer-codex, implementer-devin] }
+    runner: { prefer: [implementer-devin, implementer-codex] }
     needs: [{ stage: tasks, scope: all }]
     foreach: { source: stages.tasks.outputs.graph, key: task.id }
     gate: task.dependencies_done

@@ -7,6 +7,7 @@ import { createAssignment } from "../../src/core/assignment.js";
 import { ChildPiPlanningPort } from "../../src/pi/child-planning-port.js";
 import { createManagedPiRuntime } from "../../src/runtime/managed/factory.js";
 import { createTempGitRepository } from "../support/git-fixtures.js";
+import { installPackedHarness, packHarness } from "../support/package-consumer.js";
 
 const real = process.env.HARNESS_E2E_REAL === "1";
 
@@ -24,13 +25,17 @@ it.runIf(real)("plans with Codex CLI, implements with Devin CLI, and reviews ind
       "",
     ].join("\n"),
   });
+  const implementationPath = `${repo.path}-implementation`;
   const reviewPath = `${repo.path}-review`;
+  let packed: Awaited<ReturnType<typeof packHarness>> | undefined;
+  let consumer: Awaited<ReturnType<typeof installPackedHarness>> | undefined;
   try {
     const root = process.cwd();
     const runtime = await createManagedPiRuntime({
       profiles: parse(await readFile(join(root, "src/defaults/profiles.yaml"), "utf8")),
       runtimeVersion: "0.1.0",
       packageRoot: root,
+      projectCredentials: true,
     });
     const planner = runtime.profiles.byId["planner-codex"]!;
     const planning = new ChildPiPlanningPort({
@@ -60,6 +65,17 @@ it.runIf(real)("plans with Codex CLI, implements with Devin CLI, and reviews ind
     });
     expect(planningReceipt.profileId).toBe("planner-codex");
     expect(await readFile(join(repo.path, artifactPaths.spec), "utf8")).toContain("FR-001");
+    const planReceipt = await planning.run({
+      stage: "plan",
+      command: "/speckit.plan",
+      correlationId: "real-codex-plan-1",
+      artifactPaths,
+      baseline: { hashes: planningReceipt.afterHashes },
+    }, {
+      instruction: "Create specs/feature/plan.md for FR-001 and SC-001. Use src/add.js and node --test. Do not change any other file.",
+    });
+    expect(planReceipt.profileId).toBe("planner-codex");
+    expect(await readFile(join(repo.path, artifactPaths.plan), "utf8")).toContain("src/add.js");
     await mkdir(join(repo.path, "specs/feature"), { recursive: true });
     await writeFile(join(repo.path, artifactPaths.tasks), [
       "# Tasks", "",
@@ -69,6 +85,7 @@ it.runIf(real)("plans with Codex CLI, implements with Devin CLI, and reviews ind
     await execa("git", ["add", "specs"], { cwd: repo.path });
     await execa("git", ["commit", "-m", "docs: add approved Spec Kit artifacts"], { cwd: repo.path });
     const base = (await execa("git", ["rev-parse", "HEAD"], { cwd: repo.path })).stdout;
+    await execa("git", ["worktree", "add", "-b", "harness/REAL001-T001", implementationPath, base], { cwd: repo.path });
     const assignment = createAssignment({
       runId: "REAL001",
       stageId: "implement",
@@ -85,18 +102,38 @@ it.runIf(real)("plans with Codex CLI, implements with Devin CLI, and reviews ind
       requiredDisciplines: ["test-driven-development", "verification-before-completion"],
       verificationCommands: [["node", "--test"]],
       planningArtifacts: [artifactPaths.spec, artifactPaths.tasks],
-      worktree: { role: "implementation", path: repo.path, branch: "main", commit: base, writable: true },
+      worktree: {
+        role: "implementation",
+        path: implementationPath,
+        branch: "harness/REAL001-T001",
+        commit: base,
+        writable: true,
+      },
     });
     const prepared = await runtime.workerRuntime.prepare(assignment);
-    await runtime.workerRuntime.launch(prepared);
+    const handle = await runtime.workerRuntime.launch(prepared);
     const result = await runtime.workerRuntime.collect(prepared);
     expect(result).toMatchObject({ status: "valid", result: { role: "implementation", outcome: "completed" } });
     if (
       result.status !== "valid" || result.result.outcome !== "completed" ||
       !("role" in result.result) || result.result.role !== "implementation"
     ) throw new Error("Devin did not produce a completed implementation result");
-    expect((await execa("node", ["--test"], { cwd: repo.path })).exitCode).toBe(0);
-    expect(await readFile(join(repo.path, "src/add.js"), "utf8")).toContain("add");
+    expect((await execa("node", ["--test"], { cwd: implementationPath })).exitCode).toBe(0);
+    expect(await readFile(join(implementationPath, "src/add.js"), "utf8")).toContain("add");
+
+    const restarted = await createManagedPiRuntime({
+      profiles: parse(await readFile(join(root, "src/defaults/profiles.yaml"), "utf8")),
+      runtimeVersion: "0.1.0",
+      packageRoot: root,
+      projectCredentials: true,
+    });
+    await expect(restarted.workerRuntime.recover(prepared, {
+      attemptId: prepared.attemptId,
+      process: handle.process,
+    })).resolves.toMatchObject({
+      status: "observed",
+      result: { role: "implementation", outcome: "completed" },
+    });
 
     const candidate = result.result.commit;
     await execa("git", ["worktree", "add", "--detach", reviewPath, candidate], { cwd: repo.path });
@@ -141,8 +178,19 @@ it.runIf(real)("plans with Codex CLI, implements with Devin CLI, and reviews ind
       result: { role: "review", outcome: "approved", reviewedCommit: candidate },
     });
     expect((await execa("git", ["status", "--short", "--untracked-files=no"], { cwd: reviewPath })).stdout).toBe("");
+    await execa("git", ["merge", "--ff-only", candidate], { cwd: repo.path });
+    expect((await execa("git", ["rev-parse", "HEAD"], { cwd: repo.path })).stdout).toBe(candidate);
+    expect((await execa("node", ["--test"], { cwd: repo.path })).exitCode).toBe(0);
+
+    packed = await packHarness();
+    consumer = await installPackedHarness(packed, { pi: "0.86.1", typebox: "1.3.34" });
+    await consumer.loadPublicEntrypoint();
+    await expect(consumer.loadWithPiResourceLoader()).resolves.toEqual({ errors: [] });
   } finally {
+    await consumer?.cleanup();
+    await packed?.cleanup();
     await execa("git", ["worktree", "remove", "--force", reviewPath], { cwd: repo.path, reject: false });
+    await execa("git", ["worktree", "remove", "--force", implementationPath], { cwd: repo.path, reject: false });
     if (process.env.KEEP_REAL_E2E === "1") {
       process.stderr.write(`preserved real E2E repository: ${repo.path}\n`);
     } else {
