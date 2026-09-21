@@ -1,0 +1,241 @@
+import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { afterEach, expect, it } from "vitest";
+import { start, type StartDependencies } from "../../src/cli/start.js";
+import { status } from "../../src/cli/status.js";
+import { explain } from "../../src/cli/explain.js";
+import { recoverRun } from "../../src/controller/reconcile-run.js";
+import type { JsonValue } from "../../src/contracts/common.js";
+import { journalFixture } from "../support/state-fixtures.js";
+
+const cleanups: Array<() => Promise<void>> = [];
+afterEach(async () => {
+  await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()));
+});
+
+function startFixture(existing: boolean) {
+  const calls: string[] = [];
+  const dependencies: StartDependencies = {
+    git: { inspect: async () => ({ root: "/repo", identity: "repo-identity" }) },
+    herdr: {
+      ensureWorkspace: async () => ({ id: "workspace-1", rootPaneId: "pane-1" }),
+      findAgent: async (input) => existing ? {
+        name: input.name,
+        kind: "pi" as const,
+        workspaceId: "workspace-1",
+        paneId: "pane-1",
+        status: "idle",
+      } : undefined,
+      startAgent: async (input) => {
+        calls.push("agent.start");
+        return {
+          name: input.name,
+          kind: "pi" as const,
+          workspaceId: "workspace-1",
+          paneId: "pane-1",
+          status: "idle",
+        };
+      },
+      waitFor: async () => { calls.push("agent.wait"); },
+    },
+    extensionProbe: { assertReady: async () => { calls.push("extension.ready"); } },
+  };
+  return { calls, dependencies };
+}
+
+it("reattaches the dedicated Pi agent instead of starting a duplicate", async () => {
+  const fixture = startFixture(true);
+  const result = await start({ root: "/repo" }, fixture.dependencies);
+  expect(fixture.calls).not.toContain("agent.start");
+  expect(result.mode).toBe("reattached");
+});
+
+it("starts one stable Pi controller when none exists", async () => {
+  const fixture = startFixture(false);
+  const first = await start({ root: "/repo" }, fixture.dependencies);
+  const secondFixture = startFixture(false);
+  const second = await start({ root: "/repo" }, secondFixture.dependencies);
+  expect(first.agent.name).toBe(second.agent.name);
+  expect(fixture.calls.filter((call) => call === "agent.start")).toHaveLength(1);
+});
+
+it("reports Herdr unavailability without starting a second controller", async () => {
+  const fixture = startFixture(false);
+  const dependencies: StartDependencies = {
+    ...fixture.dependencies,
+    herdr: {
+      ...fixture.dependencies.herdr,
+      ensureWorkspace: async () => { throw new Error("Herdr unavailable"); },
+    },
+  };
+  await expect(start({ root: "/repo" }, dependencies)).rejects.toThrow(
+    /Herdr unavailable/,
+  );
+  expect(fixture.calls).not.toContain("agent.start");
+});
+
+it("recovers effects but does not schedule without Pi", async () => {
+  const fixture = await journalFixture();
+  cleanups.push(fixture.cleanup);
+  await fixture.journal.append(
+    {
+      schemaVersion: 1,
+      timestamp: "2026-09-21T00:00:00.000Z",
+      runId: "F023",
+      entityId: "run:F023",
+      idempotencyKey: "run:create",
+      eventType: "run.created",
+      payload: { workflowRevision: `sha256:${"a".repeat(64)}` },
+    },
+    fixture.lease,
+  );
+  await fixture.journal.append(
+    {
+      schemaVersion: 1,
+      timestamp: "2026-09-21T00:00:01.000Z",
+      runId: "F023",
+      entityId: "implement:T001",
+      idempotencyKey: "effect:start:T001",
+      eventType: "effect.intent",
+      payload: {
+        action: "worker.start",
+        idempotencyKey: "effect:start:T001",
+        recovery: "reconcilable",
+        laneKey: "worker:T001",
+        input: { entityId: "implement:T001" },
+      },
+    },
+    fixture.lease,
+  );
+  await fixture.lease.release();
+  const summary = await recoverRun(
+    { root: fixture.paths.repository, runId: "F023" },
+    {
+      ownerId: "recover:test",
+      effects: { recover: async () => ({ agent: "existing" } as JsonValue) },
+      now: () => new Date("2026-09-21T00:00:02.000Z"),
+    },
+  );
+  const events = await fixture.journal.read();
+  expect(summary).toMatchObject({ schedulingEnabled: false, recoveredEffects: 1 });
+  expect(events).toContainEqual(expect.objectContaining({ eventType: "effect.observed" }));
+  expect(events).not.toContainEqual(expect.objectContaining({ eventType: "attempt.started" }));
+});
+
+it("records an indeterminate non-retryable effect as a blocker", async () => {
+  const fixture = await journalFixture();
+  cleanups.push(fixture.cleanup);
+  await fixture.journal.append(
+    {
+      schemaVersion: 1,
+      timestamp: "2026-09-21T00:00:00.000Z",
+      runId: "F023",
+      entityId: "run:F023",
+      idempotencyKey: "run:create",
+      eventType: "run.created",
+      payload: { workflowRevision: `sha256:${"a".repeat(64)}` },
+    },
+    fixture.lease,
+  );
+  await fixture.journal.append(
+    {
+      schemaVersion: 1,
+      timestamp: "2026-09-21T00:00:01.000Z",
+      runId: "F023",
+      entityId: "integrate:T001",
+      idempotencyKey: "effect:push:T001",
+      eventType: "effect.intent",
+      payload: {
+        action: "git.push",
+        idempotencyKey: "effect:push:T001",
+        recovery: "non_retryable",
+        laneKey: "run-mutation:F023",
+        input: { entityId: "integrate:T001" },
+      },
+    },
+    fixture.lease,
+  );
+  await fixture.lease.release();
+  await recoverRun(
+    { root: fixture.paths.repository, runId: "F023" },
+    {
+      ownerId: "recover:test",
+      effects: { recover: async () => { throw new Error("ambiguous push"); } },
+      now: () => new Date("2026-09-21T00:00:02.000Z"),
+    },
+  );
+  expect((await fixture.journal.read()).map((event) => event.eventType)).toEqual(
+    expect.arrayContaining(["effect.failed", "job.blocked"]),
+  );
+});
+
+it("repairs a torn tail while keeping status and explain read-only", async () => {
+  const fixture = await journalFixture();
+  cleanups.push(fixture.cleanup);
+  await fixture.journal.append(
+    {
+      schemaVersion: 1,
+      timestamp: "2026-09-21T00:00:00.000Z",
+      runId: "F023",
+      entityId: "run:F023",
+      idempotencyKey: "run:create",
+      eventType: "run.created",
+      payload: { workflowRevision: `sha256:${"a".repeat(64)}` },
+    },
+    fixture.lease,
+  );
+  await fixture.lease.release();
+  const before = await readFile(fixture.paths.events, "utf8");
+  expect(await status({ root: fixture.paths.repository, runId: "F023" }))
+    .toMatchObject({ runId: "F023", lastSequence: 1 });
+  expect(await explain({ root: fixture.paths.repository, runId: "F023", target: "run:F023" }))
+    .toHaveLength(1);
+  expect(await readFile(fixture.paths.events, "utf8")).toBe(before);
+
+  await appendFile(fixture.paths.events, '{"partial":', "utf8");
+  const recovered = await recoverRun(
+    { root: fixture.paths.repository, runId: "F023" },
+    {
+      ownerId: "recover:test",
+      effects: { recover: async () => ({}) },
+      now: () => new Date("2026-09-21T00:00:02.000Z"),
+    },
+  );
+  expect(recovered.repairedTail).toBe(true);
+});
+
+it("takes over only a provably dead, aged recovery lease", async () => {
+  const fixture = await journalFixture();
+  cleanups.push(fixture.cleanup);
+  await fixture.journal.append(
+    {
+      schemaVersion: 1,
+      timestamp: "2026-09-21T00:00:00.000Z",
+      runId: "F023",
+      entityId: "run:F023",
+      idempotencyKey: "run:create",
+      eventType: "run.created",
+      payload: { workflowRevision: `sha256:${"a".repeat(64)}` },
+    },
+    fixture.lease,
+  );
+  await fixture.lease.release();
+  await mkdir(fixture.paths.lockDir);
+  await writeFile(
+    fixture.paths.lease,
+    JSON.stringify({
+      ownerId: "recover:999999:dead",
+      fencingToken: 1,
+      acquiredAt: "2026-09-20T00:00:00.000Z",
+    }),
+  );
+  await expect(
+    recoverRun(
+      { root: fixture.paths.repository, runId: "F023" },
+      {
+        ownerId: "recover:test",
+        effects: { recover: async () => ({}) },
+        now: () => new Date("2026-09-21T00:00:00.000Z"),
+      },
+    ),
+  ).resolves.toMatchObject({ schedulingEnabled: false });
+});

@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { bootstrap } from "./bootstrap.js";
 import { parseArgvJson } from "./command-detection.js";
@@ -10,6 +11,12 @@ import { ReceiptStore } from "../install/receipts.js";
 import type { CapabilityReport, ExecutableCapability } from "../install/types.js";
 import { NodeProcessRunner } from "../git/process.js";
 import type { DeclarativeProject } from "./trusted-project-reader.js";
+import { connectInstalledHerdr } from "../runtime/herdr/client.js";
+import { explain } from "./explain.js";
+import { graph } from "./graph.js";
+import { recover } from "./recover.js";
+import { installedStartDependencies, start } from "./start.js";
+import { status } from "./status.js";
 
 function semver(stdout: string): string | undefined {
   return /(?:^|\s|v)(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/.exec(stdout)?.[1];
@@ -244,6 +251,61 @@ export async function main(argv: readonly string[]): Promise<number> {
           process.stdout.write(`${capability.id}: ${capability.status}\n`);
         }
       }
+    });
+  program
+    .command("start [path]")
+    .description("Start or reattach the dedicated Pi controller in Herdr")
+    .action(async (path: string | undefined) => {
+      const client = await connectInstalledHerdr();
+      try {
+        const processRunner = new NodeProcessRunner();
+        const result = await start(
+          { root: path ?? "." },
+          installedStartDependencies(processRunner, client),
+        );
+        process.stdout.write(`${result.mode}: ${result.agent.name}\n`);
+      } finally {
+        client.close();
+      }
+    });
+  program
+    .command("status <run-id> [path]")
+    .description("Read the durable status of a run")
+    .action(async (runId: string, path: string | undefined) => {
+      process.stdout.write(`${JSON.stringify(await status({ root: path ?? ".", runId }), null, 2)}\n`);
+    });
+  program
+    .command("graph <run-id> [path]")
+    .description("Read the materialized run graph state")
+    .action(async (runId: string, path: string | undefined) => {
+      process.stdout.write(`${JSON.stringify(await graph({ root: path ?? ".", runId }), null, 2)}\n`);
+    });
+  program
+    .command("explain <run-id> <target> [path]")
+    .description("Read the durable event history for one run entity or effect")
+    .action(async (runId: string, target: string, path: string | undefined) => {
+      process.stdout.write(
+        `${JSON.stringify(await explain({ root: path ?? ".", runId, target }), null, 2)}\n`,
+      );
+    });
+  program
+    .command("recover <run-id> [path]")
+    .description("Repair the journal and reconcile recorded effects without scheduling")
+    .action(async (runId: string, path: string | undefined) => {
+      const summary = await recover(
+        { root: path ?? ".", runId },
+        {
+          ownerId: `recover:${process.pid}:${randomUUID()}`,
+          effects: {
+            async recover() {
+              throw new Error(
+                "standalone recovery has no matching action adapter; external state is indeterminate",
+              );
+            },
+          },
+        },
+      );
+      process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
     });
   await program.parseAsync([...argv], { from: "user" });
   return 0;
