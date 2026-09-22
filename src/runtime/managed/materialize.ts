@@ -11,6 +11,7 @@ import {
 } from "node:fs/promises";
 import { basename, dirname, join, relative } from "node:path";
 import type { ResolvedProfile } from "../../config/profiles.js";
+import { providerIntegration } from "../../providers/registry.js";
 import { canonicalJson } from "../../shared/canonical-json.js";
 import { deepFreeze } from "../../shared/deep-freeze.js";
 import { sha256 } from "../../shared/sha256.js";
@@ -136,11 +137,10 @@ export async function materializeProfile(
     forwardedKeys: options.forwardedKeys ?? [],
     executablePath: options.executablePath ?? "/usr/bin:/bin",
   });
+  const integration = providerIntegration(profile);
   const environment = deepFreeze({
     ...baseEnvironment,
-    ...(profile.family === "devin"
-      ? { PI_DEVIN_HEADLESS_PERMISSION: "allow" }
-      : {}),
+    ...integration.environment({ profile }),
   });
 
   await mkdir(dirname(paths.profileRoot), { recursive: true, mode: 0o700 });
@@ -179,7 +179,7 @@ export async function materializeProfile(
 
     const piSkillPaths: string[] = [];
     const providerSkillPaths: string[] = [];
-    const claudeSkills: Array<{ id: string; content: string }> = [];
+    const forwardedSkills: Array<{ id: string; content: string }> = [];
     for (const skill of profile.skills) {
       if (basename(skill.path) !== "SKILL.md") {
         throw new Error(`skill ${skill.id} must resolve to SKILL.md`);
@@ -190,26 +190,20 @@ export async function materializeProfile(
       await copyResource(dirname(skill.path), stagePath(staging, paths, finalDirectory));
       if (skill.targets.includes("pi")) piSkillPaths.push(finalSkillPath);
       if (skill.targets.includes("provider")) {
-        if (profile.family === "devin") {
-          const providerDirectory = join(
-            paths.profileHome,
-            ".agents",
-            "skills",
-            name,
-          );
+        const projection = integration.providerSkillProjection({
+          paths, name, id: skill.id, content: await readFile(skill.path, "utf8"),
+        });
+        if (projection.kind === "copy-home") {
           await copyResource(
             dirname(skill.path),
-            stagePath(staging, paths, providerDirectory),
+            stagePath(staging, paths, projection.directory),
           );
-          providerSkillPaths.push(join(providerDirectory, "SKILL.md"));
-        } else if (profile.family === "claude") {
+          providerSkillPaths.push(join(projection.directory, "SKILL.md"));
+        } else if (projection.kind === "inline") {
           providerSkillPaths.push(finalSkillPath);
-          claudeSkills.push({
-            id: skill.id,
-            content: await readFile(skill.path, "utf8"),
-          });
+          forwardedSkills.push({ id: projection.id, content: projection.content });
         } else {
-          throw new Error(`provider skill projection is unsupported for ${profile.family}`);
+          throw new Error(`provider skill projection is unsupported for ${profile.id}`);
         }
       }
     }
@@ -226,44 +220,12 @@ export async function materializeProfile(
       promptTemplatePaths.push(finalPath);
     }
 
-    if (profile.family === "claude") {
-      const configuration = {
-        strictMcpConfig: true,
-        askClaude: { enabled: false },
-        autoMemoryEnabled: false,
-        mcpServers: {},
-        forwardedSkills: claudeSkills,
-      };
-      await writeFile(
-        stagePath(staging, paths, join(paths.piAgentDir, "claude-bridge.json")),
-        `${JSON.stringify(configuration, null, 2)}\n`,
-        { encoding: "utf8", mode: 0o600 },
-      );
-    }
-    if (profile.family === "codex" && profile.provider === "pi-shell-acp") {
-      const configuration = {
-        compaction: { enabled: false },
-        piShellAcpProvider: {
-          backend: "codex",
-          appendSystemPrompt: false,
-          settingSources: [],
-          strictMcpConfig: true,
-          showToolNotifications: false,
-          tools: ["Read", "Bash", "Edit", "Write"],
-          skillPlugins: [],
-          permissionAllow: ["Read(*)", "Bash(*)", "Edit(*)", "Write(*)"],
-          mcpServers: {},
-          codexDisabledFeatures: [
-            "image_generation", "tool_suggest", "tool_search",
-            "multi_agent", "apps", "memories",
-          ],
-        },
-      };
-      const settingsPath = join(staging, "home", ".pi", "agent", "settings.json");
+    for (const settings of integration.settings({ paths, forwardedSkills })) {
+      const settingsPath = stagePath(staging, paths, settings.path);
       await mkdir(dirname(settingsPath), { recursive: true, mode: 0o700 });
       await writeFile(
         settingsPath,
-        `${JSON.stringify(configuration, null, 2)}\n`,
+        settings.content,
         { encoding: "utf8", mode: 0o600 },
       );
     }

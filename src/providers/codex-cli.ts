@@ -18,7 +18,24 @@ export const codexCli: PiProviderAdapter = {
   },
   providerSkillProjection: () => noProjection,
   environment: () => ({}),
-  settings: () => [],
+  settings(input) {
+    return [{ path: join(input.paths.piAgentDir, "settings.json"), content: `${JSON.stringify({
+      compaction: { enabled: false },
+      piShellAcpProvider: {
+        backend: "codex",
+        appendSystemPrompt: false,
+        settingSources: [],
+        strictMcpConfig: true,
+        showToolNotifications: false,
+        tools: ["Read", "Bash", "Edit", "Write"],
+        skillPlugins: [],
+        permissionAllow: ["Read(*)", "Bash(*)", "Edit(*)", "Write(*)"],
+        mcpServers: {},
+        codexDisabledFeatures: ["image_generation", "tool_suggest", "tool_search",
+          "multi_agent", "apps", "memories"],
+      },
+    }, null, 2)}\n` }];
+  },
   verifyManaged: noVerification,
   recoverProviderSession: retryWithoutProcess,
 };

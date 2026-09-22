@@ -13,6 +13,8 @@ import type { ResolvedProfile } from "../../../src/config/profiles.js";
 import { materializeProfile } from "../../../src/runtime/managed/materialize.js";
 import { managedRuntimePaths } from "../../../src/runtime/managed/paths.js";
 import { sha256 } from "../../../src/shared/sha256.js";
+import { providerIntegration } from "../../../src/providers/registry.js";
+import { validateProfileIntegration } from "../../../src/providers/identity.js";
 
 const temporary: string[] = [];
 afterEach(async () => {
@@ -135,5 +137,46 @@ describe("managed profile materialization", () => {
     await expect(
       materializeProfile({ ...input.profile, mcp: ["/managed/mcp/github.json"] }, input.paths),
     ).rejects.toThrow(/MCP projection/);
+  });
+
+  it("keeps native Pi free of bridge settings and provider permission variables", async () => {
+    const input = await fixture("devin");
+    const native = { ...input.profile, family: "research-agent", provider: "openai-codex",
+      integration: "pi-native", extensions: [], skills: [] };
+    expect(() => validateProfileIntegration({ ...native, skills: [
+      { targets: ["provider"] },
+    ] })).toThrow(/provider skill projection/);
+    const view = await materializeProfile(native, input.paths);
+    expect(view.environment.PI_DEVIN_HEADLESS_PERMISSION).toBeUndefined();
+    await expect(readFile(join(input.paths.piAgentDir, "claude-bridge.json"), "utf8"))
+      .rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(join(input.paths.piAgentDir, "settings.json"), "utf8"))
+      .rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("writes strict Codex ACP settings through the Codex integration", async () => {
+    const input = await fixture("devin");
+    const profile = { ...input.profile, family: "codex", integration: "codex-cli",
+      provider: "pi-shell-acp", extensions: [], skills: [] };
+    await materializeProfile(profile, input.paths);
+    const settings = JSON.parse(await readFile(join(input.paths.piAgentDir, "settings.json"), "utf8"));
+    expect(settings).toMatchObject({
+      compaction: { enabled: false },
+      piShellAcpProvider: {
+        backend: "codex", appendSystemPrompt: false, settingSources: [],
+        strictMcpConfig: true, skillPlugins: [], mcpServers: {},
+      },
+    });
+    expect(settings.piShellAcpProvider.codexDisabledFeatures).toContain("multi_agent");
+  });
+
+  it("rejects unsafe Claude bridge settings during provider resource verification", async () => {
+    const input = await fixture("claude");
+    const view = await materializeProfile(input.profile, input.paths);
+    await writeFile(join(input.paths.piAgentDir, "claude-bridge.json"),
+      JSON.stringify({ strictMcpConfig: false, autoMemoryEnabled: true, askClaude: { enabled: true } }));
+    const result = await providerIntegration(input.profile).verifyManaged({ profile: input.profile, managed: view });
+    expect(result.verified).toBe(false);
+    expect(result.evidence.join(" ")).toMatch(/Claude bridge strict configuration/);
   });
 });

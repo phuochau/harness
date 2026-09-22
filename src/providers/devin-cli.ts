@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { authStatus, noProjection, noVerification, type PiProviderAdapter } from "./types.js";
+import { authStatus, type PiProviderAdapter } from "./types.js";
 
 export function recoverInterruptedDevin(input: {
   readonly piSessionId: string;
@@ -31,9 +31,17 @@ export const devinCli: PiProviderAdapter = {
         target: join(input.paths.xdgConfigHome, "devin", "config.json") },
     ];
   },
-  providerSkillProjection: () => noProjection,
-  environment: () => ({}),
+  providerSkillProjection(input) {
+    return { kind: "copy-home", directory: join(input.paths.profileHome, ".agents", "skills", input.name) };
+  },
+  environment: () => ({ PI_DEVIN_HEADLESS_PERMISSION: "allow" }),
   settings: () => [],
-  verifyManaged: noVerification,
+  async verifyManaged(input) {
+    const home = input.managed.environment.HOME;
+    if (home === undefined || input.managed.providerSkillPaths.some((path) => !path.startsWith(`${home}/.agents/skills/`))) {
+      return { verified: false, evidence: ["Devin provider skills escape the managed home"] };
+    }
+    return { verified: true, evidence: [] };
+  },
   recoverProviderSession: () => ({ status: "retry", reason: "Devin provider session cannot be proven resumable" }),
 };

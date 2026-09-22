@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { lstat, mkdir, readFile, readdir, rm, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, rm, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ProcessRunner } from "../../actions/types.js";
 import type { ResolvedProfile, ResolvedProfiles } from "../../config/profiles.js";
@@ -97,36 +97,9 @@ async function verifyManagedResources(
       evidence.push("managed resource is missing");
     }
   }
-  if (profile.family === "devin") {
-    const home = managed.environment.HOME;
-    if (
-      home === undefined ||
-      managed.providerSkillPaths.some((path) => !path.startsWith(`${home}/.agents/skills/`))
-    ) {
-      verified = false;
-      evidence.push("Devin provider skills escape the managed home");
-    }
-  }
-  if (profile.family === "claude") {
-    const agentDirectory = managed.environment.PI_CODING_AGENT_DIR;
-    try {
-      if (agentDirectory === undefined) throw new Error("missing Pi agent directory");
-      const configuration = JSON.parse(
-        await readFile(join(agentDirectory, "claude-bridge.json"), "utf8"),
-      ) as Record<string, unknown>;
-      const askClaude = configuration.askClaude as Record<string, unknown> | undefined;
-      if (
-        configuration.strictMcpConfig !== true ||
-        configuration.autoMemoryEnabled !== false ||
-        askClaude?.enabled !== false
-      ) {
-        throw new Error("unsafe Claude bridge settings");
-      }
-    } catch {
-      verified = false;
-      evidence.push("Claude bridge strict configuration is missing or unsafe");
-    }
-  }
+  const providerCheck = await providerIntegration(profile).verifyManaged({ profile, managed });
+  verified &&= providerCheck.verified;
+  evidence.push(...providerCheck.evidence);
   if (verified) evidence.push("managed profile resources verified");
   return { verified, evidence };
 }

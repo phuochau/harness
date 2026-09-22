@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import { providerIntegration } from "../../../src/providers/registry.js";
 import { PiWorkerRuntime } from "../../../src/runtime/pi-worker/runtime.js";
 import { fixtureResolvedProfiles } from "../../support/factories.js";
+import { managedRuntimePaths } from "../../../src/runtime/managed/paths.js";
 
 const profiles = fixtureResolvedProfiles();
 const managedEnvironment = { HOME: "/managed/home" };
@@ -38,4 +39,20 @@ it("does not guess process-less Pi session recovery from provider identity", asy
     attemptId: "a", providerSession: { source: "pi", id: "session-1" },
   });
   expect(decision.status).toBe("retry");
+});
+
+it("declares provider skill and settings projections through adapters", () => {
+  const paths = managedRuntimePaths({ dataHome: "/tmp/managed", runtimeVersion: "0.1.0", profileId: "implementer-devin" });
+  const skill = { paths, name: "selected", id: "superpowers:test-driven-development", content: "# Selected skill" };
+  expect(providerIntegration(profiles.byId["implementer-devin"]!).providerSkillProjection(skill))
+    .toEqual({ kind: "copy-home", directory: `${paths.profileHome}/.agents/skills/selected` });
+  expect(providerIntegration(profiles.byId["implementer-claude"]!).providerSkillProjection(skill))
+    .toEqual({ kind: "inline", id: skill.id, content: skill.content });
+  expect(providerIntegration(profiles.byId["planner-codex"]!).providerSkillProjection(skill))
+    .toEqual({ kind: "none" });
+  expect(providerIntegration(profiles.byId["implementer-claude"]!).settings({ paths, forwardedSkills: [] }))
+    .toEqual([expect.objectContaining({ path: `${paths.piAgentDir}/claude-bridge.json` })]);
+  expect(providerIntegration({ ...profiles.byId["implementer-codex"]!, provider: "pi-shell-acp" })
+    .settings({ paths, forwardedSkills: [] }))
+    .toEqual([expect.objectContaining({ path: `${paths.piAgentDir}/settings.json` })]);
 });
