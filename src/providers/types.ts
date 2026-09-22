@@ -12,13 +12,13 @@ export interface AuthInput {
   readonly profile: ResolvedProfile;
   readonly managedEnvironment: Readonly<Record<string, string>>;
   readonly piExecutable: string;
+  readonly managedExtensionPaths?: readonly string[];
   readonly codexExecutable?: string;
   readonly devinExecutable?: string;
   readonly claudeExecutable?: string;
 }
 export interface AuthProbeInput extends AuthInput {
   readonly piExecutableArgs: readonly string[];
-  readonly probePrefix: readonly string[];
 }
 export interface AuthProbeCommand extends ProfileAuthCommand {
   isAuthenticated(stdout: string, stderr: string, exitCode: number): boolean;

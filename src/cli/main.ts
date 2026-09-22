@@ -28,6 +28,9 @@ import { findPackageRoot } from "./package-root.js";
 import { readDeclarativeProject } from "./trusted-project-reader.js";
 import { buildManagedEnvironment } from "../runtime/managed/environment.js";
 import { projectLocalSubscriptionCredentials } from "../runtime/managed/credentials.js";
+import { resolveManagedExtensions } from "../runtime/managed/package-resolver.js";
+import { effectivePolicy } from "../install/policy.js";
+import { effectiveIntegrationId } from "../providers/identity.js";
 import type { ResolvedProfile } from "../config/profiles.js";
 import { canonicalJson } from "../shared/canonical-json.js";
 import { sha256 } from "../shared/sha256.js";
@@ -479,10 +482,20 @@ export async function main(
         forwardedKeys: [],
         executablePath: process.env.PATH ?? "/usr/bin:/bin",
       });
+      const managedExtensionPaths = effectiveIntegrationId(profile) === "pi-native" && declared.extensions.length > 0
+        ? Object.entries(await resolveManagedExtensions({
+          environment: project.environment,
+          lock: project.lock,
+          extensionIds: declared.extensions,
+          packageModules: join(paths.packages, "node_modules"),
+          policy: effectivePolicy(builtInBaseline(), undefined, {}),
+        })).sort(([left], [right]) => left.localeCompare(right)).flatMap(([, paths]) => paths)
+        : [];
       const code = await runInteractive(authCommand({
         profile,
         managedEnvironment: environment,
         piExecutable: join(paths.packages, "node_modules", ".bin", "pi"),
+        managedExtensionPaths,
       }), project.root);
       if (code !== 0) throw new Error(`authentication command exited with code ${code}`);
     });

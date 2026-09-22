@@ -6,7 +6,7 @@ import { managedRuntimePaths } from "../../../src/runtime/managed/paths.js";
 
 const profiles = fixtureResolvedProfiles();
 const managedEnvironment = { HOME: "/managed/home" };
-const input = { managedEnvironment, piExecutable: "pi", piExecutableArgs: [], probePrefix: [] };
+const input = { managedEnvironment, piExecutable: "pi", piExecutableArgs: [] };
 
 it("selects adapters by effective integration without conflating direct Pi with Codex ACP", () => {
   const directPi = profiles.byId["planner-codex"]!;
@@ -22,6 +22,16 @@ it("selects adapters by effective integration without conflating direct Pi with 
   expect(providerIntegration(claude).authCommand({ ...input, profile: claude })).toMatchObject({ executable: "claude", argv: ["auth", "login", "--claudeai"] });
   expect(providerIntegration(directPi).authProbe({ ...input, profile: directPi }).argv)
     .toEqual(["auth", "check", "--provider", directPi.provider, "--json", "--no-refresh"]);
+  expect(providerIntegration(directPi).authProbe({ ...input, profile: directPi,
+    piExecutableArgs: ["/managed/pi-cli.js"] }).argv)
+    .toEqual(["/managed/pi-cli.js", "auth", "check", "--provider", directPi.provider, "--json", "--no-refresh"]);
+  expect(providerIntegration(directPi).authCommand({ ...input, profile: directPi,
+    managedExtensionPaths: ["/managed/native-provider.js"] }).argv)
+    .toContain("/managed/native-provider.js");
+  const extensionProbe = providerIntegration(directPi).authProbe({ ...input, profile: directPi,
+    piExecutableArgs: ["/managed/pi-cli.js"], managedExtensionPaths: ["/managed/native-provider.js"] });
+  expect(extensionProbe.argv).toContain("/managed/native-provider.js");
+  expect(extensionProbe.argv).not.toContain("auth");
   expect(providerIntegration(codex).authProbe({ ...input, profile: codex }).argv).toEqual(["login", "status"]);
   expect(providerIntegration(devin).authProbe({ ...input, profile: devin }).argv).toEqual(["auth", "status"]);
   expect(providerIntegration(claude).authProbe({ ...input, profile: claude }).argv).toEqual(["auth", "status"]);

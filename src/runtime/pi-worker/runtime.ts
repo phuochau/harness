@@ -141,7 +141,8 @@ export class PiWorkerRuntime {
     );
     const authProbe = providerIntegration(profile).authProbe({
       profile, managedEnvironment: managed.environment, piExecutable: this.options.piExecutable,
-      piExecutableArgs: executablePrefix, probePrefix: prefix,
+      piExecutableArgs: executablePrefix,
+      managedExtensionPaths: managed.extensionPaths,
     });
     const auth = await this.options.process.run(authProbe.executable, [...authProbe.argv], {
       env: authProbe.env, shell: false,
