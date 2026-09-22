@@ -190,3 +190,19 @@ it("requires explicit repair before replacing disabled Pi resource filters", () 
   expect(createInstallPlan(piLock, report, policy, { repair: true }).steps[0]?.mode)
     .toBe("automatic");
 });
+
+it("keeps a project-declared but release-unlisted npm source as a blocking manual step", () => {
+  const unknown: HarnessLock = {
+    ...piLock,
+    dependencies: [{
+      id: "unknown-pi-bridge", kind: "pi-package", version: "1.2.3",
+      source: { kind: "npm", identity: "@example/bridge", version: "1.2.3", integrity: "sha512-test" },
+      piSource: "npm:@example/bridge@1.2.3", dependsOn: [],
+    }],
+  };
+  expect(createInstallPlan(
+    unknown,
+    { byId: { "unknown-pi-bridge": { id: "unknown-pi-bridge", status: "missing" } } },
+    effectivePolicy(builtInBaseline(), undefined, {}),
+  ).steps[0]).toMatchObject({ mode: "manual", blocking: true });
+});

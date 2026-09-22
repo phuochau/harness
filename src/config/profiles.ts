@@ -43,7 +43,7 @@ export interface ResolvedProfile {
 }
 
 export interface LockedProfileResources {
-  readonly extensions: Readonly<Record<string, string>>;
+  readonly extensions: Readonly<Record<string, string | readonly string[]>>;
   readonly skills: Readonly<Record<string, string>>;
   readonly promptTemplates: Readonly<Record<string, string>>;
   readonly mcp: Readonly<Record<string, string>>;
@@ -60,11 +60,11 @@ function sortedUnique(values: readonly string[], label: string): string[] {
   return [...unique].sort();
 }
 
-function resolveResource(
+function resolveResource<T>(
   id: string,
   kind: string,
-  resources: Readonly<Record<string, string>>,
-): string {
+  resources: Readonly<Record<string, T>>,
+): T {
   const path = resources[id];
   if (path === undefined) throw new Error(`${id} has no locked ${kind} resource`);
   return path;
@@ -104,10 +104,10 @@ export function resolveProfiles(
       role: profile.role,
       environment: profile.environment,
       tools: sortedUnique(profile.tools, `tool in ${id}`),
-      extensions: sortedUnique(profile.extensions, `extension in ${id}`).map(
-        (resourceId) =>
-          resolveResource(resourceId, "extension", resources.extensions),
-      ),
+      extensions: sortedUnique(profile.extensions, `extension in ${id}`).flatMap((resourceId) => {
+        const declared = resolveResource(resourceId, "extension", resources.extensions);
+        return typeof declared === "string" ? [declared] : [...declared];
+      }),
       skills,
       promptTemplates: sortedUnique(
         profile.prompt_templates,

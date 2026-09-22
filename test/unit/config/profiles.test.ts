@@ -150,4 +150,14 @@ describe("profile resolution", () => {
     expect(resolveProfiles(profileDocument(), resources).byId["planner-codex"])
       .not.toHaveProperty("integration");
   });
+
+  it("flattens multi-entrypoint extension resources without changing legacy strings", () => {
+    const multiple = resolveProfiles(profileDocument(), {
+      ...resources,
+      extensions: { "devin-acp": ["/managed/b.js", "/managed/a.js"] },
+    });
+    expect(multiple.byId["implementer-devin"]?.extensions).toEqual(["/managed/b.js", "/managed/a.js"]);
+    expect(resolveProfiles(profileDocument(), resources).byId["implementer-devin"]?.extensions)
+      .toEqual(["/managed/extensions/devin-acp/index.js"]);
+  });
 });
