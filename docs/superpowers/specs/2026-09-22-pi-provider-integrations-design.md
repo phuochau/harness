@@ -1,6 +1,6 @@
 # Pi Provider Integrations — Design
 
-**Status:** Proposed for review
+**Status:** Approved for implementation planning
 **Date:** 2026-09-22
 **Baseline:** `51651cf`
 **Decision:** Pi Coding Agent remains the sole agent execution runtime.
