@@ -159,7 +159,7 @@ describe("managed profile materialization", () => {
     const profile = { ...input.profile, family: "codex", integration: "codex-cli",
       provider: "pi-shell-acp", extensions: [], skills: [] };
     await materializeProfile(profile, input.paths);
-    const settings = JSON.parse(await readFile(join(input.paths.piAgentDir, "settings.json"), "utf8"));
+    const settings = JSON.parse(await readFile(join(input.paths.profileHome, ".pi", "agent", "settings.json"), "utf8"));
     expect(settings).toMatchObject({
       compaction: { enabled: false },
       piShellAcpProvider: {

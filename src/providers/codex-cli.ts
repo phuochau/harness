@@ -19,7 +19,7 @@ export const codexCli: PiProviderAdapter = {
   providerSkillProjection: () => noProjection,
   environment: () => ({}),
   settings(input) {
-    return [{ path: join(input.paths.piAgentDir, "settings.json"), content: `${JSON.stringify({
+    return [{ path: join(input.paths.profileHome, ".pi", "agent", "settings.json"), content: `${JSON.stringify({
       compaction: { enabled: false },
       piShellAcpProvider: {
         backend: "codex",

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { EnvironmentDocument } from "../../../src/contracts/environment.js";
@@ -61,6 +61,13 @@ describe("managed extension resolution", () => {
     await rm(join(modules, "@example"), { recursive: true });
     await symlink(root, join(modules, "@example"));
     await expect(resolve()).rejects.toThrow(/symlink|outside|package/i);
+  });
+
+  it("rejects a symlinked managed node_modules directory", async () => {
+    const moved = join(root, "elsewhere");
+    await rename(modules, moved);
+    await symlink(moved, modules);
+    await expect(resolve()).rejects.toThrow(/symlink|outside/i);
   });
 
   it("rejects a symlinked entrypoint", async () => {

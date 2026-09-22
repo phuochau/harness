@@ -11,6 +11,20 @@ import { installPackedHarness, packHarness } from "../support/package-consumer.j
 
 const real = process.env.HARNESS_E2E_REAL === "1";
 
+function requireLockedCliVersion(name: string, expected: string, output: string): void {
+  const actual = /\b\d+\.\d+\.\d+\b/.exec(output)?.[0] ?? "unrecognized";
+  if (actual !== expected) {
+    throw new Error(`${name} CLI requires locked version ${expected}, found ${actual}; restore the locked CLI before real E2E`);
+  }
+}
+
+it("rejects a local CLI version that differs from the locked release version", () => {
+  expect(() => requireLockedCliVersion("devin", "3000.10.31", "devin 3000.11.1 (build)"))
+    .toThrow(/devin.*3000\.10\.31.*3000\.11\.1/);
+  expect(() => requireLockedCliVersion("codex", "0.155.1", "codex-cli 0.155.1"))
+    .not.toThrow();
+});
+
 async function defaultEnvironment(root: string) {
   return { ...parse(await readFile(join(root, "src/defaults/environment.yaml"), "utf8")),
     commands: { task_verify: ["npm", "test"], full_verify: ["npm", "test"] } };
@@ -20,6 +34,15 @@ it.runIf(real)("plans with Codex CLI, implements with Devin CLI, and reviews ind
   const supportedNode = Number(process.versions.node.split(".")[0]) >= 26 ||
     (Number(process.versions.node.split(".")[0]) === 22 && Number(process.versions.node.split(".")[1]) >= 22);
   if (!supportedNode) throw new Error("real E2E requires Node >=22.22.2; run it with a supported Node binary");
+  const releaseLock = parse(await readFile(join(process.cwd(), "src/defaults/harness.lock"), "utf8")) as {
+    dependencies: Array<{ id: string; source: { version: string } }>;
+  };
+  for (const name of ["codex", "devin"] as const) {
+    const expected = releaseLock.dependencies.find((dependency) => dependency.id === name)?.source.version;
+    if (expected === undefined) throw new Error(`missing ${name} CLI release lock`);
+    const version = await execa(name, ["--version"]);
+    requireLockedCliVersion(name, expected, version.stdout);
+  }
   const repo = await createTempGitRepository("real pi native", {
     "package.json": '{"type":"module","scripts":{"test":"node --test"}}\n',
     "test/add.test.js": [
@@ -120,6 +143,7 @@ it.runIf(real)("plans with Codex CLI, implements with Devin CLI, and reviews ind
     const prepared = await runtime.workerRuntime.prepare(assignment);
     const handle = await runtime.workerRuntime.launch(prepared);
     const result = await runtime.workerRuntime.collect(prepared);
+    if (result.status === "invalid") throw new Error(`Devin implementation result invalid: ${result.reason}`);
     expect(result).toMatchObject({ status: "valid", result: { role: "implementation", outcome: "completed" } });
     if (
       result.status !== "valid" || result.result.outcome !== "completed" ||

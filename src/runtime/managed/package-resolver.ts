@@ -35,6 +35,9 @@ export async function resolveManagedExtensions(input: {
   const requirements = new Map(environment.pi_packages.map((item) => [item.id, item]));
   const dependencies = new Map(lock.dependencies.map((item) => [item.id, item]));
   const result: Record<string, readonly string[]> = {};
+  if ((await lstat(input.packageModules)).isSymbolicLink()) {
+    throw new Error("managed node_modules must not be a symlink");
+  }
   const modulesReal = await realpath(input.packageModules);
 
   for (const id of new Set(input.extensionIds)) {

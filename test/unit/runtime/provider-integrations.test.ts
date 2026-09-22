@@ -25,6 +25,10 @@ it("selects adapters by effective integration without conflating direct Pi with 
   expect(providerIntegration(codex).authProbe({ ...input, profile: codex }).argv).toEqual(["login", "status"]);
   expect(providerIntegration(devin).authProbe({ ...input, profile: devin }).argv).toEqual(["auth", "status"]);
   expect(providerIntegration(claude).authProbe({ ...input, profile: claude }).argv).toEqual(["auth", "status"]);
+  expect(providerIntegration(codex).authProbe({ ...input, profile: codex })
+    .isAuthenticated("Not logged in", "", 0)).toBe(false);
+  expect(providerIntegration(devin).authProbe({ ...input, profile: devin })
+    .isAuthenticated("Logged in (via Devin)", "", 0)).toBe(true);
   expect(() => providerIntegration({ ...directPi, integration: "unknown-cli" }))
     .toThrow(/unknown-cli/);
 });
@@ -54,5 +58,5 @@ it("declares provider skill and settings projections through adapters", () => {
     .toEqual([expect.objectContaining({ path: `${paths.piAgentDir}/claude-bridge.json` })]);
   expect(providerIntegration({ ...profiles.byId["implementer-codex"]!, provider: "pi-shell-acp" })
     .settings({ paths, forwardedSkills: [] }))
-    .toEqual([expect.objectContaining({ path: `${paths.piAgentDir}/settings.json` })]);
+    .toEqual([expect.objectContaining({ path: `${paths.profileHome}/.pi/agent/settings.json` })]);
 });

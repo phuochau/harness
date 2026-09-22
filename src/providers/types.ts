@@ -63,12 +63,13 @@ export interface PiProviderAdapter {
 
 export function authStatus(stdout: string, stderr: string, exitCode: number): boolean {
   if (exitCode !== 0) return false;
-  if (/logged in/i.test(`${stdout}\n${stderr}`)) return true;
   try {
     const parsed = JSON.parse(stdout) as { status?: string; loggedIn?: boolean };
     return parsed.status === "ready" || parsed.loggedIn === true;
   } catch {
-    return false;
+    const message = `${stdout}\n${stderr}`;
+    return !/not logged in|logged in\s*:\s*false/i.test(message) &&
+      /^\s*logged in(?:\s|\(|$)/im.test(message);
   }
 }
 
