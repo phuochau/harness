@@ -1,9 +1,18 @@
 # Pi Provider Integrations — Design
 
-**Status:** Approved for implementation planning
+**Status:** Implemented
 **Date:** 2026-09-22
 **Baseline:** `51651cf`
 **Decision:** Pi Coding Agent remains the sole agent execution runtime.
+
+**Verification (2026-09-22):** On supported Node 26.7.0, the full suite passed
+(83 files, 382 passed, 4 skipped), including typecheck, build, and pack dry-run.
+The deterministic controller and packed-install subset passed (8 files, 37 tests).
+The opt-in real Pi path passed (2 tests): Codex planning, Devin implementation,
+and independent Codex review. That run selected the already-installed, release-locked
+Devin CLI 3000.10.31 through a temporary `PATH` entry; the machine's default
+Devin CLI remains 3000.11.1 and fails the exact-version E2E preflight until
+the release lock is deliberately updated or the locked binary is selected.
 
 ## Intent and success
 
