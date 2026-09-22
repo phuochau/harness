@@ -1,11 +1,7 @@
 import { Type, type Static } from "typebox";
 import { validator } from "./common.js";
 
-export const ProfileFamilySchema = Type.Union([
-  Type.Literal("codex"),
-  Type.Literal("devin"),
-  Type.Literal("claude"),
-]);
+export const ProfileFamilySchema = Type.String({ pattern: "^[a-z][a-z0-9-]*$" });
 
 export const ProfileRoleSchema = Type.Union([
   Type.Literal("planning"),
@@ -33,6 +29,7 @@ const SkillSchema = Type.Object(
 export const ProfileSchema = Type.Object(
   {
     family: ProfileFamilySchema,
+    integration: Type.Optional(Type.String({ pattern: "^[a-z][a-z0-9-]*$" })),
     runtime: Type.Literal("pi"),
     provider: Type.String({ minLength: 1 }),
     model: Type.String({ minLength: 1 }),

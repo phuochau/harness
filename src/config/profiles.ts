@@ -8,6 +8,7 @@ import {
 import { canonicalJson } from "../shared/canonical-json.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 import { sha256 } from "../shared/sha256.js";
+import { validateProfileIntegration } from "../providers/identity.js";
 
 export interface ResolvedProfileSkill {
   readonly id: string;
@@ -18,6 +19,7 @@ export interface ResolvedProfileSkill {
 export interface ResolvedProfile {
   readonly id: string;
   readonly family: ProfileFamily;
+  readonly integration?: string;
   readonly runtime: "pi";
   readonly provider: string;
   readonly model: string;
@@ -68,10 +70,6 @@ function resolveResource(
   return path;
 }
 
-function supportsProviderSkills(family: ProfileFamily): boolean {
-  return family === "devin" || family === "claude";
-}
-
 export function resolveProfiles(
   input: ProfileDocument,
   resources: LockedProfileResources,
@@ -81,6 +79,7 @@ export function resolveProfiles(
 
   for (const id of Object.keys(document.profiles).sort()) {
     const profile = document.profiles[id]!;
+    validateProfileIntegration({ id, ...profile });
     const skillIds = new Set<string>();
     const skills = [...profile.skills]
       .sort((left, right) => left.id.localeCompare(right.id))
@@ -88,11 +87,6 @@ export function resolveProfiles(
         if (skillIds.has(skill.id)) throw new Error(`duplicate skill ${skill.id}`);
         skillIds.add(skill.id);
         const targets = sortedUnique(skill.targets, `target for ${skill.id}`) as SkillTarget[];
-        if (targets.includes("provider") && !supportsProviderSkills(profile.family)) {
-          throw new Error(
-            `provider skill projection is unsupported for ${profile.family}`,
-          );
-        }
         return {
           id: skill.id,
           path: resolveResource(skill.id, "skill", resources.skills),
@@ -102,6 +96,7 @@ export function resolveProfiles(
     const normalized = {
       id,
       family: profile.family,
+      ...(profile.integration === undefined ? {} : { integration: profile.integration }),
       runtime: profile.runtime,
       provider: profile.provider,
       model: profile.model,

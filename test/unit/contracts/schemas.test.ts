@@ -5,6 +5,7 @@ import {
   validateHarnessEvent,
   validateTaskGraph,
   validateWorkerResult,
+  validateProfiles,
 } from "../../../src/contracts/index.js";
 import { canonicalJson } from "../../../src/shared/canonical-json.js";
 
@@ -180,4 +181,21 @@ it("rejects malformed task IDs and missing worker evidence", () => {
       commit: "abc123",
     }),
   ).toThrow();
+});
+
+it("rejects empty and unsafe profile family slugs", () => {
+  const profile = {
+    family: "research-agent", runtime: "pi", provider: "openai-codex",
+    model: "gpt-5", role: "planning", environment: "isolated",
+    tools: [], extensions: [], skills: [], context_files: false,
+    prompt_templates: [], mcp: [],
+  };
+  for (const family of ["", "Research Agent", "../escape"]) {
+    expect(() => validateProfiles({
+      schema: "harness/profiles/v1", profiles: { research: { ...profile, family } },
+    })).toThrow();
+  }
+  expect(() => validateProfiles({
+    schema: "harness/profiles/v1", profiles: { research: profile },
+  })).not.toThrow();
 });

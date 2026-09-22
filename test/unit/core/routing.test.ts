@@ -50,6 +50,16 @@ describe("profile routing", () => {
     ).toBe("reviewer-claude");
   });
 
+  it("can route a new independent family without scheduler changes", () => {
+    expect(selectProfile(
+      ["reviewer-codex", "reviewer-research"],
+      { ...candidates, "reviewer-research": {
+        profileId: "reviewer-research", family: "research-agent", available: true,
+      } },
+      "codex",
+    ).profileId).toBe("reviewer-research");
+  });
+
   it("blocks when no eligible profile exists", () => {
     expect(() =>
       selectProfile(["implementer-devin"], candidates),

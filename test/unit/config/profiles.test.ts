@@ -119,4 +119,35 @@ describe("profile resolution", () => {
     ];
     expect(resolveProfiles(reordered, resources).hash).toBe(first.hash);
   });
+
+  it("keeps legacy v1 identities while accepting an explicit integration and open family", () => {
+    const before = resolveProfiles(profileDocument(), resources);
+    expect(before.byId["implementer-devin"]?.hash).toBe(
+      "sha256:89710cd4924fcb2ac5e753e6466cc0bb6643632c66212c94b367707b32a519fa",
+    );
+    expect(before.hash).toBe(
+      "sha256:7082d81d59280c11387bee8a5ef8283df444e138cb4e2dfda6bdf6bfe3418b01",
+    );
+    expect(before.byId["implementer-devin"]).not.toHaveProperty("integration");
+
+    const custom = profileDocument();
+    custom.profiles["implementer-devin"]!.family = "research-agent";
+    custom.profiles["implementer-devin"]!.integration = "devin-cli";
+    expect(resolveProfiles(custom, resources).byId["implementer-devin"]).toMatchObject({
+      family: "research-agent",
+      integration: "devin-cli",
+    });
+    expect(resolveProfiles(profileDocument(), resources).hash).toBe(before.hash);
+
+    custom.profiles["implementer-devin"]!.integration = "unknown-cli";
+    expect(() => resolveProfiles(custom, resources)).toThrow(/implementer-devin.*unknown-cli/);
+  });
+
+  it("rejects an explicit native Pi integration for a bridge provider", () => {
+    const document = profileDocument();
+    document.profiles["implementer-devin"]!.integration = "pi-native";
+    expect(() => resolveProfiles(document, resources)).toThrow(/implementer-devin.*pi-native.*devin/);
+    expect(resolveProfiles(profileDocument(), resources).byId["planner-codex"])
+      .not.toHaveProperty("integration");
+  });
 });
