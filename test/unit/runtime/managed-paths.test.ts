@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { managedRuntimePaths } from "../../../src/runtime/managed/paths.js";
+import { managedPackagesPath, managedRuntimePaths } from "../../../src/runtime/managed/paths.js";
 
 describe("managed runtime paths", () => {
+  it("returns the versioned packages path independently of any profile ID", () => {
+    expect(managedPackagesPath({ dataHome: "/var/lib/example", runtimeVersion: "0.1.0" }))
+      .toBe("/var/lib/example/pi-harness/runtimes/0.1.0/packages");
+  });
   it("builds deterministic versioned profile roots", () => {
     expect(
       managedRuntimePaths({

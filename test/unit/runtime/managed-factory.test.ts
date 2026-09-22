@@ -3,11 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import {
+  createManagedPiRuntime,
   createManagedPiRuntimeFromResolved,
   managedRuntimeHash,
 } from "../../../src/runtime/managed/factory.js";
 import { sha256 } from "../../../src/shared/sha256.js";
 import { fixtureResolvedProfiles } from "../../support/factories.js";
+import { fixtureProfiles } from "../../support/factories.js";
+import { parse } from "yaml";
 
 const temporary: string[] = [];
 
@@ -81,4 +84,16 @@ it("hashes every executable dist module used by recovery", async () => {
     "export const value = 2;\n",
   );
   await expect(managedRuntimeHash(packageRoot)).resolves.not.toBe(before);
+});
+
+it("fails preflight when a declared managed provider package is absent", async () => {
+  const dataHome = await mkdtemp(join(tmpdir(), "harness-missing-provider-"));
+  temporary.push(dataHome);
+  const root = process.cwd();
+  const environment = { ...parse(await readFile(join(root, "src/defaults/environment.yaml"), "utf8")), commands: {} };
+  const lock = parse(await readFile(join(root, "src/defaults/harness.lock"), "utf8"));
+  await expect(createManagedPiRuntime({
+    profiles: fixtureProfiles(), environment, lock, dataHome,
+    runtimeVersion: "0.1.0", packageRoot: root,
+  })).rejects.toThrow(/package|entrypoint|ENOENT|not installed/i);
 });

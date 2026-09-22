@@ -26,6 +26,17 @@ function assertSafeIdentifier(value: string, label: string): void {
   }
 }
 
+export function managedPackagesPath(input: {
+  readonly dataHome: string;
+  readonly runtimeVersion: string;
+}): string {
+  assertSafeIdentifier(input.runtimeVersion, "runtime version");
+  if (input.dataHome.length === 0 || input.dataHome.includes("\0")) {
+    throw new Error("data home must be a non-empty path");
+  }
+  return join(resolve(input.dataHome), "pi-harness", "runtimes", input.runtimeVersion, "packages");
+}
+
 export function managedRuntimePaths(input: {
   readonly dataHome: string;
   readonly runtimeVersion: string;
@@ -36,11 +47,12 @@ export function managedRuntimePaths(input: {
   if (input.dataHome.length === 0 || input.dataHome.includes("\0")) {
     throw new Error("data home must be a non-empty path");
   }
-  const root = join(resolve(input.dataHome), "pi-harness", "runtimes", input.runtimeVersion);
+  const packages = managedPackagesPath(input);
+  const root = resolve(packages, "..");
   const profileRoot = join(root, "profiles", input.profileId);
   return deepFreeze({
     root,
-    packages: join(root, "packages"),
+    packages,
     skills: join(root, "skills"),
     profileRoot,
     profileHome: join(profileRoot, "home"),

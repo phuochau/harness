@@ -5,13 +5,18 @@ import { homedir } from "node:os";
 import { delimiter, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ProfileDocument } from "../../contracts/profiles.js";
+import type { EnvironmentDocument } from "../../contracts/environment.js";
+import type { HarnessLock } from "../../contracts/lock.js";
 import { resolveProfiles, type LockedProfileResources, type ResolvedProfiles } from "../../config/profiles.js";
+import { builtInBaseline } from "../../install/baseline-policy.js";
+import { effectivePolicy } from "../../install/policy.js";
 import { NodeProcessRunner } from "../../git/process.js";
 import { NodePiProcessSupervisor } from "../pi-process/process.js";
 import type { PiProcessSupervisor } from "../pi-process/types.js";
 import { PiWorkerRuntime } from "../pi-worker/runtime.js";
 import { materializeProfile, type ManagedProfileView } from "./materialize.js";
-import { managedRuntimePaths } from "./paths.js";
+import { managedPackagesPath, managedRuntimePaths } from "./paths.js";
+import { resolveManagedExtensions } from "./package-resolver.js";
 import { projectLocalSubscriptionCredentials } from "./credentials.js";
 import { sha256 } from "../../shared/sha256.js";
 
@@ -126,43 +131,33 @@ async function resolveNodeRuntime(pathValue: string): Promise<string> {
 
 export async function createManagedPiRuntime(input: ManagedPiRuntimeBaseInput & {
   readonly profiles: ProfileDocument;
+  readonly environment: EnvironmentDocument;
+  readonly lock: HarnessLock;
 }): Promise<ManagedPiRuntimeBundle> {
   const ambient = input.ambient ?? process.env;
   const userHome = ambient.HOME ?? homedir();
   const executablePath = ambient.PATH ?? "/usr/bin:/bin";
   const dataHome = input.dataHome ?? ambient.XDG_DATA_HOME ?? join(userHome, ".local", "share");
-  const base = managedRuntimePaths({ dataHome, runtimeVersion: input.runtimeVersion, profileId: "planner-codex" });
-  const packageModules = join(base.packages, "node_modules");
+  const packageModules = join(managedPackagesPath({ dataHome, runtimeVersion: input.runtimeVersion }), "node_modules");
   const superpowersRoot = join(
     ambient.CODEX_HOME ?? join(userHome, ".codex"),
     "plugins", "cache", "superpowers-dev", "superpowers", "6.4.1", "skills",
   );
   const skillIds = new Set(Object.values(input.profiles.profiles).flatMap((profile) => profile.skills.map((skill) => skill.id)));
-  const extensionIds = new Set(Object.values(input.profiles.profiles).flatMap((profile) => profile.extensions));
+  const extensionIds = Object.values(input.profiles.profiles).flatMap((profile) => profile.extensions);
   const promptIds = new Set(Object.values(input.profiles.profiles).flatMap((profile) => profile.prompt_templates));
   const skills: Record<string, string> = {};
   for (const id of skillIds) {
     const name = id.replace(/^superpowers:/, "");
     skills[id] = await existing([join(superpowersRoot, name, "SKILL.md")], `locked skill ${id}`);
   }
-  const extensions: Record<string, string> = {};
-  if (extensionIds.has("devin-acp")) {
-    extensions["devin-acp"] = await existing([
-        join(packageModules, "@tian.zuo", "pi-devin-acp", "index.ts"),
-        join(packageModules, "@tian.zuo", "pi-devin-acp", "dist", "index.js"),
-      ], "pi-devin-acp");
-  }
-  if (extensionIds.has("codex-acp")) {
-    extensions["codex-acp"] = await existing([
-      join(packageModules, "@junghanacs", "pi-shell-acp", "index.ts"),
-    ], "pi-shell-acp Codex CLI bridge");
-  }
-  if (extensionIds.has("claude-bridge")) {
-    extensions["claude-bridge"] = await existing([
-        join(packageModules, "pi-claude-bridge", "src", "index.ts"),
-        join(packageModules, "pi-claude-bridge", "dist", "index.js"),
-      ], "pi-claude-bridge");
-  }
+  const extensions = await resolveManagedExtensions({
+    environment: input.environment,
+    lock: input.lock,
+    extensionIds,
+    packageModules,
+    policy: effectivePolicy(builtInBaseline(), undefined, {}),
+  });
   const resources: LockedProfileResources = {
     extensions,
     skills,
@@ -183,8 +178,7 @@ export async function createManagedPiRuntimeFromResolved(
   const userHome = ambient.HOME ?? homedir();
   const executablePath = ambient.PATH ?? "/usr/bin:/bin";
   const dataHome = input.dataHome ?? ambient.XDG_DATA_HOME ?? join(userHome, ".local", "share");
-  const base = managedRuntimePaths({ dataHome, runtimeVersion: input.runtimeVersion, profileId: "planner-codex" });
-  const packageModules = join(base.packages, "node_modules");
+  const packageModules = join(managedPackagesPath({ dataHome, runtimeVersion: input.runtimeVersion }), "node_modules");
   const profiles = input.profiles;
   const managedProfiles: Record<string, ManagedProfileView> = {};
   for (const profile of Object.values(profiles.byId)) {

@@ -135,6 +135,8 @@ async function loadProjectConfiguration(
   ) throw new Error("invalid harness package identity");
   const runtime = await createManagedPiRuntime({
     profiles: project.profiles,
+    environment: project.environment,
+    lock: project.lock,
     runtimeVersion: project.lock.harnessVersion,
     packageRoot,
   });

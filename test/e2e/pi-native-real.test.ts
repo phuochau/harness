@@ -11,6 +11,11 @@ import { installPackedHarness, packHarness } from "../support/package-consumer.j
 
 const real = process.env.HARNESS_E2E_REAL === "1";
 
+async function defaultEnvironment(root: string) {
+  return { ...parse(await readFile(join(root, "src/defaults/environment.yaml"), "utf8")),
+    commands: { task_verify: ["npm", "test"], full_verify: ["npm", "test"] } };
+}
+
 it.runIf(real)("plans with Codex CLI, implements with Devin CLI, and reviews independently with Codex CLI", async () => {
   const supportedNode = Number(process.versions.node.split(".")[0]) >= 26 ||
     (Number(process.versions.node.split(".")[0]) === 22 && Number(process.versions.node.split(".")[1]) >= 22);
@@ -33,6 +38,8 @@ it.runIf(real)("plans with Codex CLI, implements with Devin CLI, and reviews ind
     const root = process.cwd();
     const runtime = await createManagedPiRuntime({
       profiles: parse(await readFile(join(root, "src/defaults/profiles.yaml"), "utf8")),
+      environment: await defaultEnvironment(root),
+      lock: parse(await readFile(join(root, "src/defaults/harness.lock"), "utf8")),
       runtimeVersion: "0.1.0",
       packageRoot: root,
       projectCredentials: true,
@@ -123,6 +130,8 @@ it.runIf(real)("plans with Codex CLI, implements with Devin CLI, and reviews ind
 
     const restarted = await createManagedPiRuntime({
       profiles: parse(await readFile(join(root, "src/defaults/profiles.yaml"), "utf8")),
+      environment: await defaultEnvironment(root),
+      lock: parse(await readFile(join(root, "src/defaults/harness.lock"), "utf8")),
       runtimeVersion: "0.1.0",
       packageRoot: root,
       projectCredentials: true,
