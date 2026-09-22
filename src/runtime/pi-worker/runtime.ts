@@ -6,6 +6,7 @@ import type { ResolvedProfile, ResolvedProfiles } from "../../config/profiles.js
 import type { WorkerAssignment } from "../../core/assignment.js";
 import type { WorkerResult } from "../../contracts/worker-result.js";
 import { sha256 } from "../../shared/sha256.js";
+import { providerIntegration } from "../../providers/registry.js";
 import type { ManagedProfileView } from "../managed/materialize.js";
 import type {
   CancellationEvidence,
@@ -130,17 +131,6 @@ async function verifyManagedResources(
   return { verified, evidence };
 }
 
-export function recoverInterruptedDevin(input: {
-  readonly piSessionId: string;
-  readonly priorProviderSessionId: string;
-  readonly loadedProviderSessionId: string;
-}): RecoveryDecision {
-  if (input.priorProviderSessionId !== input.loadedProviderSessionId) {
-    return { status: "retry", reason: "provider session identity changed" };
-  }
-  return { status: "resume", sessionId: input.piSessionId };
-}
-
 export class PiWorkerRuntime {
   private readonly handles = new Map<string, PiWorkerHandle>();
 
@@ -176,29 +166,16 @@ export class PiWorkerRuntime {
       [...executablePrefix, ...prefix, "--list-models", profile.model],
       { env: managed.environment, shell: false },
     );
-    const auth = profile.family === "codex" && profile.provider === "pi-shell-acp"
-      ? await this.options.process.run("codex", ["login", "status"], { env: managed.environment, shell: false })
-      : profile.family === "devin"
-        ? await this.options.process.run("devin", ["auth", "status"], { env: managed.environment, shell: false })
-        : profile.family === "claude"
-          ? await this.options.process.run("claude", ["auth", "status"], { env: managed.environment, shell: false })
-          : await this.options.process.run(
-              this.options.piExecutable,
-              [...executablePrefix, ...prefix, "auth", "check", "--provider", profile.provider, "--json", "--no-refresh"],
-              { env: managed.environment, shell: false },
-            );
+    const authProbe = providerIntegration(profile).authProbe({
+      profile, managedEnvironment: managed.environment, piExecutable: this.options.piExecutable,
+      piExecutableArgs: executablePrefix, probePrefix: prefix,
+    });
+    const auth = await this.options.process.run(authProbe.executable, [...authProbe.argv], {
+      env: authProbe.env, shell: false,
+    });
     const providerRegistered = models.exitCode === 0 && !/provider.+not found/i.test(models.stderr);
     const modelAvailable = providerRegistered && models.stdout.includes(profile.model.split("/").at(-1)!);
-    let authenticated = false;
-    try {
-      authenticated = auth.exitCode === 0 && (
-        /logged in/i.test(`${auth.stdout}\n${auth.stderr}`) ||
-        JSON.parse(auth.stdout).status === "ready" ||
-        JSON.parse(auth.stdout).loggedIn === true
-      );
-    } catch {
-      authenticated = false;
-    }
+    const authenticated = authProbe.isAuthenticated(auth.stdout, auth.stderr, auth.exitCode);
     return {
       available: version.exitCode === 0 && providerRegistered && modelAvailable && authenticated && resourceCheck.verified,
       providerRegistered,
@@ -321,15 +298,10 @@ export class PiWorkerRuntime {
         return { status: "retry", reason: parsed.reason };
       }
     }
-    if (record.providerSession !== undefined && prepared.profile.family !== "devin") {
-      return { status: "resume", sessionId: record.providerSession.id };
-    }
-    return {
-      status: "retry",
-      reason: prepared.profile.family === "devin"
-        ? "Devin provider session cannot be proven resumable"
-        : "Pi process is no longer observable",
-    };
+    return providerIntegration(prepared.profile).recoverProviderSession({
+      piSessionId: prepared.launch.sessionId,
+      providerSessionId: record.providerSession?.id ?? "",
+    });
   }
 
   public cancel(handle: PiWorkerHandle): Promise<CancellationEvidence> {

@@ -1,54 +1,10 @@
 import { spawn } from "node:child_process";
-import type { ResolvedProfile } from "../config/profiles.js";
+import { providerIntegration } from "../providers/registry.js";
+import type { AuthInput, ProfileAuthCommand } from "../providers/types.js";
+export type { ProfileAuthCommand } from "../providers/types.js";
 
-export interface ProfileAuthCommand {
-  readonly executable: string;
-  readonly argv: readonly string[];
-  readonly env: Readonly<Record<string, string>>;
-}
-
-export function authCommand(input: {
-  readonly profile: ResolvedProfile;
-  readonly managedEnvironment: Readonly<Record<string, string>>;
-  readonly piExecutable: string;
-  readonly devinExecutable?: string;
-  readonly claudeExecutable?: string;
-  readonly codexExecutable?: string;
-}): ProfileAuthCommand {
-  const { profile } = input;
-  if (profile.family === "codex") {
-    if (profile.provider === "pi-shell-acp") {
-      return {
-        executable: input.codexExecutable ?? "codex",
-        argv: ["login"],
-        env: input.managedEnvironment,
-      };
-    }
-    return {
-      executable: input.piExecutable,
-      argv: [
-        "--no-extensions", "--no-skills", "--no-prompt-templates",
-        "--no-context-files", "--no-themes", "--no-approve",
-        "--provider", profile.provider,
-        "--model", profile.model,
-        "--",
-        "Run /login to authenticate this isolated harness profile, then /exit.",
-      ],
-      env: input.managedEnvironment,
-    };
-  }
-  if (profile.family === "devin") {
-    return {
-      executable: input.devinExecutable ?? "devin",
-      argv: ["auth", "login"],
-      env: input.managedEnvironment,
-    };
-  }
-  return {
-    executable: input.claudeExecutable ?? "claude",
-    argv: ["auth", "login", "--claudeai"],
-    env: input.managedEnvironment,
-  };
+export function authCommand(input: AuthInput): ProfileAuthCommand {
+  return providerIntegration(input.profile).authCommand(input);
 }
 
 export function runInteractive(command: ProfileAuthCommand, cwd: string): Promise<number> {

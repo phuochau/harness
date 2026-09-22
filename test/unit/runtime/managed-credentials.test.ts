@@ -36,3 +36,24 @@ it("projects only the selected provider subscription file and never overwrites m
   await projectLocalSubscriptionCredentials({ profile: profile("devin"), paths, ambient: { HOME: home } });
   expect(await readFile(projected[0]!, "utf8")).toContain("managed-login");
 });
+
+it("separates direct Pi auth from Codex CLI credential projection", async () => {
+  const root = await mkdtemp(join(tmpdir(), "managed-credentials-"));
+  roots.push(root);
+  const home = join(root, "home");
+  const piAuth = join(home, ".pi", "agent", "auth.json");
+  const codexAuth = join(home, ".codex", "auth.json");
+  await mkdir(dirname(piAuth), { recursive: true });
+  await mkdir(dirname(codexAuth), { recursive: true });
+  await writeFile(piAuth, "pi-secret");
+  await writeFile(codexAuth, "codex-secret");
+  const paths = managedRuntimePaths({ dataHome: join(root, "managed"), runtimeVersion: "0.1.0", profileId: "planner-codex" });
+  const native = { ...profile("codex"), id: "planner-codex", provider: "openai-codex" };
+  expect(await projectLocalSubscriptionCredentials({ profile: native, paths, ambient: { HOME: home } }))
+    .toEqual([join(paths.piAgentDir, "auth.json")]);
+  expect(await readFile(join(paths.piAgentDir, "auth.json"), "utf8")).toBe("pi-secret");
+  const acp = { ...native, provider: "pi-shell-acp" };
+  expect(await projectLocalSubscriptionCredentials({ profile: acp, paths, ambient: { HOME: home } }))
+    .toEqual([join(paths.profileHome, ".codex", "auth.json")]);
+  expect(await readFile(join(paths.profileHome, ".codex", "auth.json"), "utf8")).toBe("codex-secret");
+});

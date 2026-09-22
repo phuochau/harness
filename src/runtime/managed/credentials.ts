@@ -1,8 +1,8 @@
 import { constants } from "node:fs";
 import { chmod, copyFile, lstat, mkdir } from "node:fs/promises";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import type { ResolvedProfile } from "../../config/profiles.js";
+import { providerIntegration } from "../../providers/registry.js";
 import type { ManagedRuntimePaths } from "./paths.js";
 
 async function copyCredential(source: string, target: string): Promise<boolean> {
@@ -36,38 +36,11 @@ export async function projectLocalSubscriptionCredentials(input: {
   readonly ambient?: Readonly<Record<string, string | undefined>>;
 }): Promise<readonly string[]> {
   const ambient = input.ambient ?? process.env;
-  const home = ambient.HOME ?? homedir();
   const projected: string[] = [];
-  const copy = async (source: string, target: string) => {
+  for (const { source, target } of providerIntegration(input.profile).credentialFiles({
+    profile: input.profile, paths: input.paths, ambient,
+  })) {
     if (await copyCredential(source, target)) projected.push(target);
-  };
-  if (input.profile.family === "codex") {
-    if (input.profile.provider === "pi-shell-acp") {
-      await copy(
-        join(ambient.CODEX_HOME ?? join(home, ".codex"), "auth.json"),
-        join(input.paths.profileHome, ".codex", "auth.json"),
-      );
-    } else {
-      await copy(
-        join(ambient.PI_CODING_AGENT_DIR ?? join(home, ".pi", "agent"), "auth.json"),
-        join(input.paths.piAgentDir, "auth.json"),
-      );
-    }
-  } else if (input.profile.family === "devin") {
-    await copy(
-      join(ambient.XDG_DATA_HOME ?? join(home, ".local", "share"), "devin", "credentials.toml"),
-      join(input.paths.xdgDataHome, "devin", "credentials.toml"),
-    );
-    await copy(
-      join(ambient.XDG_CONFIG_HOME ?? join(home, ".config"), "devin", "config.json"),
-      join(input.paths.xdgConfigHome, "devin", "config.json"),
-    );
-  } else {
-    await copy(join(home, ".claude.json"), join(input.paths.profileHome, ".claude.json"));
-    await copy(
-      join(home, ".claude", ".credentials.json"),
-      join(input.paths.profileHome, ".claude", ".credentials.json"),
-    );
   }
   return projected;
 }

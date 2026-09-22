@@ -7,7 +7,7 @@ import {
   parseTerminalWorkerResult,
 } from "../../../src/runtime/pi-worker/results.js";
 import { contractAssignment, completedResultText } from "../../support/worker-fixtures.js";
-import { recoverInterruptedDevin } from "../../../src/runtime/pi-worker/runtime.js";
+import { recoverInterruptedDevin } from "../../../src/providers/devin-cli.js";
 
 const temporary: string[] = [];
 afterEach(async () => {
