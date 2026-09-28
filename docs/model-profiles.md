@@ -20,11 +20,13 @@ The `provider/` prefix on `model` is optional; when present it must equal the
 profile's own `provider`.
 
 Worker preflight requires an **exact** provider + model row in the profile's
-`pi --list-models` output. `glm-5.3` is not satisfied by `glm-5.3-flash`, and a
-missing credential, unreachable declaration, or absent model leaves the profile
-unavailable with a specific reason — the runner then tries the next entry in
-`runner.prefer`. Moving aliases such as `devstral-latest` are allowed but are a
-deliberate choice to float with the provider's catalog.
+`pi --list-models` output. `glm-5.3` is not satisfied by `glm-5.3-flash`.
+A missing credential, managed catalog, or model leaves the profile unavailable
+with a specific reason, and the runner tries the next entry in
+`runner.prefer`. Preflight does not contact the endpoint: an unreachable
+Ollama or vLLM server is reported when a worker attempts to use it. Moving
+aliases such as `devstral-latest` are allowed but are a deliberate choice to
+float with the provider's catalog.
 
 `family` is the origin model family used by independent-review policy, not the
 provider or gateway name. An OpenRouter-hosted DeepSeek model has

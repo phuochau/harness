@@ -21,7 +21,7 @@ Ship copyable, inactive examples for DeepSeek, Google Gemini, Z.ai GLM, MiniMax,
 
 ## Preflight and failure behavior
 
-Worker preflight must match the exact provider/model row from Pi's available-model listing. A similarly prefixed model (such as `glm-5.3-flash`) cannot satisfy `glm-5.3`. For a custom model, the generated catalog must be present as a regular managed file before launch. A missing credential, unavailable endpoint, absent model, or malformed declaration makes the profile unavailable with a specific reason; the controller may choose the next declared runner. Provider/model combinations are never silently substituted.
+Worker preflight must match the exact provider/model row from Pi's available-model listing. A similarly prefixed model (such as `glm-5.3-flash`) cannot satisfy `glm-5.3`. For a custom model, the generated catalog must be present as a regular managed file before launch. A missing credential, absent model, or malformed declaration makes the profile unavailable with a specific reason; the controller may choose the next declared runner. Preflight does not contact the endpoint, so an unreachable server fails when the worker attempts to use it. Provider/model combinations are never silently substituted.
 
 ## Compatibility and verification
 
