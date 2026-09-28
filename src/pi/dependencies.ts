@@ -236,7 +236,7 @@ function sessionController(
   return new HarnessController(queue);
 }
 
-class ProjectCommandBackend implements HarnessCommandBackend {
+export class ProjectCommandBackend implements HarnessCommandBackend {
   private active: ProductionRunSystem | undefined;
 
   public constructor(

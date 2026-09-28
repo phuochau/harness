@@ -17,8 +17,9 @@ npm exec --yes --package pi-multi-agent-harness@0.1.0 -- harness init .
 ```
 
 Initialization creates a ready `.harness/workflow.yaml`, `profiles.yaml`,
-`environment.yaml`, `policy.yaml`, `harness.lock`, workflow presets, and
-`.pi/settings.json`. Existing customized files are never overwritten.
+`environment.yaml`, `policy.yaml`, `harness.lock`, the `workflows/bugfix.yaml`
+and `workflows/small-feature.yaml` quick presets, and `.pi/settings.json`.
+Existing customized files are never overwritten.
 
 The default install inventory includes only the Pi harness, the Codex CLI ACP
 bridge, and the Devin CLI ACP bridge. Global Pi packages, skills, MCP servers,
