@@ -10,6 +10,8 @@ Worker selection is data in `.harness/workflow.yaml`, not a hard-coded call
 chain. The ready-to-use default plans with Codex, prefers Devin then Codex for
 implementation, and requires review by a different provider family. The
 included `spec-kit-codex.yaml` preset makes Codex the primary implementer.
+Additional hosted or local coding models can be declared as opt-in `pi-native`
+profiles — see [coding model profiles](docs/model-profiles.md).
 
 ## Quick start
 
@@ -57,6 +59,7 @@ be reconciled after the controller restarts.
 
 - [Installation and setup](docs/installation.md)
 - [Workflow DSL](docs/workflow-dsl.md)
+- [Coding model profiles](docs/model-profiles.md)
 - [Recovery and operations](docs/recovery.md)
 - [Security model](SECURITY.md)
 - [Release process](docs/releasing.md)

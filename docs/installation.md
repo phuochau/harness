@@ -64,6 +64,13 @@ The harness never prints or stores credential values in receipts. Codex uses
 `codex login`; Devin uses `devin auth login`. API-key billing is not selected as
 an automatic fallback.
 
+Additional coding models are opt-in: hosted providers run through `pi-native`
+profiles authenticated per profile with `harness auth <profile> .`, and local
+or remote OpenAI-compatible endpoints are declared with an isolated
+`model_config` whose only credential is a named environment variable. Examples
+and activation steps live in [coding model profiles](model-profiles.md); the
+default runner preferences stay Codex/Devin until you edit them.
+
 ## Diagnose and start
 
 ```bash

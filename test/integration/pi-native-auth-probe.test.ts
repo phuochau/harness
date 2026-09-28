@@ -39,3 +39,26 @@ it("checks authentication after a declared native Pi extension registers its pro
   expect(command.exitCode).toBe(0);
   expect(JSON.parse(command.stdout)).toEqual({ status: "ready" });
 });
+
+it("discovers a generated custom model catalog without a live endpoint", async () => {
+  const root = await mkdtemp(join(tmpdir(), "harness-native-auth-"));
+  temporary.push(root);
+  const agentDir = join(root, "agent");
+  await mkdir(agentDir);
+  await writeFile(join(agentDir, "models.json"), JSON.stringify({
+    providers: {
+      ollama: {
+        baseUrl: "http://127.0.0.1:1/v1",
+        apiKey: "local",
+        api: "openai-completions",
+        models: [{ id: "qwen3-coder:30b", name: "Qwen3-Coder 30B" }],
+      },
+    },
+  }));
+  const input = { piCliPath: join(process.cwd(), "node_modules/.bin/pi"),
+    provider: "ollama", model: "qwen3-coder:30b",
+    extensionPaths: [], agentDir, cwd: root };
+  expect(await checkPiNativeAuth(input)).toEqual({ status: "ready" });
+  expect(await checkPiNativeAuth({ ...input, model: "qwen3-coder:14b" }))
+    .toEqual({ status: "not_ready", reason: "provider_or_model_not_found" });
+});

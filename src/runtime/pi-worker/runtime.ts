@@ -97,6 +97,10 @@ async function verifyManagedResources(
       evidence.push("managed resource is missing");
     }
   }
+  if (profile.modelConfig !== undefined && managed.modelCatalogPath === undefined) {
+    verified = false;
+    evidence.push("managed model catalog is not materialized");
+  }
   if (managed.modelCatalogPath !== undefined) {
     try {
       const info = await lstat(managed.modelCatalogPath);
@@ -117,6 +121,18 @@ async function verifyManagedResources(
   evidence.push(...providerCheck.evidence);
   if (verified) evidence.push("managed profile resources verified");
   return { verified, evidence };
+}
+
+function piModelRows(stdout: string): { provider: string; model: string }[] {
+  const lines = stdout.split("\n").filter((line) => line.trim() !== "");
+  const rows =
+    lines.length > 0 && /^\s*provider\s+model\b/i.test(lines[0]!)
+      ? lines.slice(1)
+      : lines;
+  return rows.map((line) => {
+    const [provider = "", model = ""] = line.trim().split(/\s+/);
+    return { provider, model };
+  });
 }
 
 export class PiWorkerRuntime {
@@ -163,7 +179,14 @@ export class PiWorkerRuntime {
       env: authProbe.env, shell: false,
     });
     const providerRegistered = models.exitCode === 0 && !/provider.+not found/i.test(models.stderr);
-    const modelAvailable = providerRegistered && models.stdout.includes(profile.model.split("/").at(-1)!);
+    const modelId = profile.model.startsWith(`${profile.provider}/`)
+      ? profile.model.slice(profile.provider.length + 1)
+      : profile.model;
+    const modelAvailable =
+      providerRegistered &&
+      piModelRows(models.stdout).some(
+        (row) => row.provider === profile.provider && row.model === modelId,
+      );
     const authenticated = authProbe.isAuthenticated(auth.stdout, auth.stderr, auth.exitCode);
     return {
       available: version.exitCode === 0 && providerRegistered && modelAvailable && authenticated && resourceCheck.verified,

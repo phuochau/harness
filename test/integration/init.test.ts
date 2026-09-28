@@ -73,6 +73,14 @@ describe("harness init", () => {
       role: "implementation",
     });
     expect(profiles.profiles["implementer-devin"].tools).toContain("devin");
+    expect(
+      Object.values(profiles.profiles).every(
+        (profile) =>
+          typeof profile === "object" &&
+          profile !== null &&
+          !("model_config" in profile),
+      ),
+    ).toBe(true);
 
     const environment = await yaml(join(root, ".harness/environment.yaml"));
     const lock = await yaml(join(root, ".harness/harness.lock"));
