@@ -138,6 +138,43 @@ describe("harness init", () => {
     });
   });
 
+  it("installs validated bugfix and small-feature workflow presets", async () => {
+    const root = await fixture("node");
+    await initProject({ root });
+    for (const kind of ["bugfix", "small-feature"] as const) {
+      const preset = await yaml(join(root, `.harness/workflows/${kind}.yaml`));
+      expect(() => validateWorkflow(preset)).not.toThrow();
+      expect(preset.stages[0].id).toBe("quick_plan");
+      expect(preset.stages[0].uses).toBe("harness.quick-plan");
+      expect(preset.stages[0].with).toEqual({ kind });
+      expect(preset.stages.map((stage: { id: string }) => stage.id)).toEqual([
+        "quick_plan",
+        "implement",
+        "review",
+        "verify",
+        "integrate",
+        "post_integrate_verify",
+        "record_task_done",
+        "final_verify",
+        "final_review",
+        "push",
+        "final_pr",
+      ]);
+    }
+  });
+
+  it("leaves all existing files untouched on a rerun", async () => {
+    const root = await fixture("node");
+    await initProject({ root });
+    const workflow = join(root, ".harness/workflow.yaml");
+    const bugfix = join(root, ".harness/workflows/bugfix.yaml");
+    const before = await readFile(workflow, "utf8");
+    const beforePreset = await readFile(bugfix, "utf8");
+    await expect(initProject({ root })).rejects.toThrow(/already exists/);
+    expect(await readFile(workflow, "utf8")).toBe(before);
+    expect(await readFile(bugfix, "utf8")).toBe(beforePreset);
+  });
+
   it("supports paths with spaces and projects that are not Git repositories", async () => {
     const root = await fixture("node", "project with spaces");
     await initProject({ root });

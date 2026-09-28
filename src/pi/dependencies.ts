@@ -6,7 +6,11 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { parse } from "yaml";
 import type { ControllerCommand } from "../contracts/controller-command.js";
-import { validateEnvironmentAndLock } from "../contracts/index.js";
+import {
+  validateEnvironmentAndLock,
+  type EnvironmentDocument,
+  type WorkflowDocument,
+} from "../contracts/index.js";
 import { compileWorkflow, type CompiledWorkflow } from "../config/compile.js";
 import { loadEnvironment, loadWorkflow } from "../config/load.js";
 import { ControllerCommandQueue } from "../controller/command-queue.js";
@@ -16,6 +20,13 @@ import {
   type HarnessCommandBackend,
 } from "./commands.js";
 import { runRequestFromPayload, type RunRequest } from "./run-request.js";
+import {
+  buildRunPreview,
+  compileRunSelection,
+  type RunSelectionContext,
+} from "./run-selection.js";
+
+export { previewEffectKinds } from "./run-selection.js";
 import type { HarnessRuntimeEventSink } from "./events.js";
 import { ControllerEventRouter } from "./events.js";
 import { canonicalJson } from "../shared/canonical-json.js";
@@ -79,6 +90,8 @@ const defaultFactory: HarnessSessionDependencyFactory = {
 
 interface LoadedProjectConfiguration {
   readonly workflow: CompiledWorkflow;
+  readonly workflowDocument: WorkflowDocument;
+  readonly environment: EnvironmentDocument;
   readonly commands: Readonly<Record<string, readonly string[]>>;
   readonly permissions: readonly string[];
   readonly runtime: ManagedPiRuntimeBundle;
@@ -101,12 +114,6 @@ function artifactPaths(workflow: CompiledWorkflow): ArtifactPaths {
     }
   }
   return outputs as unknown as ArtifactPaths;
-}
-
-export function previewEffectKinds(
-  stages: readonly { readonly uses: string }[],
-): readonly string[] {
-  return [...new Set(stages.map((stage) => stage.uses))];
 }
 
 async function loadProjectConfiguration(
@@ -147,6 +154,8 @@ async function loadProjectConfiguration(
   const runtimeHash = await managedRuntimeHash(packageRoot);
   return {
     workflow: compileWorkflow({ workflow: workflowDocument, environment, profiles: runtime.profiles }),
+    workflowDocument: project.workflow,
+    environment,
     commands: environment.commands,
     permissions,
     runtime,
@@ -239,8 +248,25 @@ class ProjectCommandBackend implements HarnessCommandBackend {
     private readonly configurationError?: string,
   ) {}
 
+  private selectionContext(): RunSelectionContext {
+    const configuration = this.configuration;
+    if (configuration === undefined) {
+      throw new Error(this.configurationError ?? "Harness is not initialized");
+    }
+    return {
+      root: this.cwd,
+      workflowDocument: configuration.workflowDocument,
+      defaultWorkflow: configuration.workflow,
+      environment: configuration.environment,
+      profiles: configuration.runtime.profiles,
+    };
+  }
+
   public async snapshot() {
-    if (this.active !== undefined) return this.active.readState();
+    if (this.active !== undefined) {
+      const state = await this.active.readState();
+      return { ...state, kind: this.active.selection.kind };
+    }
     return {
       project: this.cwd,
       ready: this.configuration !== undefined,
@@ -292,28 +318,17 @@ class ProjectCommandBackend implements HarnessCommandBackend {
     };
   }
 
-  public async previewRun(_request: RunRequest) {
+  public async previewRun(request: RunRequest) {
     if (this.configuration === undefined) {
       throw new Error(this.configurationError ?? "Harness is not initialized");
     }
-    const stages = this.configuration.workflow.stages;
-    const workers = new Set<string>();
-    const profiles = new Set<string>();
-    for (const stage of stages) {
-      if (typeof stage.runner === "object") {
-        stage.runner.prefer.forEach((item) => workers.add(item));
-      }
-      if (stage.model_profile) profiles.add(stage.model_profile);
-    }
-    return {
-      workflowHash: this.configuration.workflow.revision,
-      commands: this.configuration.commands,
-      workers: [...workers],
-      credentialProfiles: [...profiles],
-      permissions: this.configuration.permissions,
-      branches: ["harness/run-<run-id>", "harness/<run-id>-<task-id>"],
-      effects: previewEffectKinds(stages),
-    };
+    const workflow = await compileRunSelection(this.selectionContext(), request);
+    return buildRunPreview(
+      request,
+      workflow,
+      this.configuration.commands,
+      this.configuration.permissions,
+    );
   }
 
   public async enqueue(command: ControllerCommand): Promise<void> {
@@ -330,7 +345,14 @@ class ProjectCommandBackend implements HarnessCommandBackend {
       }
       if (this.active !== undefined) throw new Error("a harness run is already active");
       const payload = command.payload as Record<string, unknown>;
-      const preview = await this.previewRun(runRequestFromPayload(payload));
+      const request = runRequestFromPayload(payload);
+      const workflow = await compileRunSelection(this.selectionContext(), request);
+      const preview = buildRunPreview(
+        request,
+        workflow,
+        this.configuration.commands,
+        this.configuration.permissions,
+      );
       const approved = payload.approvedPreviewHash;
       const expected = sha256(canonicalJson(preview));
       if (approved !== expected) {
@@ -346,9 +368,9 @@ class ProjectCommandBackend implements HarnessCommandBackend {
       const initialized = await initializeProductionRun({
         root: inspection.root,
         runId,
-        workflowRevision: this.configuration.workflow.revision,
+        workflowRevision: workflow.revision,
         approvedPreviewHash: expected,
-        artifactPaths: artifactPaths(this.configuration.workflow),
+        artifactPaths: artifactPaths(workflow),
         remote: "origin",
         baseBranch: inspection.branch,
       });
@@ -362,13 +384,17 @@ class ProjectCommandBackend implements HarnessCommandBackend {
           transportHash: this.configuration.transportHash,
           runtimeHash: this.configuration.runtimeHash,
         },
-        workflow: this.configuration.workflow,
+        workflow,
         commands: this.configuration.commands,
+        selection: {
+          kind: request.kind,
+          ...(request.brief === undefined ? {} : { brief: request.brief }),
+        },
       });
       this.active = await composeProductionRun({
         initialized,
-        workflow: this.configuration.workflow,
-        artifactPaths: artifactPaths(this.configuration.workflow),
+        workflow,
+        artifactPaths: artifactPaths(workflow),
         commands: this.configuration.commands,
         pi: this.pi,
         context: this.context,

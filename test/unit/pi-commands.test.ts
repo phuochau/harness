@@ -17,6 +17,7 @@ function fixture(confirm = true) {
     doctor: async () => ({ ready: true, summary: "ready" }),
     previewRun: async () => ({
       workflowHash: `sha256:${"a".repeat(64)}`,
+      kind: "large-feature",
       commands: { task_verify: ["npm", "test"] },
       workers: ["devin", "codex", "claude"],
       credentialProfiles: ["chatgpt-planning"],

@@ -2,8 +2,18 @@ import { link, lstat, mkdir, open, readFile, unlink } from "node:fs/promises";
 import { dirname, isAbsolute } from "node:path";
 import type { CompiledWorkflow } from "../config/compile.js";
 import { contentRevision } from "../config/hash.js";
+import {
+  RUN_BRIEF_MAX_BYTES,
+  taskKinds,
+  type TaskKind,
+} from "../pi/run-request.js";
 import { canonicalJson } from "../shared/canonical-json.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
+
+export interface RunSelection {
+  readonly kind: TaskKind;
+  readonly brief?: string;
+}
 
 export interface ResolvedRunConfig {
   readonly schemaVersion: 1;
@@ -17,6 +27,7 @@ export interface ResolvedRunConfig {
   };
   readonly workflow: CompiledWorkflow;
   readonly commands: Readonly<Record<string, readonly string[]>>;
+  readonly selection?: RunSelection;
 }
 
 const digest = /^sha256:[0-9a-f]{64}$/;
@@ -32,11 +43,34 @@ export function validateResolvedRunConfig(value: unknown): ResolvedRunConfig {
   ) {
     throw new Error("invalid resolved run configuration");
   }
+  const topLevelKeys = canonicalJson(Object.keys(value).sort());
   if (
-    canonicalJson(Object.keys(value).sort()) !==
-      canonicalJson(["commands", "runtime", "schemaVersion", "workflow"])
+    topLevelKeys !==
+      canonicalJson(["commands", "runtime", "schemaVersion", "workflow"]) &&
+    topLevelKeys !==
+      canonicalJson(["commands", "runtime", "schemaVersion", "selection", "workflow"])
   ) {
     throw new Error("resolved run configuration has unknown or missing fields");
+  }
+  if (value.selection !== undefined) {
+    const selection = value.selection;
+    const selectionKeys = record(selection)
+      ? canonicalJson(Object.keys(selection).sort())
+      : "";
+    if (
+      !record(selection) ||
+      (selectionKeys !== canonicalJson(["kind"]) &&
+        selectionKeys !== canonicalJson(["brief", "kind"])) ||
+      typeof selection.kind !== "string" ||
+      !(taskKinds as readonly string[]).includes(selection.kind) ||
+      (selection.brief !== undefined &&
+        (typeof selection.brief !== "string" ||
+          selection.brief.length === 0 ||
+          Buffer.byteLength(selection.brief, "utf8") > RUN_BRIEF_MAX_BYTES)) ||
+      (selection.kind !== "large-feature" && selection.brief === undefined)
+    ) {
+      throw new Error("invalid resolved run selection");
+    }
   }
   const runtime = value.runtime;
   if (

@@ -132,6 +132,48 @@ export async function readDeclarativeProject(rootInput: string): Promise<Declara
   }
 }
 
+export const QUICK_WORKFLOW_PRESET_PATHS = {
+  bugfix: ".harness/workflows/bugfix.yaml",
+  "small-feature": ".harness/workflows/small-feature.yaml",
+} as const;
+
+export type QuickWorkflowKind = keyof typeof QUICK_WORKFLOW_PRESET_PATHS;
+
+export async function readQuickWorkflowPreset(
+  rootInput: string,
+  kind: QuickWorkflowKind,
+): Promise<WorkflowDocument> {
+  const relativePath = QUICK_WORKFLOW_PRESET_PATHS[kind];
+  let root: string;
+  try {
+    root = await realpath(rootInput);
+  } catch (error) {
+    throw new TrustedProjectReadError(
+      `project root is unavailable: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  let text: string;
+  try {
+    await assertDirectoryNotSymlink(join(root, ".harness"));
+    await assertDirectoryNotSymlink(join(root, ".harness", "workflows"));
+    text = await boundedRegularFile(join(root, relativePath));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new TrustedProjectReadError(
+        `workflow preset ${relativePath} is missing; run 'harness init' in a fresh project to install it, or use --kind large-feature`,
+      );
+    }
+    throw error;
+  }
+  try {
+    return validateWorkflow(parse(text));
+  } catch (error) {
+    throw new TrustedProjectReadError(
+      `invalid workflow preset ${relativePath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
 export async function readTrustedHarnessLock(rootInput: string): Promise<HarnessLock> {
   let root: string;
   try {

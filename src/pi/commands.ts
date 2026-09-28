@@ -7,7 +7,11 @@ import {
   renderStatus,
   renderTask,
 } from "./status-view.js";
-import { parseRunRequest, type RunRequest } from "./run-request.js";
+import {
+  parseRunRequest,
+  type RunRequest,
+  type TaskKind,
+} from "./run-request.js";
 import { canonicalJson } from "../shared/canonical-json.js";
 import { sha256 } from "../shared/sha256.js";
 
@@ -29,6 +33,8 @@ export type HarnessCommandName = (typeof harnessCommandNames)[number];
 
 export interface RunPreview {
   readonly workflowHash: string;
+  readonly kind: TaskKind;
+  readonly brief?: string;
   readonly commands: Readonly<Record<string, readonly string[]>>;
   readonly workers: readonly string[];
   readonly credentialProfiles: readonly string[];
