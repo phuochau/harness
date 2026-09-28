@@ -185,7 +185,10 @@ export async function createManagedPiRuntimeFromResolved(
     const paths = managedRuntimePaths({ dataHome, runtimeVersion: input.runtimeVersion, profileId: profile.id });
     managedProfiles[profile.id] = await materializeProfile(profile, paths, {
       ambient,
-      forwardedKeys: [],
+      forwardedKeys:
+        profile.modelConfig?.apiKeyEnv === undefined
+          ? []
+          : [profile.modelConfig.apiKeyEnv],
       executablePath,
       retainExtensionSources: true,
     });

@@ -23,6 +23,8 @@ export interface ManagedProfileView {
   readonly piSkillPaths: readonly string[];
   readonly providerSkillPaths: readonly string[];
   readonly promptTemplatePaths: readonly string[];
+  readonly modelCatalogPath?: string;
+  readonly modelCatalogHash?: `sha256:${string}`;
   readonly environment: Readonly<Record<string, string>>;
   readonly receiptHash: `sha256:${string}`;
 }
@@ -230,6 +232,40 @@ export async function materializeProfile(
       );
     }
 
+    let modelCatalog: { path: string; hash: `sha256:${string}` } | undefined;
+    if (profile.modelConfig !== undefined) {
+      const modelId = profile.model.startsWith(`${profile.provider}/`)
+        ? profile.model.slice(profile.provider.length + 1)
+        : profile.model;
+      const catalog = {
+        providers: {
+          [profile.provider]: {
+            baseUrl: profile.modelConfig.baseUrl,
+            api: profile.modelConfig.api,
+            apiKey:
+              profile.modelConfig.apiKeyEnv === undefined
+                ? "local"
+                : `$${profile.modelConfig.apiKeyEnv}`,
+            models: [
+              {
+                id: modelId,
+                ...(profile.modelConfig.name === undefined
+                  ? {}
+                  : { name: profile.modelConfig.name }),
+              },
+            ],
+          },
+        },
+      };
+      const catalogContent = `${JSON.stringify(catalog, null, 2)}\n`;
+      const finalCatalogPath = join(paths.piAgentDir, "models.json");
+      await writeFile(stagePath(staging, paths, finalCatalogPath), catalogContent, {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+      modelCatalog = { path: finalCatalogPath, hash: sha256(catalogContent) };
+    }
+
     const receiptBody = {
       schemaVersion: 1,
       profileId: profile.id,
@@ -242,6 +278,14 @@ export async function materializeProfile(
       promptTemplates: promptTemplatePaths.map((path) =>
         relative(paths.profileRoot, path),
       ),
+      ...(modelCatalog === undefined
+        ? {}
+        : {
+            modelCatalog: {
+              path: relative(paths.profileRoot, modelCatalog.path),
+              hash: modelCatalog.hash,
+            },
+          }),
     };
     const receiptHash = sha256(canonicalJson(receiptBody));
     await writeFile(
@@ -256,6 +300,9 @@ export async function materializeProfile(
       piSkillPaths,
       providerSkillPaths,
       promptTemplatePaths,
+      ...(modelCatalog === undefined
+        ? {}
+        : { modelCatalogPath: modelCatalog.path, modelCatalogHash: modelCatalog.hash }),
       environment,
       receiptHash,
     });

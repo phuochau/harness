@@ -154,6 +154,168 @@ describe("managed profile materialization", () => {
       .rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("materializes an isolated model catalog for each declared custom model", async () => {
+    const input = await fixture("devin");
+    const nativeProfile = (
+      id: string,
+      model: string,
+      name?: string,
+    ): ResolvedProfile => ({
+      id,
+      family: "qwen",
+      runtime: "pi",
+      provider: "ollama",
+      model,
+      modelConfig: {
+        baseUrl: "http://127.0.0.1:11434/v1",
+        api: "openai-completions",
+        ...(name === undefined ? {} : { name }),
+      },
+      role: "implementation",
+      environment: "isolated",
+      tools: [],
+      extensions: [],
+      skills: [],
+      promptTemplates: [],
+      contextFiles: false,
+      mcp: [],
+      hash: sha256(id),
+    });
+    const pathsFor = (id: string) =>
+      managedRuntimePaths({
+        dataHome: join(input.root, "managed-data"),
+        runtimeVersion: "0.1.0",
+        profileId: id,
+      });
+
+    const qwen = nativeProfile("local-qwen", "qwen3-coder:30b", "Qwen3-Coder 30B");
+    const devstral = nativeProfile("local-devstral", "devstral-small-2");
+    const qwenView = await materializeProfile(qwen, pathsFor("local-qwen"));
+    const devstralView = await materializeProfile(devstral, pathsFor("local-devstral"));
+
+    const qwenCatalog = JSON.parse(
+      await readFile(join(pathsFor("local-qwen").piAgentDir, "models.json"), "utf8"),
+    );
+    expect(qwenCatalog).toEqual({
+      providers: {
+        ollama: {
+          baseUrl: "http://127.0.0.1:11434/v1",
+          api: "openai-completions",
+          apiKey: "local",
+          models: [{ id: "qwen3-coder:30b", name: "Qwen3-Coder 30B" }],
+        },
+      },
+    });
+    const devstralCatalog = JSON.parse(
+      await readFile(join(pathsFor("local-devstral").piAgentDir, "models.json"), "utf8"),
+    );
+    expect(devstralCatalog).toEqual({
+      providers: {
+        ollama: {
+          baseUrl: "http://127.0.0.1:11434/v1",
+          api: "openai-completions",
+          apiKey: "local",
+          models: [{ id: "devstral-small-2" }],
+        },
+      },
+    });
+    expect(qwenView.modelCatalogPath).toBe(
+      join(pathsFor("local-qwen").piAgentDir, "models.json"),
+    );
+    expect(qwenView.modelCatalogHash).toMatch(/^sha256:/);
+    expect(qwenView.modelCatalogHash).not.toBe(devstralView.modelCatalogHash);
+    expect(qwenView.receiptHash).not.toBe(devstralView.receiptHash);
+
+    await materializeProfile(qwen, pathsFor("local-qwen"));
+    expect(
+      JSON.parse(
+        await readFile(join(pathsFor("local-qwen").piAgentDir, "models.json"), "utf8"),
+      ),
+    ).toEqual(qwenCatalog);
+  });
+
+  it("leaves profiles without a model config free of a managed catalog", async () => {
+    const input = await fixture("devin");
+    const view = await materializeProfile(input.profile, input.paths);
+    expect(view.modelCatalogPath).toBeUndefined();
+    expect(view.modelCatalogHash).toBeUndefined();
+    await expect(
+      lstat(join(input.paths.piAgentDir, "models.json")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("forwards only the declared credential key and binds the catalog to the receipt", async () => {
+    const input = await fixture("devin");
+    const remote: ResolvedProfile = {
+      id: "remote-llm",
+      family: "remote-coder",
+      runtime: "pi",
+      provider: "remote-llm",
+      model: "remote-llm/coder-v9",
+      modelConfig: {
+        baseUrl: "https://llm.example.com/v1",
+        api: "openai-completions",
+        apiKeyEnv: "REMOTE_LLM_API_KEY",
+      },
+      role: "implementation",
+      environment: "isolated",
+      tools: [],
+      extensions: [],
+      skills: [],
+      promptTemplates: [],
+      contextFiles: false,
+      mcp: [],
+      hash: sha256("remote-llm"),
+    };
+    const remotePaths = managedRuntimePaths({
+      dataHome: join(input.root, "managed-data"),
+      runtimeVersion: "0.1.0",
+      profileId: "remote-llm",
+    });
+    const remoteView = await materializeProfile(remote, remotePaths, {
+      ambient: {
+        REMOTE_LLM_API_KEY: "ambient-secret-value",
+        UNRELATED_SECRET: "do-not-forward",
+      },
+      forwardedKeys: ["REMOTE_LLM_API_KEY"],
+    });
+    expect(remoteView.environment.REMOTE_LLM_API_KEY).toBe("ambient-secret-value");
+    expect(remoteView.environment.UNRELATED_SECRET).toBeUndefined();
+
+    const local = await materializeProfile(input.profile, input.paths, {
+      ambient: { REMOTE_LLM_API_KEY: "ambient-secret-value" },
+      forwardedKeys: [],
+    });
+    expect(local.environment.REMOTE_LLM_API_KEY).toBeUndefined();
+
+    const missingView = await materializeProfile(remote, remotePaths, {
+      ambient: {},
+      forwardedKeys: ["REMOTE_LLM_API_KEY"],
+    });
+    expect(missingView.environment.REMOTE_LLM_API_KEY).toBeUndefined();
+
+    const catalogPath = join(remotePaths.piAgentDir, "models.json");
+    const catalog = JSON.parse(await readFile(catalogPath, "utf8"));
+    expect(catalog.providers["remote-llm"].apiKey).toBe("$REMOTE_LLM_API_KEY");
+    expect(catalog.providers["remote-llm"].models).toEqual([{ id: "coder-v9" }]);
+    expect(JSON.stringify(catalog)).not.toContain("ambient-secret-value");
+
+    const info = await lstat(catalogPath);
+    expect(info.isFile()).toBe(true);
+    expect(info.isSymbolicLink()).toBe(false);
+    expect(info.mode & 0o777).toBe(0o600);
+
+    const receipt = JSON.parse(
+      await readFile(join(remotePaths.profileRoot, "receipt.json"), "utf8"),
+    );
+    expect(receipt.modelCatalog).toEqual({
+      path: "pi-agent/models.json",
+      hash: sha256(await readFile(catalogPath, "utf8")),
+    });
+    expect(remoteView.modelCatalogHash).toBe(receipt.modelCatalog.hash);
+    expect(receipt.receiptHash).toBe(remoteView.receiptHash);
+  });
+
   it("writes strict Codex ACP settings through the Codex integration", async () => {
     const input = await fixture("devin");
     const profile = { ...input.profile, family: "codex", integration: "codex-cli",

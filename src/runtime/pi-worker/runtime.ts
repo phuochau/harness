@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { lstat, mkdir, readdir, rm, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, rm, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ProcessRunner } from "../../actions/types.js";
 import type { ResolvedProfile, ResolvedProfiles } from "../../config/profiles.js";
@@ -95,6 +95,21 @@ async function verifyManagedResources(
     } catch {
       verified = false;
       evidence.push("managed resource is missing");
+    }
+  }
+  if (managed.modelCatalogPath !== undefined) {
+    try {
+      const info = await lstat(managed.modelCatalogPath);
+      if (info.isSymbolicLink() || !info.isFile()) {
+        verified = false;
+        evidence.push("managed model catalog is not a real file");
+      } else if (sha256(await readFile(managed.modelCatalogPath)) !== managed.modelCatalogHash) {
+        verified = false;
+        evidence.push("managed model catalog content hash mismatch");
+      }
+    } catch {
+      verified = false;
+      evidence.push("managed model catalog is missing");
     }
   }
   const providerCheck = await providerIntegration(profile).verifyManaged({ profile, managed });

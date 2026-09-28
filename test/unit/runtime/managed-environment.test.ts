@@ -37,6 +37,27 @@ describe("managed environment", () => {
     expect(Object.isFrozen(env)).toBe(true);
   });
 
+  it("forwards a declared credential key only when ambient supplies a value", () => {
+    const base = {
+      profile: fixtureResolvedProfiles().byId["implementer-devin"]!,
+      paths,
+      executablePath: "/usr/bin:/bin",
+    };
+    const env = buildManagedEnvironment({
+      ...base,
+      ambient: { REMOTE_LLM_API_KEY: "secret-value", OTHER_SECRET: "keep-out" },
+      forwardedKeys: ["REMOTE_LLM_API_KEY"],
+    });
+    expect(env.REMOTE_LLM_API_KEY).toBe("secret-value");
+    expect(env.OTHER_SECRET).toBeUndefined();
+    const missing = buildManagedEnvironment({
+      ...base,
+      ambient: {},
+      forwardedKeys: ["REMOTE_LLM_API_KEY"],
+    });
+    expect(missing.REMOTE_LLM_API_KEY).toBeUndefined();
+  });
+
   it("does not let forwarding override harness-owned roots", () => {
     expect(() =>
       buildManagedEnvironment({

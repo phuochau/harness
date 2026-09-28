@@ -225,7 +225,7 @@ describe("profile resolution", () => {
       const document = profileDocument();
       document.profiles["local-qwen"] = {
         ...baseProfile,
-        model_config: model_config as ProfileDocument["profiles"][string]["model_config"],
+        model_config: model_config as NonNullable<ProfileDocument["profiles"][string]["model_config"]>,
       };
       return document;
     };
