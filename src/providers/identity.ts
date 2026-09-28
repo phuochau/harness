@@ -8,6 +8,7 @@ export interface ProfileIntegrationIdentity {
   readonly provider: string;
   readonly extensions: readonly string[];
   readonly skills: readonly { readonly targets: readonly string[] }[];
+  readonly model_config?: unknown;
 }
 
 export function effectiveIntegrationId(profile: {
@@ -46,6 +47,9 @@ export function validateProfileIntegration(profile: ProfileIntegrationIdentity):
     }
   } else if (Object.values(bridges).some(({ provider }) => provider === profile.provider)) {
     throw new Error(`profile ${profile.id}: pi-native cannot use bridge provider ${profile.provider}`);
+  }
+  if (profile.model_config !== undefined && integration !== "pi-native") {
+    throw new Error(`profile ${profile.id}: model_config requires the pi-native integration, not ${integration}`);
   }
   if (integration !== "devin-cli" && integration !== "claude-bridge" &&
       profile.skills.some((skill) => skill.targets.includes("provider"))) {

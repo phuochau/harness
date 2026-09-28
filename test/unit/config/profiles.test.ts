@@ -143,6 +143,151 @@ describe("profile resolution", () => {
     expect(() => resolveProfiles(custom, resources)).toThrow(/implementer-devin.*unknown-cli/);
   });
 
+  it("resolves exact model identities and a validated custom model config", () => {
+    const nativeProfile = {
+      family: "qwen",
+      runtime: "pi" as const,
+      provider: "ollama",
+      model: "qwen3-coder:30b",
+      role: "implementation" as const,
+      environment: "isolated" as const,
+      tools: [],
+      extensions: [],
+      skills: [],
+      context_files: false as const,
+      prompt_templates: [],
+      mcp: [],
+      model_config: {
+        base_url: "http://127.0.0.1:11434/v1",
+        api: "openai-completions" as const,
+        name: "Qwen3-Coder 30B",
+      },
+    };
+    const document = profileDocument();
+    document.profiles["local-qwen"] = nativeProfile;
+    const resolved = resolveProfiles(document, resources);
+    const qwen = resolved.byId["local-qwen"];
+    expect(qwen?.model).toBe("qwen3-coder:30b");
+    expect(qwen?.modelConfig).toEqual({
+      baseUrl: "http://127.0.0.1:11434/v1",
+      api: "openai-completions",
+      name: "Qwen3-Coder 30B",
+    });
+    expect(resolved.byId["implementer-devin"]).not.toHaveProperty("modelConfig");
+    expect(resolved.byId["implementer-devin"]?.hash).toBe(
+      "sha256:89710cd4924fcb2ac5e753e6466cc0bb6643632c66212c94b367707b32a519fa",
+    );
+
+    const changedModel = profileDocument();
+    changedModel.profiles["local-qwen"] = {
+      ...nativeProfile,
+      model: "qwen3-coder:14b",
+    };
+    expect(resolveProfiles(changedModel, resources).byId["local-qwen"]?.hash)
+      .not.toBe(qwen?.hash);
+
+    const changedUrl = profileDocument();
+    changedUrl.profiles["local-qwen"] = {
+      ...nativeProfile,
+      model_config: { ...nativeProfile.model_config, base_url: "http://[::1]:11434/v1" },
+    };
+    expect(resolveProfiles(changedUrl, resources).byId["local-qwen"]?.hash)
+      .not.toBe(qwen?.hash);
+  });
+
+  it("rejects model config on bridge integrations", () => {
+    const document = profileDocument();
+    document.profiles["implementer-devin"]!.model_config = {
+      base_url: "http://127.0.0.1:11434/v1",
+      api: "openai-completions",
+    };
+    expect(() => resolveProfiles(document, resources)).toThrow(
+      /implementer-devin.*model_config/,
+    );
+  });
+
+  it("rejects unsafe or under-authenticated model endpoints", () => {
+    const baseProfile = {
+      family: "qwen",
+      runtime: "pi" as const,
+      provider: "ollama",
+      model: "qwen3-coder:30b",
+      role: "implementation" as const,
+      environment: "isolated" as const,
+      tools: [],
+      extensions: [],
+      skills: [],
+      context_files: false as const,
+      prompt_templates: [],
+      mcp: [],
+    };
+    const withConfig = (model_config: object) => {
+      const document = profileDocument();
+      document.profiles["local-qwen"] = {
+        ...baseProfile,
+        model_config: model_config as ProfileDocument["profiles"][string]["model_config"],
+      };
+      return document;
+    };
+
+    expect(() =>
+      resolveProfiles(
+        withConfig({ base_url: "http://192.168.1.10:11434/v1", api: "openai-completions" }),
+        resources,
+      ),
+    ).toThrow(/local-qwen.*base_url/);
+    expect(() =>
+      resolveProfiles(
+        withConfig({ base_url: "https://llm.example.com/v1", api: "openai-completions" }),
+        resources,
+      ),
+    ).toThrow(/local-qwen.*api_key_env/);
+    expect(() =>
+      resolveProfiles(
+        withConfig({
+          base_url: "http://127.0.0.1:11434/v1",
+          api: "openai-completions",
+          api_key_env: "not a key",
+        }),
+        resources,
+      ),
+    ).toThrow(/api_key_env/);
+    expect(() =>
+      resolveProfiles(
+        withConfig({
+          base_url: "http://127.0.0.1:11434/v1",
+          api: "openai-completions",
+          api_key_env: "!cat /etc/passwd",
+        }),
+        resources,
+      ),
+    ).toThrow(/api_key_env/);
+    expect(() =>
+      resolveProfiles(
+        withConfig({
+          base_url: "http://127.0.0.1:11434/v1",
+          api: "openai-completions",
+          surprise: true,
+        }),
+        resources,
+      ),
+    ).toThrow(/model_config/);
+
+    const remote = resolveProfiles(
+      withConfig({
+        base_url: "https://llm.example.com/v1",
+        api: "openai-completions",
+        api_key_env: "REMOTE_LLM_API_KEY",
+      }),
+      resources,
+    );
+    expect(remote.byId["local-qwen"]?.modelConfig).toEqual({
+      baseUrl: "https://llm.example.com/v1",
+      api: "openai-completions",
+      apiKeyEnv: "REMOTE_LLM_API_KEY",
+    });
+  });
+
   it("rejects an explicit native Pi integration for a bridge provider", () => {
     const document = profileDocument();
     document.profiles["implementer-devin"]!.integration = "pi-native";

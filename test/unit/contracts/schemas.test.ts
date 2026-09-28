@@ -199,3 +199,30 @@ it("rejects empty and unsafe profile family slugs", () => {
     schema: "harness/profiles/v1", profiles: { research: profile },
   })).not.toThrow();
 });
+
+it("accepts a closed optional model_config and rejects unknown config keys", () => {
+  const profile = {
+    family: "qwen", runtime: "pi", provider: "ollama",
+    model: "qwen3-coder:30b", role: "implementation", environment: "isolated",
+    tools: [], extensions: [], skills: [], context_files: false,
+    prompt_templates: [], mcp: [],
+  };
+  const wrap = (model_config: unknown) => ({
+    schema: "harness/profiles/v1",
+    profiles: { local: { ...profile, model_config } },
+  });
+  expect(() => validateProfiles(wrap({
+    base_url: "http://127.0.0.1:11434/v1",
+    api: "openai-completions",
+    name: "Qwen3-Coder 30B",
+    api_key_env: "OLLAMA_API_KEY",
+  }))).not.toThrow();
+  for (const model_config of [
+    { base_url: "http://127.0.0.1:11434/v1", api: "openai-completions", extra: true },
+    { base_url: "http://127.0.0.1:11434/v1", api: "anthropic-messages" },
+    { base_url: "http://127.0.0.1:11434/v1", api: "openai-completions", api_key_env: "!command" },
+    { api: "openai-completions" },
+  ]) {
+    expect(() => validateProfiles(wrap(model_config))).toThrow();
+  }
+});

@@ -16,6 +16,13 @@ export interface ResolvedProfileSkill {
   readonly targets: readonly SkillTarget[];
 }
 
+export interface ResolvedProfileModelConfig {
+  readonly baseUrl: string;
+  readonly api: "openai-completions";
+  readonly name?: string;
+  readonly apiKeyEnv?: string;
+}
+
 export interface ResolvedProfile {
   readonly id: string;
   readonly family: ProfileFamily;
@@ -23,6 +30,7 @@ export interface ResolvedProfile {
   readonly runtime: "pi";
   readonly provider: string;
   readonly model: string;
+  readonly modelConfig?: ResolvedProfileModelConfig;
   readonly thinking?:
     | "off"
     | "minimal"
@@ -60,6 +68,60 @@ function sortedUnique(values: readonly string[], label: string): string[] {
   return [...unique].sort();
 }
 
+function loopbackHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host === "[::1]" ||
+    host.startsWith("127.")
+  );
+}
+
+type ProfileModelConfigDeclaration = NonNullable<
+  ProfileDocument["profiles"][string]["model_config"]
+>;
+
+function resolveModelConfig(
+  id: string,
+  config: ProfileModelConfigDeclaration,
+): ResolvedProfileModelConfig {
+  let url: URL;
+  try {
+    url = new URL(config.base_url);
+  } catch {
+    throw new Error(`profile ${id}: model_config base_url is not a valid URL`);
+  }
+  if (url.username !== "" || url.password !== "") {
+    throw new Error(`profile ${id}: model_config base_url must not embed userinfo`);
+  }
+  if (url.search !== "" || url.hash !== "") {
+    throw new Error(
+      `profile ${id}: model_config base_url must not include a query or fragment`,
+    );
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error(`profile ${id}: model_config base_url must use http or https`);
+  }
+  const loopback = loopbackHostname(url.hostname);
+  if (url.protocol === "http:" && !loopback) {
+    throw new Error(
+      `profile ${id}: model_config base_url must be a loopback endpoint for http`,
+    );
+  }
+  if (!loopback && config.api_key_env === undefined) {
+    throw new Error(
+      `profile ${id}: model_config base_url is remote and requires api_key_env`,
+    );
+  }
+  return {
+    baseUrl: config.base_url,
+    api: config.api,
+    ...(config.name === undefined ? {} : { name: config.name }),
+    ...(config.api_key_env === undefined ? {} : { apiKeyEnv: config.api_key_env }),
+  };
+}
+
 function resolveResource<T>(
   id: string,
   kind: string,
@@ -80,6 +142,10 @@ export function resolveProfiles(
   for (const id of Object.keys(document.profiles).sort()) {
     const profile = document.profiles[id]!;
     validateProfileIntegration({ id, ...profile });
+    const modelConfig =
+      profile.model_config === undefined
+        ? undefined
+        : resolveModelConfig(id, profile.model_config);
     const skillIds = new Set<string>();
     const skills = [...profile.skills]
       .sort((left, right) => left.id.localeCompare(right.id))
@@ -100,6 +166,7 @@ export function resolveProfiles(
       runtime: profile.runtime,
       provider: profile.provider,
       model: profile.model,
+      ...(modelConfig === undefined ? {} : { modelConfig }),
       ...(profile.thinking === undefined ? {} : { thinking: profile.thinking }),
       role: profile.role,
       environment: profile.environment,

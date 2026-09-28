@@ -14,6 +14,20 @@ export const SkillTargetSchema = Type.Union([
   Type.Literal("provider"),
 ]);
 
+export const ModelConfigApiSchema = Type.Literal("openai-completions");
+
+const ModelConfigSchema = Type.Object(
+  {
+    base_url: Type.String({ minLength: 1 }),
+    api: ModelConfigApiSchema,
+    name: Type.Optional(Type.String({ minLength: 1 })),
+    api_key_env: Type.Optional(
+      Type.String({ pattern: "^[A-Za-z_][A-Za-z0-9_]*$" }),
+    ),
+  },
+  { additionalProperties: false },
+);
+
 const SymbolicResourceIdSchema = Type.String({ minLength: 1 });
 const SkillSchema = Type.Object(
   {
@@ -33,6 +47,7 @@ export const ProfileSchema = Type.Object(
     runtime: Type.Literal("pi"),
     provider: Type.String({ minLength: 1 }),
     model: Type.String({ minLength: 1 }),
+    model_config: Type.Optional(ModelConfigSchema),
     thinking: Type.Optional(
       Type.Union([
         Type.Literal("off"),
