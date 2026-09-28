@@ -36,6 +36,11 @@ function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function actionInput(stage: unknown): Record<string, unknown> | undefined {
+  if (!record(stage) || !record(stage.action)) return undefined;
+  return record(stage.action.input) ? stage.action.input : undefined;
+}
+
 export function validateResolvedRunConfig(value: unknown): ResolvedRunConfig {
   if (
     !record(value) || value.schemaVersion !== 1 || !record(value.runtime) ||
@@ -103,6 +108,34 @@ export function validateResolvedRunConfig(value: unknown): ResolvedRunConfig {
   const { revision: _revision, ...revisionInput } = workflow;
   if (contentRevision(revisionInput) !== workflow.revision) {
     throw new Error("resolved workflow revision does not match its content");
+  }
+  const quickStages = workflow.stages.filter(
+    (stage) => record(stage) && stage.uses === "harness.quick-plan",
+  );
+  const selection = value.selection as RunSelection | undefined;
+  if (quickStages.length > 0) {
+    const input = actionInput(quickStages[0]);
+    if (
+      quickStages.length !== 1 || selection === undefined ||
+      selection.kind === "large-feature" ||
+      input?.kind !== selection.kind || input.brief !== selection.brief
+    ) {
+      throw new Error("resolved run selection does not match its workflow");
+    }
+  } else {
+    const specifyStages = workflow.stages.filter(
+      (stage) => record(stage) && stage.uses === "spec-kit.specify",
+    );
+    const brief = specifyStages.length === 1
+      ? actionInput(specifyStages[0])?.brief
+      : undefined;
+    if (
+      (selection !== undefined && selection.kind !== "large-feature") ||
+      brief !== selection?.brief ||
+      (selection?.brief !== undefined && specifyStages.length !== 1)
+    ) {
+      throw new Error("resolved run selection does not match its workflow");
+    }
   }
   for (const [name, argv] of Object.entries(value.commands)) {
     if (!/^[a-z][a-z0-9_]*$/.test(name) || !Array.isArray(argv) || argv.some((item) => typeof item !== "string")) {
