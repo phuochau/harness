@@ -190,7 +190,10 @@ function applyPlanningEvent(state: RunState, event: HarnessEvent): void {
       if (state.planning.stage !== event.payload.stage) {
         throw new ReducerError("planning completion stage mismatch");
       }
-      if (event.payload.stage === "tasks" && event.payload.commit.length === 0) {
+      if (
+        (event.payload.stage === "tasks" || event.payload.stage === "quick") &&
+        event.payload.commit.length === 0
+      ) {
         throw new ReducerError("task planning requires a seal commit");
       }
       state.planning.status = "completed";

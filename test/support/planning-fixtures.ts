@@ -66,6 +66,63 @@ export function exactTaskDocumentFixture(
   return `${visible}<!-- harness-task-metadata:v1\n${canonicalJson(metadata)}\n-->`;
 }
 
+export interface QuickTaskDocumentOptions {
+  readonly kind?: "bugfix" | "small-feature";
+  readonly extraTask?: boolean;
+  readonly parallel?: boolean;
+  readonly acceptanceRefs?: readonly string[];
+  readonly ownedPaths?: readonly string[];
+}
+
+export function quickTaskDocumentFixture(
+  options: QuickTaskDocumentOptions = {},
+): string {
+  const kind = options.kind ?? "bugfix";
+  const acceptanceRefs = options.acceptanceRefs ?? ["FR-001"];
+  const ownedPaths = options.ownedPaths ?? ["src/parser.ts"];
+  const parallel = options.parallel ?? false;
+  const description = kind === "bugfix" ? "Fix parser crash" : "Add parser option";
+  const mainLine =
+    `- [ ] T001${parallel ? " [P]" : ""} [${kind}] ${description} ` +
+    `| deps=[] | ac=${JSON.stringify(acceptanceRefs)} | paths=${JSON.stringify(ownedPaths)}`;
+  const visible = [
+    "# Feature Tasks",
+    "",
+    "## Phase 1: Change",
+    mainLine,
+    ...(options.extraTask === true
+      ? [`- [ ] T002 [${kind}] Verify | deps=["T001"] | ac=["SC-001"] | paths=["test/parser.test.ts"]`]
+      : []),
+    "",
+  ].join("\n");
+  const tasks = [
+    {
+      acceptanceRefs,
+      dependsOn: [] as string[],
+      description,
+      id: "T001",
+      labels: [kind],
+      ownedPaths,
+      parallelEligible: parallel,
+      phase: "Change",
+    },
+    ...(options.extraTask === true
+      ? [{
+          acceptanceRefs: ["SC-001"],
+          dependsOn: ["T001"],
+          description: "Verify",
+          id: "T002",
+          labels: [kind],
+          ownedPaths: ["test/parser.test.ts"],
+          parallelEligible: false,
+          phase: "Change",
+        }]
+      : []),
+  ];
+  const metadata = { schema: "harness/task-metadata/v1", tasks };
+  return `${visible}<!-- harness-task-metadata:v1\n${canonicalJson(metadata)}\n-->`;
+}
+
 export type MalformedTaskKind =
   | "missing_metadata_delimiter"
   | "duplicate_json_key"

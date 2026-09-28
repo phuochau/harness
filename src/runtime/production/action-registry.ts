@@ -70,6 +70,14 @@ export function createProductionActionRegistry(
     planning: options.planning,
     ...(options.afterPlanningCompleted === undefined ? {} : { afterCompleted: options.afterPlanningCompleted }),
   }));
+  registry.register(new DurablePlanningAction("harness.quick-plan", {
+    runId: options.manifest.runId,
+    root: options.planningRoot,
+    artifactPaths: options.manifest.artifactPaths,
+    records: options.records,
+    planning: options.planning,
+    ...(options.afterPlanningCompleted === undefined ? {} : { afterCompleted: options.afterPlanningCompleted }),
+  }));
   registry.register(new DurableWorkerAction("worker.execute", {
     records: options.records,
     runtime: options.workerRuntime,

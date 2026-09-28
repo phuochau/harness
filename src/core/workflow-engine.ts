@@ -160,7 +160,12 @@ function laneFor(runId: string, stage: CompiledStage, job: MaterializedJob): str
   ) {
     return `run-mutation:${runId}`;
   }
-  if (stage.uses.startsWith("spec-kit.")) return `planning:${runId}`;
+  if (
+    stage.uses.startsWith("spec-kit.") ||
+    stage.uses === "harness.quick-plan"
+  ) {
+    return `planning:${runId}`;
+  }
   return `job:${job.id}`;
 }
 

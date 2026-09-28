@@ -109,6 +109,7 @@ const PlanningStageSchema = Type.Union([
   Type.Literal("specify"),
   Type.Literal("plan"),
   Type.Literal("tasks"),
+  Type.Literal("quick"),
 ]);
 const PlanningMarkerPayloadSchema = Type.Object(
   {
@@ -147,7 +148,7 @@ const PlanningCompletedPayloadSchema = Type.Union([
   ),
   Type.Object(
     {
-      stage: Type.Literal("tasks"),
+      stage: Type.Union([Type.Literal("tasks"), Type.Literal("quick")]),
       correlationId: Type.String({ minLength: 1 }),
       commit: Type.String({ minLength: 1 }),
       hashes: Type.Record(Type.String(), HashSchema),

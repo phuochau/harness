@@ -12,7 +12,11 @@ import { sha256 } from "../../shared/sha256.js";
 import type { ArtifactPaths, PlanningStage } from "../../speckit/artifacts.js";
 import type { DurableRecordStore } from "./records.js";
 
-export type PlanningActionKind = "spec-kit.specify" | "spec-kit.plan" | "spec-kit.tasks";
+export type PlanningActionKind =
+  | "spec-kit.specify"
+  | "spec-kit.plan"
+  | "spec-kit.tasks"
+  | "harness.quick-plan";
 export type PlanningEffectInput = Readonly<Record<string, unknown>>;
 
 export interface PlanningActionOutput {
@@ -45,13 +49,33 @@ const stageByKind: Readonly<Record<PlanningActionKind, PlanningStage>> = {
   "spec-kit.specify": "specify",
   "spec-kit.plan": "plan",
   "spec-kit.tasks": "tasks",
+  "harness.quick-plan": "quick",
 };
 
 const commandByStage = {
   specify: "/speckit.specify",
   plan: "/speckit.plan",
   tasks: "/speckit.tasks",
+  quick: "/harness.quick-plan",
 } as const;
+
+function quickInput(input: PlanningEffectInput): Pick<PlanningRequest, "kind" | "brief"> {
+  const kind = input.kind;
+  const brief = input.brief;
+  if (kind !== "bugfix" && kind !== "small-feature") {
+    throw new Error("quick planning requires a bugfix or small-feature kind input");
+  }
+  if (typeof brief !== "string" || brief.length === 0) {
+    throw new Error("quick planning requires a nonempty brief input");
+  }
+  return { kind, brief };
+}
+
+function specifyInput(input: PlanningEffectInput): Pick<PlanningRequest, "brief"> {
+  return typeof input.brief === "string" && input.brief.length > 0
+    ? { brief: input.brief }
+    : {};
+}
 
 async function baseline(
   root: string,
@@ -155,6 +179,11 @@ export class DurablePlanningAction<K extends PlanningActionKind>
         correlationId: `${this.options.runId}-${stage}-${String(intent.input.attempt ?? 1)}`,
         artifactPaths: this.options.artifactPaths,
         baseline: await baseline(this.options.root, this.options.artifactPaths),
+        ...(stage === "quick"
+          ? quickInput(intent.input)
+          : stage === "specify"
+            ? specifyInput(intent.input)
+            : {}),
       };
       if (
         this.options.planning.prepare !== undefined &&

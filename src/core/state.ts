@@ -47,7 +47,7 @@ export interface PendingDecision {
 export interface PlanningState {
   status: "idle" | "pending" | "settled" | "completed" | "blocked";
   correlationId?: string;
-  stage?: "specify" | "plan" | "tasks";
+  stage?: "specify" | "plan" | "tasks" | "quick";
   finalTurnIndex?: number;
   hashes?: Readonly<Record<string, string>>;
 }

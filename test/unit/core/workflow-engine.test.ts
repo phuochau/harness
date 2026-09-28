@@ -120,6 +120,53 @@ it("turns task cancellation into a durable worker cancellation effect", () => {
   ]);
 });
 
+it("binds quick planning effects to the serialized planning lane", () => {
+  const input = structuredClone(fixtureCompileInput());
+  input.workflow.stages = [
+    {
+      id: "quick_plan",
+      uses: "harness.quick-plan",
+      runner: "planner-codex",
+      with: { kind: "bugfix", brief: "Fix the parser crash" },
+      produces: {
+        spec: "specs/fixture/spec.md",
+        plan: "specs/fixture/plan.md",
+        tasks: "specs/fixture/tasks.md",
+        graph: "specs/fixture/task-graph.json",
+      },
+    },
+  ];
+  input.workflow.task_model = {
+    source: "stages.quick_plan.outputs.graph",
+    complete_when: { stage: "quick_plan" },
+  };
+  const derive = createWorkflowCommandDeriver({
+    workflow: compileWorkflow(input),
+    graph: validateGraph(diamondTaskGraph(), fixtureGraphContextFor(diamondTaskGraph())),
+  });
+  const decision = derive(
+    initialRunState("F030", revision),
+    accepted({
+      schemaVersion: 1,
+      source: "operator",
+      kind: "operator_intent",
+      idempotencyKey: "resume:1",
+      payload: { operation: "resume", target: "run", arguments: {} },
+    }),
+  );
+  expect(decision.effects).toEqual([
+    expect.objectContaining({
+      action: "harness.quick-plan",
+      laneKey: "planning:F030",
+      input: expect.objectContaining({
+        stageId: "quick_plan",
+        kind: "bugfix",
+        brief: "Fix the parser crash",
+      }),
+    }),
+  ]);
+});
+
 it("turns an explicit retry into a new immutable attempt and fallback route", () => {
   const derive = engine();
   const state = structuredClone(initialRunState("F031", revision)) as RunState;

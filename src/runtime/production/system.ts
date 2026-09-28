@@ -136,11 +136,13 @@ function managedPlanningAgent(input: {
 }): PlanningAgent {
   const routes: Record<string, string> = {};
   const ports: Record<string, ChildPiPlanningPort> = {};
-  for (const stage of input.workflow.stages.filter((stage) => stage.uses.startsWith("spec-kit."))) {
+  for (const stage of input.workflow.stages.filter(
+    (stage) => stage.uses.startsWith("spec-kit.") || stage.uses === "harness.quick-plan",
+  )) {
     const runner = stage.runner;
     const profileId = typeof runner === "string" ? runner : runner?.prefer[0];
     if (profileId === undefined) throw new Error(`planning stage ${stage.id} has no profile`);
-    routes[stage.uses.slice("spec-kit.".length)] = profileId;
+    routes[stage.uses === "harness.quick-plan" ? "quick" : stage.uses.slice("spec-kit.".length)] = profileId;
     if (ports[profileId] !== undefined) continue;
     const profile = input.workflow.profiles.byId[profileId];
     const managed = input.runtime.managedProfiles[profileId];
@@ -275,7 +277,7 @@ export async function composeProductionRun(
       workerRuntime,
       verificationObservations: new JournalVerificationObservations(journal),
       afterPlanningCompleted: async (output) => {
-        if (output.stage === "tasks") {
+        if (output.stage === "tasks" || output.stage === "quick") {
           currentGraph = await loadRunTaskGraph(git, initialized.manifest);
         }
       },

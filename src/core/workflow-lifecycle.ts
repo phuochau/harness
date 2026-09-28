@@ -236,12 +236,15 @@ export function createWorkflowLifecycle(): WorkflowLifecycle {
           : [blocked(intent, bound.jobId, "approval denied", [], "Revise the plan or approve it explicitly.")];
       }
 
-      if (intent.action.startsWith("spec-kit.")) {
+      if (
+        intent.action.startsWith("spec-kit.") ||
+        intent.action === "harness.quick-plan"
+      ) {
         const value = record(output, "planning output");
         const stage = string(value, "stage");
         const correlationId = string(value, "correlationId");
         const hashes = record(value.hashes, "planning hashes");
-        const payload = stage === "tasks"
+        const payload = stage === "tasks" || stage === "quick"
           ? { stage, correlationId, commit: string(value, "commit"), hashes }
           : { stage, correlationId, hashes };
         return [
