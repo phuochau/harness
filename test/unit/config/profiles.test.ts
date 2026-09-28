@@ -245,6 +245,15 @@ describe("profile resolution", () => {
     expect(() =>
       resolveProfiles(
         withConfig({
+          base_url: "http://127.0.0.1.evil.example.com/v1",
+          api: "openai-completions",
+        }),
+        resources,
+      ),
+    ).toThrow(/local-qwen.*base_url/);
+    expect(() =>
+      resolveProfiles(
+        withConfig({
           base_url: "http://127.0.0.1:11434/v1",
           api: "openai-completions",
           api_key_env: "not a key",

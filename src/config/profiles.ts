@@ -74,7 +74,7 @@ function loopbackHostname(hostname: string): boolean {
     host === "localhost" ||
     host.endsWith(".localhost") ||
     host === "[::1]" ||
-    host.startsWith("127.")
+    /^127(?:\.\d{1,3}){3}$/.test(host)
   );
 }
 
