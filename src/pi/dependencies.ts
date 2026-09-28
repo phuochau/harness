@@ -15,6 +15,7 @@ import {
   HarnessCommandService,
   type HarnessCommandBackend,
 } from "./commands.js";
+import { runRequestFromPayload, type RunRequest } from "./run-request.js";
 import type { HarnessRuntimeEventSink } from "./events.js";
 import { ControllerEventRouter } from "./events.js";
 import { canonicalJson } from "../shared/canonical-json.js";
@@ -291,7 +292,7 @@ class ProjectCommandBackend implements HarnessCommandBackend {
     };
   }
 
-  public async previewRun(_target?: string) {
+  public async previewRun(_request: RunRequest) {
     if (this.configuration === undefined) {
       throw new Error(this.configurationError ?? "Harness is not initialized");
     }
@@ -329,9 +330,7 @@ class ProjectCommandBackend implements HarnessCommandBackend {
       }
       if (this.active !== undefined) throw new Error("a harness run is already active");
       const payload = command.payload as Record<string, unknown>;
-      const preview = await this.previewRun(
-        typeof payload.target === "string" ? payload.target : undefined,
-      );
+      const preview = await this.previewRun(runRequestFromPayload(payload));
       const approved = payload.approvedPreviewHash;
       const expected = sha256(canonicalJson(preview));
       if (approved !== expected) {

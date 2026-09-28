@@ -7,6 +7,7 @@ import {
   renderStatus,
   renderTask,
 } from "./status-view.js";
+import { parseRunRequest, type RunRequest } from "./run-request.js";
 import { canonicalJson } from "../shared/canonical-json.js";
 import { sha256 } from "../shared/sha256.js";
 
@@ -41,7 +42,7 @@ export interface HarnessCommandBackend {
   graph(): Promise<unknown>;
   logs(target?: string): Promise<readonly string[]>;
   doctor(): Promise<{ readonly ready: boolean; readonly summary: string }>;
-  previewRun(target?: string): Promise<RunPreview>;
+  previewRun(request: RunRequest): Promise<RunPreview>;
   enqueue(command: ControllerCommand): Promise<void>;
 }
 
@@ -100,14 +101,16 @@ export class HarnessCommandService {
       return;
     }
     if (command === "harness-run") {
-      const target = args.trim() || undefined;
-      const preview = await this.backend.previewRun(target);
+      const request = parseRunRequest(args);
+      const preview = await this.backend.previewRun(request);
       ui.notify(renderRunPreview(preview), "info");
       if (!(await ui.confirm("Start harness run?", "Approve the displayed effects"))) return;
       await this.intent({
         operation: "run",
         approvedPreviewHash: sha256(canonicalJson(preview)),
-        ...(target === undefined ? {} : { target }),
+        ...(request.runId === undefined ? {} : { target: request.runId }),
+        kind: request.kind,
+        ...(request.brief === undefined ? {} : { brief: request.brief }),
       });
       return;
     }
