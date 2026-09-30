@@ -234,9 +234,26 @@ function applyEvent(state: RunState, event: HarnessEvent): void {
     case "attempt.started":
       startAttempt(state, event);
       break;
-    case "worker.routed":
-      ensureJob(state, event.entityId).worker = event.payload.worker;
+    case "worker.routed": {
+      const job = ensureJob(state, event.entityId);
+      job.worker = event.payload.worker;
+      if (event.payload.cause !== undefined) {
+        job.route = {
+          profileId: event.payload.worker,
+          cause: event.payload.cause,
+          ...(event.payload.tier === undefined
+            ? {}
+            : { tier: event.payload.tier }),
+          ...(event.payload.complexity === undefined
+            ? {}
+            : { complexity: event.payload.complexity }),
+          ...(event.payload.fixRound === undefined
+            ? {}
+            : { fixRound: event.payload.fixRound }),
+        };
+      }
       break;
+    }
     case "worker.result_observed":
       observeWorkerResult(state, event);
       break;

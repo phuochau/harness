@@ -1,13 +1,24 @@
 import type { EffectIntent } from "../actions/types.js";
 import type { JsonValue } from "../contracts/common.js";
 import type { DecisionEventDraft } from "../contracts/events.js";
-import { stageProfileIds } from "../contracts/workflow.js";
+import {
+  taskComplexity,
+  type TaskComplexity,
+  type TaskNodeV2,
+} from "../contracts/task-graph.js";
+import {
+  complexityTierOrder,
+  stageProfileIds,
+  type ComplexityRunner,
+} from "../contracts/workflow.js";
 import type {
   AcceptedCommandRecord,
   CommandDeriver,
 } from "../controller/command-source.js";
 import type { CompiledStage, CompiledWorkflow } from "../config/compile.js";
+import type { ProfileCapabilitySnapshot } from "../state/resolved-run-config.js";
 import { materializeJobs, type MaterializedJob } from "./materialize.js";
+import { selectInitialComplexityRoute } from "./routing.js";
 import type { RunState } from "./state.js";
 import type { ValidatedTaskGraph } from "./task-graph.js";
 
@@ -15,6 +26,7 @@ export interface WorkflowCommandDeriverOptions {
   readonly workflow: CompiledWorkflow;
   readonly graph: ValidatedTaskGraph | (() => ValidatedTaskGraph);
   readonly maxNewEffects?: number;
+  readonly profileCapabilities?: ProfileCapabilitySnapshot;
 }
 
 export function emptyTaskGraph(): ValidatedTaskGraph {
@@ -32,6 +44,23 @@ export function emptyTaskGraph(): ValidatedTaskGraph {
 
 function workerPreference(stage: CompiledStage): readonly string[] {
   return stageProfileIds(stage);
+}
+
+function tieredRunner(stage: CompiledStage): ComplexityRunner | undefined {
+  const runner = stage.runner;
+  if (typeof runner !== "object" || !("by_complexity" in runner)) {
+    return undefined;
+  }
+  return runner;
+}
+
+function tieredRouteCandidates(
+  runner: ComplexityRunner,
+  complexity: TaskComplexity,
+): readonly string[] {
+  return complexityTierOrder
+    .slice(complexityTierOrder.indexOf(complexity))
+    .flatMap((tier) => runner.by_complexity[tier]);
 }
 
 function implementationWorker(state: RunState, taskId: string): string | undefined {
@@ -437,14 +466,110 @@ export function createWorkflowCommandDeriver(
       occupiedLanes.add(laneKey);
       const current = state.jobs[job.id];
       const attempt = (current?.attempt ?? 0) + 1;
-      const worker = selectWorker(
-        state,
-        options.workflow,
-        stage,
-        job,
-        attempt,
-        forcedWorkers.get(job.id),
-      );
+      const forced = forcedWorkers.get(job.id);
+      const runner = tieredRunner(stage);
+      let worker: string;
+      let routedPayload: Record<string, JsonValue> | undefined;
+      if (runner !== undefined && stage.uses === "worker.execute") {
+        const task = job.taskId === undefined
+          ? undefined
+          : graph.byId.get(job.taskId);
+        const assessed = task !== undefined && taskComplexity(task) !== undefined
+          ? (task as TaskNodeV2)
+          : undefined;
+        if (assessed === undefined) {
+          throw new Error(
+            `stage ${stage.id} declares by_complexity routing but ` +
+              `${job.taskId ?? job.id} lacks a v2 complexity assessment ` +
+              `(graph schema ${graph.graph.schema}); migrate by resealing ` +
+              `tasks.md through the spec-kit tasks stage so it emits ` +
+              `harness/task-metadata/v2 records`,
+          );
+        }
+        const tieredCandidates = [...stageProfileIds(stage)];
+        if (forced !== undefined) {
+          if (!tieredCandidates.includes(forced)) {
+            throw new Error(`worker ${forced} is not declared for ${job.id}`);
+          }
+          worker = forced;
+          routedPayload = {
+            worker,
+            reason: "operator reroute",
+            taskId: assessed.id,
+            complexity: assessed.complexity,
+            complexityReason: assessed.complexityReason.slice(0, 500),
+            candidates: tieredCandidates,
+            tier: complexityTierOrder.find((tier) =>
+              runner.by_complexity[tier].includes(forced))!,
+            fixRound: 0,
+            cause: "operator_reroute",
+            workflowRevision: options.workflow.revision,
+            tasksSemanticHash: graph.graph.tasksSemanticHash,
+          };
+        } else if (current?.route !== undefined) {
+          worker = current.route.profileId;
+        } else {
+          const capabilities = options.profileCapabilities ?? {};
+          const route = selectInitialComplexityRoute({
+            complexity: assessed.complexity,
+            runner,
+            capabilities,
+          });
+          if ("blockReason" in route) {
+            events.push({
+              eventType: "job.blocked",
+              entityId: job.id,
+              idempotencyKey: `route-block:${job.id}:${accepted.acceptedSequence}`,
+              payload: {
+                reason: route.blockReason,
+                evidence: tieredRouteCandidates(runner, assessed.complexity)
+                  .map((profileId) => {
+                    const entry = capabilities[profileId];
+                    return entry === undefined
+                      ? `${profileId}: no capability probe recorded`
+                      : `${profileId}: ${
+                        entry.evidence.slice(0, 8).join("; ") || "unavailable"
+                      }`;
+                  }),
+                suggestedChange:
+                  "Authenticate or repair a declared tier profile, then retry the tick or reroute the task.",
+              },
+            });
+            continue;
+          }
+          worker = route.profileId;
+          routedPayload = {
+            worker,
+            reason: "initial complexity route",
+            taskId: assessed.id,
+            complexity: assessed.complexity,
+            complexityReason: assessed.complexityReason.slice(0, 500),
+            candidates: [...route.candidates],
+            tier: route.actualTier,
+            fixRound: 0,
+            cause: "initial",
+            workflowRevision: options.workflow.revision,
+            tasksSemanticHash: graph.graph.tasksSemanticHash,
+          };
+        }
+      } else {
+        worker = selectWorker(
+          state,
+          options.workflow,
+          stage,
+          job,
+          attempt,
+          forced,
+        );
+        if (worker !== "system" && worker !== "pi") {
+          routedPayload = {
+            worker,
+            reason: forced !== undefined
+              ? "operator reroute"
+              : "workflow preference",
+          };
+        }
+      }
       if (current === undefined || current.state === "PENDING") {
         events.push({
           eventType: "job.ready",
@@ -459,15 +584,12 @@ export function createWorkflowCommandDeriver(
         idempotencyKey: `attempt:${job.id}:${attempt}`,
         payload: { attempt, worker },
       });
-      if (worker !== "system" && worker !== "pi") {
+      if (routedPayload !== undefined) {
         events.push({
           eventType: "worker.routed",
           entityId: job.id,
           idempotencyKey: `route:${job.id}:${attempt}`,
-          payload: {
-            worker,
-            reason: forcedWorkers.has(job.id) ? "operator reroute" : "workflow preference",
-          },
+          payload: routedPayload,
         });
       }
       effects.push({

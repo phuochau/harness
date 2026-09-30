@@ -7,6 +7,7 @@ import type {
   ProcessRunner,
 } from "../../actions/types.js";
 import type { CompiledWorkflow } from "../../config/compile.js";
+import type { ResolvedProfile } from "../../config/profiles.js";
 import { createWorkflowCommandDeriver, emptyTaskGraph } from "../../core/workflow-engine.js";
 import { createWorkflowLifecycle } from "../../core/workflow-lifecycle.js";
 import type { ValidatedTaskGraph } from "../../core/task-graph.js";
@@ -28,8 +29,15 @@ import { Journal } from "../../state/journal.js";
 import { RunLease } from "../../state/lease.js";
 import { createProductionActionRegistry } from "./action-registry.js";
 import { recoverCleanupFailures } from "./cleanup-recovery.js";
+import type {
+  ProfileCapabilitySnapshot,
+  ProfileCapabilitySnapshotEntry,
+} from "../../state/resolved-run-config.js";
 import type { ProductionWorkerRuntime } from "./worker-action.js";
-import type { PiWorkerRuntime } from "../pi-worker/runtime.js";
+import type {
+  PiWorkerRuntime,
+  ProfileCapabilities,
+} from "../pi-worker/runtime.js";
 import { ProductionPiWorkerRuntime } from "./pi-worker.js";
 import { JournalVerificationObservations } from "./journal-observations.js";
 import { loadRunTaskGraph, ProductionPlanningArtifactSealer } from "./planning-artifacts.js";
@@ -64,6 +72,7 @@ export interface ComposeProductionRunOptions {
   readonly managedPiRuntime?: ManagedPiRuntimeBundle;
   readonly process?: ProcessRunner;
   readonly planningAgent?: PlanningAgent;
+  readonly profileCapabilities?: ProfileCapabilitySnapshot;
 }
 
 export interface StandaloneProductionEffects {
@@ -113,6 +122,54 @@ class DurableInteractiveApprovalStore implements ApprovalStore {
       this.prompts.delete(requestId);
     }
   }
+}
+
+function boundedEvidence(evidence: readonly string[]): readonly string[] {
+  return evidence
+    .map((item) =>
+      item.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 300))
+    .filter((item) => item.length > 0)
+    .slice(0, 32);
+}
+
+export async function probeTieredRunnerCapabilities(input: {
+  readonly workflow: CompiledWorkflow;
+  readonly probe: (profile: ResolvedProfile) => Promise<ProfileCapabilities>;
+}): Promise<ProfileCapabilitySnapshot | undefined> {
+  const declared = new Set<string>();
+  for (const stage of input.workflow.stages) {
+    const runner = stage.runner;
+    if (typeof runner === "object" && "by_complexity" in runner) {
+      for (const profileId of stageProfileIds(stage)) declared.add(profileId);
+    }
+  }
+  if (declared.size === 0) return undefined;
+  const snapshot: Record<string, ProfileCapabilitySnapshotEntry> = {};
+  for (const profileId of [...declared].sort()) {
+    const profile = input.workflow.profiles.byId[profileId];
+    if (profile === undefined) {
+      throw new Error(`tier-declared profile ${profileId} is not resolved`);
+    }
+    let entry: ProfileCapabilitySnapshotEntry;
+    try {
+      const capabilities = await input.probe(profile);
+      entry = {
+        available: capabilities.available === true,
+        evidence: boundedEvidence(capabilities.evidence),
+      };
+    } catch (error) {
+      entry = {
+        available: false,
+        evidence: boundedEvidence([
+          `capability probe failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        ]),
+      };
+    }
+    snapshot[profileId] = entry;
+  }
+  return snapshot;
 }
 
 const unavailableWorkerRuntime: ProductionWorkerRuntime = {
@@ -291,7 +348,13 @@ export async function composeProductionRun(
       journal,
       lease,
       clock: systemClock,
-      derive: createWorkflowCommandDeriver({ workflow, graph: () => currentGraph }),
+      derive: createWorkflowCommandDeriver({
+        workflow,
+        graph: () => currentGraph,
+        ...(options.profileCapabilities === undefined
+          ? {}
+          : { profileCapabilities: options.profileCapabilities }),
+      }),
       effects: executor,
       lifecycle: createWorkflowLifecycle(),
       beforeLeaseRelease: async () => {

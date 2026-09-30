@@ -1,9 +1,11 @@
 import type {
   CommandDecisionBatch,
   EffectIntentPayload,
+  RouteCause,
 } from "../contracts/events.js";
 import type { ControllerCommand } from "../contracts/controller-command.js";
 import type { JsonValue } from "../contracts/common.js";
+import type { TaskComplexity } from "../contracts/task-graph.js";
 import type { WorkerResult } from "../contracts/worker-result.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 import { ZERO_HASH } from "../state/hash-chain.js";
@@ -18,11 +20,20 @@ export type JobStatus =
   | "BLOCKED"
   | "FAILED";
 
+export interface AcceptedRoute {
+  profileId: string;
+  cause: RouteCause;
+  tier?: TaskComplexity;
+  complexity?: TaskComplexity;
+  fixRound?: number;
+}
+
 export interface JobState {
   state: JobStatus;
   attempt: number;
   firstAttemptAt?: string;
   worker?: string;
+  route?: AcceptedRoute;
   result?: WorkerResult;
   reviewCommit?: string;
   verificationCommit?: string;

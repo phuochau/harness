@@ -6,6 +6,7 @@ import {
   validator,
 } from "./common.js";
 import { ControllerCommandSchema } from "./controller-command.js";
+import { TaskComplexitySchema } from "./task-graph.js";
 import { BlockerSchema, WorkerResultSchema } from "./worker-result.js";
 
 const EventEnvelopeProperties = {
@@ -90,6 +91,14 @@ export const CommandDecisionBatchSchema = Type.Object(
 );
 export type DecisionEventDraft = Static<typeof DecisionEventDraftSchema>;
 export type CommandDecisionBatch = Static<typeof CommandDecisionBatchSchema>;
+
+export const RouteCauseSchema = Type.Union([
+  Type.Literal("initial"),
+  Type.Literal("review_fix"),
+  Type.Literal("escalation"),
+  Type.Literal("operator_reroute"),
+]);
+export type RouteCause = Static<typeof RouteCauseSchema>;
 
 const OperatorIntentPayloadSchema = Type.Object(
   {
@@ -187,7 +196,19 @@ export const HarnessEventSchema = Type.Union([
   event(
     "worker.routed",
     Type.Object(
-      { worker: Type.String(), reason: Type.String() },
+      {
+        worker: Type.String(),
+        reason: Type.String(),
+        taskId: Type.Optional(Type.String({ minLength: 1 })),
+        complexity: Type.Optional(TaskComplexitySchema),
+        complexityReason: Type.Optional(Type.String({ maxLength: 500 })),
+        candidates: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
+        tier: Type.Optional(TaskComplexitySchema),
+        fixRound: Type.Optional(Type.Integer({ minimum: 0 })),
+        cause: Type.Optional(RouteCauseSchema),
+        workflowRevision: Type.Optional(HashSchema),
+        tasksSemanticHash: Type.Optional(HashSchema),
+      },
       { additionalProperties: false },
     ),
   ),

@@ -156,3 +156,47 @@ it("keeps operator cancellation terminal when a worker settles concurrently", ()
     blocker: { reason: "cancelled by operator" },
   });
 });
+
+it("records the accepted complexity route from extended worker.routed evidence", () => {
+  const base = initialRunState("F042", `sha256:${"a".repeat(64)}`);
+  const state = reduceEvent(base, nextHarnessEvent(base, {
+    eventType: "worker.routed",
+    entityId: "implement:T001",
+    idempotencyKey: "route:implement:T001:1",
+    payload: {
+      worker: "implementer-devin",
+      reason: "initial complexity route",
+      taskId: "T001",
+      complexity: "standard",
+      complexityReason: "assessment for T001",
+      candidates: ["implementer-codex", "implementer-devin"],
+      tier: "complex",
+      fixRound: 0,
+      cause: "initial",
+      workflowRevision: `sha256:${"a".repeat(64)}`,
+      tasksSemanticHash: `sha256:${"b".repeat(64)}`,
+    },
+  }));
+  expect(state.jobs["implement:T001"]).toMatchObject({
+    worker: "implementer-devin",
+    route: {
+      profileId: "implementer-devin",
+      cause: "initial",
+      tier: "complex",
+      complexity: "standard",
+      fixRound: 0,
+    },
+  });
+});
+
+it("keeps legacy worker.routed payloads replayable without route state", () => {
+  const base = initialRunState("F043", `sha256:${"a".repeat(64)}`);
+  const state = reduceEvent(base, nextHarnessEvent(base, {
+    eventType: "worker.routed",
+    entityId: "implement:T001",
+    idempotencyKey: "route:implement:T001:1",
+    payload: { worker: "implementer-codex", reason: "workflow preference" },
+  }));
+  expect(state.jobs["implement:T001"]?.worker).toBe("implementer-codex");
+  expect(state.jobs["implement:T001"]?.route).toBeUndefined();
+});

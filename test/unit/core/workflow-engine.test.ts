@@ -1,22 +1,43 @@
 import { expect, it } from "vitest";
-import { compileWorkflow } from "../../../src/config/compile.js";
+import { compileWorkflow, type CompileInput } from "../../../src/config/compile.js";
 import type { ControllerCommand } from "../../../src/contracts/controller-command.js";
+import type { HarnessEvent } from "../../../src/contracts/events.js";
+import type {
+  TaskComplexity,
+  TaskGraphV2Document,
+} from "../../../src/contracts/task-graph.js";
+import { reduceEvent } from "../../../src/core/reducer.js";
 import { createWorkflowCommandDeriver } from "../../../src/core/workflow-engine.js";
 import { initialRunState, type RunState } from "../../../src/core/state.js";
 import { validateGraph } from "../../../src/core/task-graph.js";
+import type { ProfileCapabilitySnapshot } from "../../../src/state/resolved-run-config.js";
 import {
   diamondTaskGraph,
   fixtureCompileInput,
   fixtureGraphContextFor,
 } from "../../support/factories.js";
+import { nextHarnessEvent } from "../../support/state-fixtures.js";
 
-function accepted(command: ControllerCommand) {
+function accepted(command: ControllerCommand, acceptedAt = "2026-09-21T00:00:00.000Z") {
   return {
     command,
-    acceptedAt: "2026-09-21T00:00:00.000Z",
+    acceptedAt,
     acceptedSequence: 1,
     stateRevision: 1,
   };
+}
+
+function tick(idempotencyKey: string, acceptedAt?: string) {
+  return accepted(
+    {
+      schemaVersion: 1,
+      source: "timer",
+      kind: "tick",
+      idempotencyKey,
+      payload: { reason: "schedule" },
+    },
+    acceptedAt,
+  );
 }
 
 function engine() {
@@ -306,4 +327,308 @@ it("turns a declared remediation block into a durable blocker", () => {
     action: "worker.review",
     input: expect.objectContaining({ jobId: "final_review" }),
   }));
+});
+
+function tieredCompileInput(): CompileInput {
+  const input = structuredClone(fixtureCompileInput());
+  const implement = input.workflow.stages.find((stage) => stage.id === "implement")!;
+  implement.runner = {
+    by_complexity: {
+      mechanical: ["implementer-claude"],
+      standard: ["implementer-codex"],
+      complex: ["implementer-devin"],
+    },
+  };
+  return input;
+}
+
+function capabilitySnapshot(
+  availability: Readonly<Record<string, boolean>>,
+): ProfileCapabilitySnapshot {
+  return Object.fromEntries(
+    Object.entries(availability).map(([profileId, available]) => [
+      profileId,
+      {
+        available,
+        evidence: [
+          available
+            ? "managed profile resources verified"
+            : "authentication not ready",
+        ],
+      },
+    ]),
+  );
+}
+
+function singleTaskV2Graph(complexity: TaskComplexity): TaskGraphV2Document {
+  const base = diamondTaskGraph();
+  const task = base.tasks[0]!;
+  return {
+    schema: "harness/task-graph/v2",
+    tasksSemanticHash: base.tasksSemanticHash,
+    tasks: [
+      { ...task, complexity, complexityReason: `assessment for ${task.id}` },
+    ],
+  };
+}
+
+function stateWithTasksDone(runId: string): RunState {
+  const state = structuredClone(initialRunState(runId, revision)) as RunState;
+  state.jobs.prepare = { state: "DONE", attempt: 1, worker: "system" };
+  state.jobs.tasks = { state: "DONE", attempt: 1, worker: "pi" };
+  return state;
+}
+
+function workerFor(effects: readonly { input: unknown }[], jobId: string) {
+  return effects.find(
+    (effect) =>
+      typeof effect.input === "object" &&
+      effect.input !== null &&
+      (effect.input as { jobId?: unknown }).jobId === jobId,
+  );
+}
+
+it("routes a tiered task to the first available declared candidate and journals route evidence", () => {
+  const workflow = compileWorkflow(tieredCompileInput());
+  const document = singleTaskV2Graph("standard");
+  const graph = validateGraph(document, fixtureGraphContextFor(document));
+  const derive = createWorkflowCommandDeriver({
+    workflow,
+    graph,
+    profileCapabilities: capabilitySnapshot({
+      "implementer-claude": true,
+      "implementer-codex": true,
+      "implementer-devin": true,
+    }),
+  });
+  const decision = derive(stateWithTasksDone("F036"), tick("tick:route"));
+  expect(workerFor(decision.effects, "implement:T001")?.input).toMatchObject({
+    worker: "implementer-codex",
+  });
+  const routed = decision.events.find(
+    (event) =>
+      event.eventType === "worker.routed" && event.entityId === "implement:T001",
+  );
+  expect(routed?.payload).toEqual({
+    worker: "implementer-codex",
+    reason: "initial complexity route",
+    taskId: "T001",
+    complexity: "standard",
+    complexityReason: "assessment for T001",
+    candidates: ["implementer-codex", "implementer-devin"],
+    tier: "standard",
+    fixRound: 0,
+    cause: "initial",
+    workflowRevision: workflow.revision,
+    tasksSemanticHash: graph.graph.tasksSemanticHash,
+  });
+});
+
+it("falls back only upward to a stronger declared tier when the first candidate is unavailable", () => {
+  const workflow = compileWorkflow(tieredCompileInput());
+  const document = singleTaskV2Graph("standard");
+  const derive = createWorkflowCommandDeriver({
+    workflow,
+    graph: validateGraph(document, fixtureGraphContextFor(document)),
+    profileCapabilities: capabilitySnapshot({
+      "implementer-claude": true,
+      "implementer-codex": false,
+      "implementer-devin": true,
+    }),
+  });
+  const decision = derive(stateWithTasksDone("F037"), tick("tick:fallback"));
+  expect(workerFor(decision.effects, "implement:T001")?.input).toMatchObject({
+    worker: "implementer-devin",
+  });
+  const routed = decision.events.find(
+    (event) =>
+      event.eventType === "worker.routed" && event.entityId === "implement:T001",
+  );
+  expect(routed?.payload).toMatchObject({
+    worker: "implementer-devin",
+    complexity: "standard",
+    tier: "complex",
+    cause: "initial",
+    candidates: ["implementer-codex", "implementer-devin"],
+  });
+});
+
+it("blocks a tiered task with per-candidate diagnostics when no declared profile is available", () => {
+  const derive = createWorkflowCommandDeriver({
+    workflow: compileWorkflow(tieredCompileInput()),
+    graph: (() => {
+      const document = singleTaskV2Graph("complex");
+      return validateGraph(document, fixtureGraphContextFor(document));
+    })(),
+    profileCapabilities: capabilitySnapshot({
+      "implementer-claude": false,
+      "implementer-codex": false,
+      "implementer-devin": false,
+    }),
+  });
+  const decision = derive(stateWithTasksDone("F038"), tick("tick:block"));
+  expect(decision.effects).toHaveLength(0);
+  const blocked = decision.events.find(
+    (event) =>
+      event.eventType === "job.blocked" && event.entityId === "implement:T001",
+  );
+  expect(blocked?.payload).toMatchObject({ reason: "no_available_profile" });
+  const evidence = (blocked?.payload as { evidence: string[] }).evidence;
+  expect(evidence.join("\n")).toContain("implementer-devin");
+  expect(evidence.join("\n")).toContain("authentication not ready");
+  expect(decision.events).not.toContainEqual(
+    expect.objectContaining({
+      eventType: "attempt.started",
+      entityId: "implement:T001",
+    }),
+  );
+});
+
+it("never downgrades a complex task to a weaker tier when no candidate is available", () => {
+  const derive = createWorkflowCommandDeriver({
+    workflow: compileWorkflow(tieredCompileInput()),
+    graph: (() => {
+      const document = singleTaskV2Graph("complex");
+      return validateGraph(document, fixtureGraphContextFor(document));
+    })(),
+    profileCapabilities: capabilitySnapshot({
+      "implementer-claude": true,
+      "implementer-codex": true,
+      "implementer-devin": false,
+    }),
+  });
+  const decision = derive(stateWithTasksDone("F039"), tick("tick:ceiling"));
+  expect(decision.effects).toHaveLength(0);
+  expect(decision.events).toContainEqual(
+    expect.objectContaining({
+      eventType: "job.blocked",
+      entityId: "implement:T001",
+      payload: expect.objectContaining({ reason: "no_available_profile" }),
+    }),
+  );
+});
+
+it("rejects a v1 task graph paired with a tiered runner before dispatch", () => {
+  const derive = createWorkflowCommandDeriver({
+    workflow: compileWorkflow(tieredCompileInput()),
+    graph: (() => {
+      const document = diamondTaskGraph();
+      return validateGraph(document, fixtureGraphContextFor(document));
+    })(),
+    profileCapabilities: capabilitySnapshot({
+      "implementer-claude": true,
+      "implementer-codex": true,
+      "implementer-devin": true,
+    }),
+  });
+  expect(() =>
+    derive(stateWithTasksDone("F040"), tick("tick:migrate")),
+  ).toThrow(/harness\/task-metadata\/v2|migrat/i);
+});
+
+it("retains the accepted route across replay even when live availability later changes", () => {
+  const workflow = compileWorkflow(tieredCompileInput());
+  const document = singleTaskV2Graph("standard");
+  const graph = validateGraph(document, fixtureGraphContextFor(document));
+  const initial = createWorkflowCommandDeriver({
+    workflow,
+    graph,
+    profileCapabilities: capabilitySnapshot({
+      "implementer-claude": true,
+      "implementer-codex": false,
+      "implementer-devin": true,
+    }),
+  });
+  let state = stateWithTasksDone("F041");
+  const first = initial(state, tick("tick:dispatch", "2026-09-20T00:00:00.000Z"));
+  for (const draft of first.events) {
+    state = reduceEvent(
+      state,
+      nextHarnessEvent(state, {
+        eventType: draft.eventType as HarnessEvent["eventType"],
+        entityId: draft.entityId,
+        idempotencyKey: draft.idempotencyKey,
+        payload: draft.payload,
+      }),
+    );
+  }
+  state = reduceEvent(
+    state,
+    nextHarnessEvent(state, {
+      eventType: "worker.result_observed",
+      entityId: "implement:T001",
+      idempotencyKey: "worker-result:implement:T001:1",
+      payload: {
+        schemaVersion: 1,
+        assignmentHash: `sha256:${"b".repeat(64)}`,
+        outcome: "failed",
+        reason: "Pi process exited with code 1",
+        evidence: ["exit 1"],
+      },
+    }),
+  );
+  expect(state.jobs["implement:T001"]?.state).toBe("RETRY");
+
+  const recovered = createWorkflowCommandDeriver({
+    workflow,
+    graph,
+    profileCapabilities: capabilitySnapshot({
+      "implementer-claude": true,
+      "implementer-codex": true,
+      "implementer-devin": false,
+    }),
+  });
+  const second = recovered(state, tick("tick:retry", "2026-09-20T00:10:00.000Z"));
+  expect(workerFor(second.effects, "implement:T001")?.input).toMatchObject({
+    attempt: 2,
+    worker: "implementer-devin",
+  });
+  expect(second.events).toContainEqual(
+    expect.objectContaining({
+      eventType: "attempt.started",
+      entityId: "implement:T001",
+      payload: { attempt: 2, worker: "implementer-devin" },
+    }),
+  );
+  expect(
+    second.events.filter((event) => event.eventType === "worker.routed"),
+  ).toHaveLength(0);
+});
+
+it("keeps credentials and prompts out of route evidence", () => {
+  const derive = createWorkflowCommandDeriver({
+    workflow: compileWorkflow(tieredCompileInput()),
+    graph: (() => {
+      const document = singleTaskV2Graph("standard");
+      return validateGraph(document, fixtureGraphContextFor(document));
+    })(),
+    profileCapabilities: capabilitySnapshot({
+      "implementer-claude": true,
+      "implementer-codex": true,
+      "implementer-devin": true,
+    }),
+  });
+  const decision = derive(stateWithTasksDone("F042"), tick("tick:secrets"));
+  const routed = decision.events.find(
+    (event) =>
+      event.eventType === "worker.routed" && event.entityId === "implement:T001",
+  );
+  expect(Object.keys(routed?.payload as object).sort()).toEqual(
+    [
+      "candidates",
+      "cause",
+      "complexity",
+      "complexityReason",
+      "fixRound",
+      "reason",
+      "taskId",
+      "tasksSemanticHash",
+      "tier",
+      "worker",
+      "workflowRevision",
+    ].sort(),
+  );
+  expect(JSON.stringify(routed?.payload)).not.toMatch(
+    /api[_-]?key|bearer|password|secret|token|prompt/i,
+  );
 });

@@ -103,7 +103,16 @@ it("materializes tiered-runner jobs routed only to declared tier candidates", ()
     })),
   };
   let graph = emptyTaskGraph();
-  const derive = createWorkflowCommandDeriver({ workflow, graph: () => graph });
+  const derive = createWorkflowCommandDeriver({
+    workflow,
+    graph: () => graph,
+    profileCapabilities: Object.fromEntries(
+      declared.map((profileId) => [
+        profileId,
+        { available: true, evidence: ["managed profile resources verified"] },
+      ]),
+    ),
+  });
   const state = initialRunState("F023", workflow.revision);
   graph = validateGraph(document, fixtureGraphContextFor(document));
   const workers = derive(state, accepted).effects.map(

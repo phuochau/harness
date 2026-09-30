@@ -23,6 +23,7 @@ import { GitRepository } from "../git/repository.js";
 import { initializeProductionRun } from "../runtime/production/run.js";
 import {
   composeProductionRun,
+  probeTieredRunnerCapabilities,
   type ProductionRunSystem,
 } from "../runtime/production/system.js";
 import type { ArtifactPaths } from "../speckit/artifacts.js";
@@ -353,6 +354,10 @@ class ProjectCommandBackend implements HarnessCommandBackend {
         remote: "origin",
         baseBranch: inspection.branch,
       });
+      const profileCapabilities = await probeTieredRunnerCapabilities({
+        workflow: this.configuration.workflow,
+        probe: (profile) => this.configuration!.runtime.workerRuntime.probe(profile),
+      });
       await writeResolvedRunConfig(initialized.paths.resolvedConfig, {
         schemaVersion: 1,
         runtime: {
@@ -365,6 +370,9 @@ class ProjectCommandBackend implements HarnessCommandBackend {
         },
         workflow: this.configuration.workflow,
         commands: this.configuration.commands,
+        ...(profileCapabilities === undefined
+          ? {}
+          : { profileCapabilities }),
       });
       this.active = await composeProductionRun({
         initialized,
@@ -374,6 +382,9 @@ class ProjectCommandBackend implements HarnessCommandBackend {
         pi: this.pi,
         context: this.context,
         managedPiRuntime: this.configuration.runtime,
+        ...(profileCapabilities === undefined
+          ? {}
+          : { profileCapabilities }),
       });
       await this.active.controller.enqueue(command);
       return;
@@ -439,6 +450,9 @@ class ProjectCommandBackend implements HarnessCommandBackend {
       pi: this.pi,
       context: this.context,
       managedPiRuntime: runtime,
+      ...(selected.config.profileCapabilities === undefined
+        ? {}
+        : { profileCapabilities: selected.config.profileCapabilities }),
     });
     await this.active.recover();
   }
