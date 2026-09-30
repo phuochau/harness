@@ -137,10 +137,10 @@ it("does not enqueue a denied run and emits typed retry/reroute intents", async 
 
   const run = fixture();
   await run.service.execute("harness-retry", "T001", run.ui);
-  await run.service.execute("harness-reroute", "T001 claude", run.ui);
+  await run.service.execute("harness-reroute", "T001 implementer-strong", run.ui);
   expect(run.commands.map((command) => command.payload)).toEqual([
     { operation: "retry", target: "T001", arguments: {} },
-    { operation: "reroute", target: "T001", arguments: { worker: "claude" } },
+    { operation: "reroute", target: "T001", arguments: { worker: "implementer-strong" } },
   ]);
 });
 

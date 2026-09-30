@@ -123,8 +123,8 @@ export class HarnessCommandService {
     const target = requiredTarget(args, command);
     if (command === "harness-reroute") {
       const worker = parts[1];
-      if (!worker || !["codex", "devin", "claude"].includes(worker)) {
-        throw new Error("reroute requires TNNN and one of codex, devin, claude");
+      if (!worker || !/^[a-z][a-z0-9-]*$/.test(worker) || parts.length !== 2) {
+        throw new Error("reroute requires TNNN and a declared profile ID");
       }
       await this.intent({ operation: "reroute", target, arguments: { worker } });
       return;
