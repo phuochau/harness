@@ -1,4 +1,10 @@
 import type { ProfileFamily } from "../contracts/profiles.js";
+import type { TaskComplexity } from "../contracts/task-graph.js";
+import {
+  complexityTierOrder,
+  type ComplexityRunner,
+} from "../contracts/workflow.js";
+import type { ProfileCapabilitySnapshot } from "../state/resolved-run-config.js";
 
 /** @deprecated Runtime adapters retain this alias until the Pi runtime migration. */
 export type WorkerKind = ProfileFamily;
@@ -76,4 +82,32 @@ export function selectWorker(input: WorkerSelection): WorkerProfile {
     throw new PolicyBlocker("NO_ELIGIBLE_PROFILE", "no eligible profile");
   }
   return selected;
+}
+
+export type InitialComplexityRoute =
+  | {
+      readonly profileId: string;
+      readonly actualTier: TaskComplexity;
+      readonly candidates: readonly string[];
+    }
+  | { readonly blockReason: string };
+
+export function selectInitialComplexityRoute(input: {
+  readonly complexity: TaskComplexity;
+  readonly runner: ComplexityRunner;
+  readonly capabilities: ProfileCapabilitySnapshot;
+}): InitialComplexityRoute {
+  const tiers = complexityTierOrder.slice(
+    complexityTierOrder.indexOf(input.complexity),
+  );
+  const candidates = tiers.flatMap((tier) => input.runner.by_complexity[tier]);
+  for (const tier of tiers) {
+    const selected = input.runner.by_complexity[tier].find(
+      (profileId) => input.capabilities[profileId]?.available === true,
+    );
+    if (selected !== undefined) {
+      return { profileId: selected, actualTier: tier, candidates };
+    }
+  }
+  return { blockReason: "no_available_profile" };
 }

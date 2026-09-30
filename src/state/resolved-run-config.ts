@@ -5,6 +5,15 @@ import { contentRevision } from "../config/hash.js";
 import { canonicalJson } from "../shared/canonical-json.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 
+export interface ProfileCapabilitySnapshotEntry {
+  readonly available: boolean;
+  readonly evidence: readonly string[];
+}
+
+export type ProfileCapabilitySnapshot = Readonly<
+  Record<string, ProfileCapabilitySnapshotEntry>
+>;
+
 export interface ResolvedRunConfig {
   readonly schemaVersion: 1;
   readonly runtime: {
@@ -17,12 +26,44 @@ export interface ResolvedRunConfig {
   };
   readonly workflow: CompiledWorkflow;
   readonly commands: Readonly<Record<string, readonly string[]>>;
+  readonly profileCapabilities?: ProfileCapabilitySnapshot;
 }
 
 const digest = /^sha256:[0-9a-f]{64}$/;
+const profileId = /^[a-z][a-z0-9-]*$/;
+const evidenceControlCharacters = /[\u0000-\u001f\u007f]/;
+const snapshotMaxProfiles = 128;
+const snapshotMaxEvidenceEntries = 32;
+const snapshotMaxEvidenceLength = 300;
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function validateProfileCapabilitySnapshot(value: unknown): void {
+  if (!record(value) || Object.keys(value).length > snapshotMaxProfiles) {
+    throw new Error("invalid profile capability snapshot");
+  }
+  for (const [id, entry] of Object.entries(value)) {
+    if (
+      !profileId.test(id) ||
+      !record(entry) ||
+      canonicalJson(Object.keys(entry).sort()) !==
+        canonicalJson(["available", "evidence"]) ||
+      typeof entry.available !== "boolean" ||
+      !Array.isArray(entry.evidence) ||
+      entry.evidence.length > snapshotMaxEvidenceEntries ||
+      entry.evidence.some(
+        (item) =>
+          typeof item !== "string" ||
+          item.length === 0 ||
+          item.length > snapshotMaxEvidenceLength ||
+          evidenceControlCharacters.test(item),
+      )
+    ) {
+      throw new Error("invalid profile capability snapshot");
+    }
+  }
 }
 
 export function validateResolvedRunConfig(value: unknown): ResolvedRunConfig {
@@ -32,11 +73,23 @@ export function validateResolvedRunConfig(value: unknown): ResolvedRunConfig {
   ) {
     throw new Error("invalid resolved run configuration");
   }
+  const topLevelKeys = canonicalJson(Object.keys(value).sort());
   if (
-    canonicalJson(Object.keys(value).sort()) !==
-      canonicalJson(["commands", "runtime", "schemaVersion", "workflow"])
+    topLevelKeys !==
+      canonicalJson(["commands", "runtime", "schemaVersion", "workflow"]) &&
+    topLevelKeys !==
+      canonicalJson([
+        "commands",
+        "profileCapabilities",
+        "runtime",
+        "schemaVersion",
+        "workflow",
+      ])
   ) {
     throw new Error("resolved run configuration has unknown or missing fields");
+  }
+  if (value.profileCapabilities !== undefined) {
+    validateProfileCapabilitySnapshot(value.profileCapabilities);
   }
   const runtime = value.runtime;
   if (
