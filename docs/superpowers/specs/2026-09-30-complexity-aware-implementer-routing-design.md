@@ -1,7 +1,7 @@
 # Complexity-Aware Implementer Routing — Design
 
 **Date:** 2026-09-30
-**Status:** Conversational design approved; written spec awaiting owner review.
+**Status:** Approved by owner for planning and implementation.
 
 ## Intent and scope
 
@@ -48,7 +48,7 @@ This is the new closed runner form. Its only field is `by_complexity`, containin
 
 1. Every complexity tier has a nonempty, ordered list of implementation-role profile IDs. IDs must exist in the frozen resolved profiles and be unique across tiers. An ordinary `runner: profile-id` or `runner: { prefer: [...] }` retains existing behavior.
 2. On the first implementation, try declared profiles in the task's tier in order. If none is ready, try the next stronger tier, continuing upward. Never silently route to a weaker tier. A missing eligible profile blocks the task with profile-specific diagnostics.
-3. Selection uses the existing isolated profile probe: provider registered, exact model ID available, authentication ready, and managed resources verified. It does not probe the endpoint for quality or benchmark performance. An endpoint that fails after preflight follows infrastructure retry policy.
+3. At run creation, probe each declared candidate profile with the existing isolated profile probe and freeze a capability snapshot in the run's durable configuration. Selection uses that snapshot: provider registered, exact model ID available, authentication ready, and managed resources verified. It does not probe the endpoint for quality or benchmark performance. An endpoint that fails after preflight follows infrastructure retry policy. A capability change during the run requires an explicit operator reroute or a new run; recovery does not silently refresh the snapshot.
 4. Freeze the selected profile ID, actual tier, assessment, and policy revision in the run's durable decision history. A controller restart must replay the same accepted route; later catalog or auth changes may make continuation unavailable but must not silently substitute a different profile. A fresh attempt may choose another declared candidate only through an explicit recorded reroute or the defined escalation transition.
 5. An operator `reroute` remains possible only to a profile declared by the implementation stage. It records who/what requested the change and the effective tier. If it changes the profile, the next worker receives a fresh session; it must never append a different model's turns to the old session.
 
