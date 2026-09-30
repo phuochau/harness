@@ -288,6 +288,14 @@ function applyFixDispatch(state: RunState, event: HarnessEvent): void {
   lineage.activeProfileId = payload.profileId;
   lineage.activeTier = payload.tier;
   lineage.dispatchKey = event.idempotencyKey;
+  const implement = ensureJob(state, event.entityId);
+  implement.worker = payload.profileId;
+  implement.route = {
+    profileId: payload.profileId,
+    cause: payload.cause,
+    tier: payload.tier,
+    fixRound: payload.fixRound,
+  };
   for (const [jobId, job] of Object.entries(state.jobs)) {
     if (taskIdForJob(jobId) !== payload.taskId) continue;
     job.attempt = 0;

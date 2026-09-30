@@ -18,7 +18,7 @@ import type {
 import type { CompiledStage, CompiledWorkflow } from "../config/compile.js";
 import type { ProfileCapabilitySnapshot } from "../state/resolved-run-config.js";
 import { materializeJobs, type MaterializedJob } from "./materialize.js";
-import { selectInitialComplexityRoute } from "./routing.js";
+import { selectInitialComplexityRoute, selectNextFixRoute } from "./routing.js";
 import type { RunState } from "./state.js";
 import type { ValidatedTaskGraph } from "./task-graph.js";
 import { globalAttemptNumber, scopedAttemptKey } from "./attempt-identity.js";
@@ -328,6 +328,73 @@ export function createWorkflowCommandDeriver(
     if (state.operator.paused && !resuming) {
       return { events: prefixEvents, effects: [] };
     }
+    // A reviewed implementation advances at a separate durable boundary. Do not
+    // schedule from the pre-transition state: the next tick sees the accepted
+    // generation and its fresh local retry budgets.
+    let pendingFixTransition = false;
+    for (const lineage of Object.values(state.implementationLineages)) {
+      const pending = lineage.pendingReview;
+      if (pending === undefined) continue;
+      const implementJob = materialized.jobs[`implement:${lineage.taskId}`];
+      const reviewJob = Object.values(materialized.jobs).find(
+        (job) => job.taskId === lineage.taskId && stages.get(job.stageId)?.uses === "worker.review",
+      );
+      if (implementJob === undefined || reviewJob === undefined) continue;
+      if (state.jobs[reviewJob.id]?.state === "BLOCKED") continue;
+      const runner = tieredRunner(stages.get(implementJob.stageId)!);
+      if (runner === undefined) continue;
+      const route = selectNextFixRoute({
+        fixRound: lineage.fixRound,
+        originalProfileId: lineage.originalProfileId,
+        originalTier: lineage.originalTier,
+        runner,
+        capabilities: options.profileCapabilities ?? {},
+      });
+      pendingFixTransition = true;
+      if ("blockReason" in route) {
+        prefixEvents.push({
+          eventType: "job.blocked",
+          entityId: reviewJob.id,
+          idempotencyKey: `fix-block:${lineage.taskId}:${pending.reviewEventKey}:${route.blockReason}`,
+          payload: {
+            reason: route.blockReason,
+            evidence: [...pending.findings],
+            suggestedChange: "Review the findings and explicitly reroute or resolve this task.",
+          },
+        });
+        continue;
+      }
+      prefixEvents.push({
+        eventType: "implementation.fix_dispatched",
+        entityId: implementJob.id,
+        idempotencyKey: `fix-dispatch:${lineage.taskId}:${pending.reviewEventKey}:${route.nextFixRound}`,
+        payload: {
+          taskId: lineage.taskId,
+          fixRound: route.nextFixRound,
+          generation: lineage.generation + 1,
+          profileId: route.profileId,
+          tier: route.tier,
+          cause: route.cause,
+          reviewedCommit: pending.commit,
+        },
+      });
+      const path = remediationPath(materialized.jobs, reviewJob.id, implementJob.id);
+      if (path.length === 0) throw new Error(`no review remediation path for ${lineage.taskId}`);
+      for (const pathId of path) {
+        const pathState = state.jobs[pathId];
+        if (pathState === undefined || pathState.state === "PENDING") continue;
+        prefixEvents.push({
+          eventType: "job.invalidated",
+          entityId: pathId,
+          idempotencyKey: `fix-invalidate:${lineage.taskId}:${pending.reviewEventKey}:${pathId}`,
+          payload: {
+            supersededGeneration: Math.max(1, pathState.attempt),
+            reason: `review findings at ${pending.commit}`,
+          },
+        });
+      }
+    }
+    if (pendingFixTransition) return { events: prefixEvents, effects: [] };
     for (const job of Object.values(materialized.jobs)) {
       const current = state.jobs[job.id];
       if (current?.state !== "RETRY" || current.retryReason === undefined) continue;

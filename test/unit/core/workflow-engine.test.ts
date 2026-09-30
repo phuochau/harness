@@ -388,6 +388,101 @@ function workerFor(effects: readonly { input: unknown }[], jobId: string) {
   );
 }
 
+function pendingTieredReview(fixRound: number, tier: "standard" | "complex" = "standard") {
+  const state = stateWithTasksDone(`F-fix-${fixRound}`);
+  state.jobs["implement:T001"] = {
+    state: "DONE", attempt: 1, worker: "implementer-codex",
+    route: { profileId: "implementer-codex", cause: "initial", tier: "standard", fixRound: 0 },
+  };
+  state.jobs["review:T001"] = {
+    state: "RETRY", attempt: 1, worker: "reviewer-claude", retryReason: "changes_requested",
+  };
+  state.implementationLineages.T001 = {
+    taskId: "T001", fixRound, generation: fixRound + 1,
+    originalProfileId: tier === "complex" ? "implementer-devin" : "implementer-codex",
+    originalTier: tier, activeProfileId: "implementer-codex", activeTier: "standard",
+    pendingReview: {
+      commit: `commit-${fixRound}`,
+      findings: ["Fix failing parser case"],
+      reviewedFixRound: fixRound,
+      reviewEventKey: `review-${fixRound}`,
+    },
+    acceptedReviews: [], globalAttemptSeq: 2 + fixRound * 2,
+  };
+  return state;
+}
+
+it("dispatches one durable fix after accepted review and then starts the new generation", () => {
+  const workflow = compileWorkflow(tieredCompileInput());
+  const document = singleTaskV2Graph("standard");
+  const derive = createWorkflowCommandDeriver({
+    workflow, graph: validateGraph(document, fixtureGraphContextFor(document)),
+    profileCapabilities: capabilitySnapshot({ "implementer-codex": true, "implementer-devin": true }),
+  });
+  let state = pendingTieredReview(0);
+  const transition = derive(state, tick("tick:fix-dispatch"));
+  expect(transition.effects).toEqual([]);
+  expect(transition.events.filter((event) => event.eventType === "implementation.fix_dispatched")).toHaveLength(1);
+  expect(transition.events).toContainEqual(expect.objectContaining({
+    eventType: "implementation.fix_dispatched",
+    payload: expect.objectContaining({ fixRound: 1, generation: 2, profileId: "implementer-codex" }),
+  }));
+  for (const draft of transition.events) {
+    state = reduceEvent(state, nextHarnessEvent(state, {
+      eventType: draft.eventType as HarnessEvent["eventType"],
+      entityId: draft.entityId,
+      idempotencyKey: draft.idempotencyKey,
+      payload: draft.payload,
+    }));
+  }
+  expect(state.implementationLineages.T001?.fixRound).toBe(1);
+  expect(state.implementationLineages.T001?.pendingReview).toBeUndefined();
+  const retry = derive(state, tick("tick:fix-attempt"));
+  expect(retry.effects.find((effect) => effect.action === "worker.execute")?.idempotencyKey).toBe(
+    "worker.execute:implement:T001:1:g2",
+  );
+  expect(workerFor(retry.effects, "implement:T001")?.input).toMatchObject({ worker: "implementer-codex" });
+  expect(retry.events.filter((event) => event.eventType === "implementation.fix_dispatched")).toHaveLength(0);
+});
+
+it("escalates round four and blocks after the fifth reviewed round", () => {
+  const workflow = compileWorkflow(tieredCompileInput());
+  const document = singleTaskV2Graph("standard");
+  const derive = createWorkflowCommandDeriver({
+    workflow, graph: validateGraph(document, fixtureGraphContextFor(document)),
+    profileCapabilities: capabilitySnapshot({ "implementer-codex": true, "implementer-devin": true }),
+  });
+  const fourth = derive(pendingTieredReview(3), tick("tick:round-four"));
+  expect(fourth.events).toContainEqual(expect.objectContaining({
+    eventType: "implementation.fix_dispatched",
+    payload: expect.objectContaining({ fixRound: 4, profileId: "implementer-devin", cause: "escalation" }),
+  }));
+  const exhausted = derive(pendingTieredReview(5), tick("tick:exhausted"));
+  expect(exhausted.effects).toEqual([]);
+  expect(exhausted.events).toContainEqual(expect.objectContaining({
+    eventType: "job.blocked", payload: expect.objectContaining({ reason: "fix_rounds_exhausted" }),
+  }));
+});
+
+it("keeps findings pending and blocks escalation when the original tier is strongest", () => {
+  const workflow = compileWorkflow(tieredCompileInput());
+  const document = singleTaskV2Graph("complex");
+  const derive = createWorkflowCommandDeriver({
+    workflow, graph: validateGraph(document, fixtureGraphContextFor(document)),
+    profileCapabilities: capabilitySnapshot({ "implementer-devin": true }),
+  });
+  const state = pendingTieredReview(3, "complex");
+  const decision = derive(state, tick("tick:no-escalation"));
+  expect(decision.effects).toEqual([]);
+  expect(decision.events).toContainEqual(expect.objectContaining({
+    eventType: "job.blocked",
+    entityId: "review:T001",
+    payload: expect.objectContaining({ reason: "no_escalation_profile", evidence: ["Fix failing parser case"] }),
+  }));
+  expect(decision.events.some((event) => event.eventType === "implementation.fix_dispatched")).toBe(false);
+  expect(state.implementationLineages.T001?.pendingReview?.findings).toEqual(["Fix failing parser case"]);
+});
+
 it("uses distinct effect and assignment identities after a fix generation resets local attempts", () => {
   const workflow = compileWorkflow(tieredCompileInput());
   const document = singleTaskV2Graph("standard");
