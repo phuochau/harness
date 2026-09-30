@@ -124,14 +124,6 @@ class DurableInteractiveApprovalStore implements ApprovalStore {
   }
 }
 
-function boundedEvidence(evidence: readonly string[]): readonly string[] {
-  return evidence
-    .map((item) =>
-      item.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 300))
-    .filter((item) => item.length > 0)
-    .slice(0, 32);
-}
-
 export async function probeTieredRunnerCapabilities(input: {
   readonly workflow: CompiledWorkflow;
   readonly probe: (profile: ResolvedProfile) => Promise<ProfileCapabilities>;
@@ -155,16 +147,17 @@ export async function probeTieredRunnerCapabilities(input: {
       const capabilities = await input.probe(profile);
       entry = {
         available: capabilities.available === true,
-        evidence: boundedEvidence(capabilities.evidence),
+        evidence: [
+          `provider ${capabilities.providerRegistered ? "registered" : "missing"}`,
+          `model ${capabilities.modelAvailable ? "available" : "missing"}`,
+          `authentication ${capabilities.authenticated ? "ready" : "not ready"}`,
+          `resources ${capabilities.resourcesVerified ? "verified" : "unverified"}`,
+        ],
       };
-    } catch (error) {
+    } catch {
       entry = {
         available: false,
-        evidence: boundedEvidence([
-          `capability probe failed: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        ]),
+        evidence: ["capability probe failed"],
       };
     }
     snapshot[profileId] = entry;

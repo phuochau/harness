@@ -130,6 +130,7 @@ it("probes each declared tier profile once and freezes only bounded evidence", a
       probed.push(profile.id);
       return {
         ...probeResult(profile.id === "implementer-devin"),
+        evidence: ["secret=sk-must-not-persist"],
         apiKey: "sk-must-not-persist",
         prompt: "implement everything",
       } as unknown as ProfileCapabilities;
@@ -143,17 +144,18 @@ it("probes each declared tier profile once and freezes only bounded evidence", a
   expect(snapshot).toEqual({
     "implementer-claude": {
       available: false,
-      evidence: ["authentication not ready"],
+      evidence: ["provider registered", "model missing", "authentication not ready", "resources verified"],
     },
     "implementer-codex": {
       available: false,
-      evidence: ["authentication not ready"],
+      evidence: ["provider registered", "model missing", "authentication not ready", "resources verified"],
     },
     "implementer-devin": {
       available: true,
-      evidence: ["managed profile resources verified"],
+      evidence: ["provider registered", "model available", "authentication ready", "resources verified"],
     },
   });
+  expect(JSON.stringify(snapshot)).not.toContain("sk-must-not-persist");
 });
 
 it("records a failed capability probe as unavailable instead of aborting run creation", async () => {
@@ -161,15 +163,16 @@ it("records a failed capability probe as unavailable instead of aborting run cre
     workflow: tieredWorkflow(),
     probe: async (profile) => {
       if (profile.id === "implementer-codex") {
-        throw new Error("spawn pi ENOENT");
+        throw new Error("spawn pi ENOENT secret=sk-must-not-persist");
       }
       return probeResult(true);
     },
   });
   expect(snapshot?.["implementer-codex"]).toMatchObject({ available: false });
-  expect(snapshot?.["implementer-codex"]?.evidence.join(" ")).toContain(
-    "ENOENT",
-  );
+  expect(snapshot?.["implementer-codex"]?.evidence).toEqual([
+    "capability probe failed",
+  ]);
+  expect(JSON.stringify(snapshot)).not.toContain("sk-must-not-persist");
   expect(snapshot?.["implementer-devin"]).toMatchObject({ available: true });
 });
 
