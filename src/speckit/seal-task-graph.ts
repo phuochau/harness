@@ -2,6 +2,7 @@ import { mkdir, rename, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { dirname, resolve, sep } from "node:path";
 import {
+  taskComplexity,
   validateTaskGraph,
   type TaskGraphDocument,
 } from "../contracts/task-graph.js";
@@ -65,8 +66,9 @@ export async function sealTaskGraph(
       }
     }
   }
+  const versioned = parsed.every((task) => taskComplexity(task) !== undefined);
   const graph = validateTaskGraph({
-    schema: "harness/task-graph/v1",
+    schema: versioned ? "harness/task-graph/v2" : "harness/task-graph/v1",
     tasksSemanticHash: semanticHash(parsed),
     tasks: structuredClone(parsed),
   });

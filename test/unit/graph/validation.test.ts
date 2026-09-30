@@ -1,4 +1,8 @@
 import { expect, it } from "vitest";
+import {
+  taskComplexity,
+  type TaskGraphDocument,
+} from "../../../src/contracts/task-graph.js";
 import { validateGraph } from "../../../src/core/task-graph.js";
 import {
   diamondTaskGraph,
@@ -7,6 +11,19 @@ import {
   fixtureTaskGraph,
   taskGraphCase,
 } from "../../support/factories.js";
+
+function v2TaskGraph(): TaskGraphDocument {
+  const base = diamondTaskGraph();
+  return {
+    schema: "harness/task-graph/v2",
+    tasksSemanticHash: base.tasksSemanticHash,
+    tasks: base.tasks.map((task, index) => ({
+      ...task,
+      complexity: index === 2 ? "complex" : "standard",
+      complexityReason: `assessment ${task.id}`,
+    })),
+  };
+}
 
 it.each([
   ["duplicate", taskGraphCase("duplicate"), fixtureGraphContext(), /duplicate task/],
@@ -53,6 +70,37 @@ it("accepts a valid diamond and causally ordered path overlap", () => {
   expect(() =>
     validateGraph(orderedOverlap, fixtureGraphContextFor(orderedOverlap)),
   ).not.toThrow();
+});
+
+it("accepts a valid v2 task graph and exposes taskComplexity", () => {
+  const graph = v2TaskGraph();
+  const validated = validateGraph(graph, fixtureGraphContextFor(graph));
+  expect(validated.graph.schema).toBe("harness/task-graph/v2");
+  expect(taskComplexity(validated.byId.get("T001")!)).toBe("standard");
+  expect(taskComplexity(validated.byId.get("T003")!)).toBe("complex");
+});
+
+it("returns undefined taskComplexity for v1 task nodes", () => {
+  expect(taskComplexity(fixtureTaskGraph().tasks[0]!)).toBeUndefined();
+});
+
+it("rejects a v2 graph node missing the assessment", () => {
+  const graph = v2TaskGraph();
+  const malformed = structuredClone(graph) as { tasks: { complexity?: string }[] };
+  delete malformed.tasks[0]!.complexity;
+  expect(() =>
+    validateGraph(
+      malformed as TaskGraphDocument,
+      fixtureGraphContextFor(graph),
+    ),
+  ).toThrow();
+});
+
+it("rejects a v2 graph projected against v1 task records", () => {
+  const graph = v2TaskGraph();
+  expect(() => validateGraph(graph, fixtureGraphContext())).toThrow(
+    /does not match tasks.md/,
+  );
 });
 
 it("rejects unsafe and protected owned paths", () => {

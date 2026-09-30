@@ -5,6 +5,7 @@ import type {
   HarnessLock,
   ProfileDocument,
   TaskGraphDocument,
+  TaskGraphV1Document,
   WorkerResult,
   WorkflowDocument,
 } from "../../src/contracts/index.js";
@@ -297,7 +298,7 @@ export const fixtureHarnessLock = fixture<HarnessLock>(() => ({
   ],
 }));
 
-function diamondTaskGraphBase(): TaskGraphDocument {
+function diamondTaskGraphBase(): TaskGraphV1Document {
   return {
   schema: "harness/task-graph/v1",
   tasksSemanticHash: hashA,
@@ -336,12 +337,12 @@ function diamondTaskGraphBase(): TaskGraphDocument {
   };
 }
 
-export const fixtureTaskGraph = fixture<TaskGraphDocument>(diamondTaskGraphBase);
+export const fixtureTaskGraph = fixture<TaskGraphV1Document>(diamondTaskGraphBase);
 
 export function diamondTaskGraph(
-  overrides: DeepPartial<TaskGraphDocument> = {},
-): TaskGraphDocument {
-  return fixture<TaskGraphDocument>(diamondTaskGraphBase)(overrides);
+  overrides: DeepPartial<TaskGraphV1Document> = {},
+): TaskGraphV1Document {
+  return fixture<TaskGraphV1Document>(diamondTaskGraphBase)(overrides);
 }
 
 export const fixtureEvent = fixture<HarnessEvent>(() => ({
@@ -452,7 +453,7 @@ export function taskGraphCase(kind: TaskGraphCase): TaskGraphDocument {
       graph.tasks[2]!.ownedPaths = [...graph.tasks[0]!.ownedPaths];
       break;
   }
-  return fixture<TaskGraphDocument>(() => graph)();
+  return fixture<TaskGraphV1Document>(() => graph)();
 }
 
 export function fixtureGraphContext(

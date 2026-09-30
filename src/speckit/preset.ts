@@ -52,7 +52,7 @@ export async function runSpecKitCompatibilitySmoke(): Promise<void> {
       "utf8",
     );
     if (
-      !command.includes("harness-task-metadata:v1") ||
+      !command.includes("harness-task-metadata:v2") ||
       !command.includes("controller derives both deterministically") ||
       command.includes("{CORE_TEMPLATE}")
     ) {

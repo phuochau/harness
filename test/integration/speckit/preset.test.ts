@@ -8,17 +8,45 @@ import {
 import {
   artifactPaths,
   emptyArtifactBaseline,
+  exactTaskDocumentV2Fixture,
   planningProjectFixture,
   presetFixture,
 } from "../../support/planning-fixtures.js";
 
-it("wraps speckit.tasks and emits a controller-derived hash-bound graph", async () => {
+it("wraps speckit.tasks and emits a controller-derived hash-bound v2 graph", async () => {
   const preset = await presetFixture();
   expect(preset.manifest).toContain("strategy: wrap");
   expect(preset.command).toContain("{CORE_TEMPLATE}");
-  expect(preset.command).toContain("harness-task-metadata:v1");
+  expect(preset.command).toContain("harness-task-metadata:v2");
+  expect(preset.command).toContain("| complexity=");
+  expect(preset.command).toContain("| why=");
+  expect(preset.command).toContain("mechanical");
+  expect(preset.command).toContain("complex");
   expect(preset.command).toContain("controller derives both deterministically");
 
+  const project = await planningProjectFixture({
+    tasksText: exactTaskDocumentV2Fixture(),
+  });
+  try {
+    const artifacts = await validatePlanningArtifacts(
+      project.root,
+      planningArtifactContract("tasks", artifactPaths),
+      emptyArtifactBaseline(),
+    );
+    expect(artifacts.graph?.schema).toBe("harness/task-graph/v2");
+    expect(artifacts.graph?.tasks[0]).toMatchObject({
+      complexity: "standard",
+      complexityReason: "Touches parser and CLI contract",
+    });
+    expect(artifacts.graph?.tasksSemanticHash).toBe(
+      semanticHash(parseSpecKitTasks(artifacts.files.tasks!.text)),
+    );
+  } finally {
+    await project.cleanup();
+  }
+});
+
+it("still accepts a v1 tasks document for legacy workflows", async () => {
   const project = await planningProjectFixture();
   try {
     const artifacts = await validatePlanningArtifacts(

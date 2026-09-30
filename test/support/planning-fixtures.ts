@@ -66,6 +66,60 @@ export function exactTaskDocumentFixture(
   return `${visible}<!-- harness-task-metadata:v1\n${canonicalJson(metadata)}\n-->`;
 }
 
+export interface TaskDocumentV2Options {
+  readonly complexityReason?: string;
+}
+
+function taskRecordsV2(complexityReason = "Touches parser and CLI contract") {
+  return [
+    {
+      acceptanceRefs: ["FR-001"],
+      complexity: "standard",
+      complexityReason,
+      dependsOn: [],
+      description: "Implement parser",
+      id: "T001",
+      labels: ["US1"],
+      ownedPaths: ["src/parser.ts"],
+      parallelEligible: true,
+      phase: "Setup",
+    },
+    {
+      acceptanceRefs: ["SC-001"],
+      complexity: "mechanical",
+      complexityReason: "Single isolated test file",
+      dependsOn: ["T001"],
+      description: "Verify escaped | description",
+      id: "T002",
+      labels: [],
+      ownedPaths: ["test/parser.test.ts"],
+      parallelEligible: false,
+      phase: "Verification",
+    },
+  ];
+}
+
+export function exactTaskDocumentV2Fixture(
+  options: TaskDocumentV2Options = {},
+): string {
+  const reason = options.complexityReason ?? "Touches parser and CLI contract";
+  const visible = [
+    "# Feature Tasks",
+    "",
+    "## Phase 1: Setup",
+    `- [ ] T001 [P] [US1] Implement parser | complexity=standard | why=${JSON.stringify(reason)} | deps=[] | ac=[\"FR-001\"] | paths=[\"src/parser.ts\"]`,
+    "",
+    "## Phase 2: Verification",
+    `- [ ] T002 Verify escaped \\| description | complexity=mechanical | why="Single isolated test file" | deps=[\"T001\"] | ac=[\"SC-001\"] | paths=[\"test/parser.test.ts\"]`,
+    "",
+  ].join("\n");
+  const metadata = {
+    schema: "harness/task-metadata/v2",
+    tasks: taskRecordsV2(reason),
+  };
+  return `${visible}<!-- harness-task-metadata:v2\n${canonicalJson(metadata)}\n-->`;
+}
+
 export type MalformedTaskKind =
   | "missing_metadata_delimiter"
   | "duplicate_json_key"
@@ -100,7 +154,9 @@ export function malformedTaskDocumentFixture(kind: MalformedTaskKind): string {
   }
 }
 
-export async function planningProjectFixture() {
+export async function planningProjectFixture(
+  options: { readonly tasksText?: string } = {},
+) {
   const root = await mkdtemp(join(tmpdir(), "pi-harness-planning-"));
   const files: Record<string, string> = {
     [artifactPaths.spec]: [
@@ -111,7 +167,7 @@ export async function planningProjectFixture() {
       "",
     ].join("\n"),
     [artifactPaths.plan]: "# Plan\n\nUse a deterministic parser.\n",
-    [artifactPaths.tasks]: exactTaskDocumentFixture(),
+    [artifactPaths.tasks]: options.tasksText ?? exactTaskDocumentFixture(),
   };
   for (const [path, contents] of Object.entries(files)) {
     const target = join(root, path);

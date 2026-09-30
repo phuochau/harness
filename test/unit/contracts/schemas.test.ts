@@ -111,7 +111,22 @@ it("keeps environment/v1 backward compatible while validating declared agent plu
   }, lock)).toThrow(/lock dependency/);
 });
 
-it("accepts only the exact task graph version and closed shape", () => {
+it("accepts v1 and v2 task graphs, each with a closed shape", () => {
+  const v1Node = {
+    id: "T001",
+    description: "one",
+    phase: "foundation",
+    labels: [],
+    parallelEligible: false,
+    dependsOn: [],
+    acceptanceRefs: [],
+    ownedPaths: [],
+  };
+  const v2Node = {
+    ...v1Node,
+    complexity: "standard",
+    complexityReason: "Touches one file",
+  };
   expect(
     validateTaskGraph({
       schema: "harness/task-graph/v1",
@@ -119,9 +134,16 @@ it("accepts only the exact task graph version and closed shape", () => {
       tasks: [],
     }),
   ).toBeTruthy();
-  expect(() =>
+  expect(
     validateTaskGraph({
       schema: "harness/task-graph/v2",
+      tasksSemanticHash: hash,
+      tasks: [v2Node],
+    }),
+  ).toBeTruthy();
+  expect(() =>
+    validateTaskGraph({
+      schema: "harness/task-graph/v3",
       tasksSemanticHash: hash,
       tasks: [],
     }),
@@ -132,6 +154,20 @@ it("accepts only the exact task graph version and closed shape", () => {
       tasksSemanticHash: hash,
       tasks: [],
       extra: true,
+    }),
+  ).toThrow();
+  expect(() =>
+    validateTaskGraph({
+      schema: "harness/task-graph/v1",
+      tasksSemanticHash: hash,
+      tasks: [v2Node],
+    }),
+  ).toThrow();
+  expect(() =>
+    validateTaskGraph({
+      schema: "harness/task-graph/v2",
+      tasksSemanticHash: hash,
+      tasks: [v1Node],
     }),
   ).toThrow();
 });
