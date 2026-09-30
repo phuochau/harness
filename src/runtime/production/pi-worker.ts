@@ -3,13 +3,15 @@ import { link, lstat, mkdir, open, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { EffectIntent, ReconcileResult } from "../../actions/types.js";
 import type { ResolvedProfile, ResolvedProfiles } from "../../config/profiles.js";
-import type { WorkerAssignment } from "../../core/assignment.js";
+import type { HandoffReference, WorkerAssignment } from "../../core/assignment.js";
 import { validateWorkerResult, type WorkerResult } from "../../contracts/worker-result.js";
 import type { ProfileFamily } from "../../contracts/profiles.js";
 import type { LifecycleWorktreeBinding } from "../../git/worktrees.js";
 import { sha256 } from "../../shared/sha256.js";
 import type { PiProcessRecord } from "../pi-process/types.js";
 import type { TaskSessionStore } from "../pi-worker/task-session.js";
+import type { Journal } from "../../state/journal.js";
+import { buildHandoffReport, verifyHandoffReport, writeHandoffReport } from "../workers/handoff-report.js";
 import {
   PiWorkerRuntime,
   type PreparedPiAttempt,
@@ -31,6 +33,7 @@ export interface PreparedAttemptBinding {
 export interface ProductionWorkerAttemptPort {
   prepare(
     intent: EffectIntent<ProductionWorkerKind, ProductionWorkerInput>,
+    handoffReport?: HandoffReference,
   ): Promise<PreparedAttemptBinding>;
   stagePrompt(binding: LifecycleWorktreeBinding, prompt: string): Promise<string>;
   accept(
@@ -65,6 +68,8 @@ export interface ProductionPiWorkerRuntimeOptions {
   readonly records: DurableRecordStore;
   readonly processRoot: string;
   readonly sessions?: TaskSessionStore;
+  readonly journal?: Journal;
+  readonly handoffRoot?: string;
 }
 
 export class SessionContinuationBlockedError extends Error {
@@ -72,6 +77,14 @@ export class SessionContinuationBlockedError extends Error {
 
   public constructor(reason: string) {
     super(`session_continuation_blocked: ${reason}`);
+  }
+}
+
+export class HandoffReportBlockedError extends Error {
+  public readonly code = "HANDOFF_REPORT_BLOCKED";
+
+  public constructor(reason: string) {
+    super(`handoff_report_blocked: ${reason}`);
   }
 }
 
@@ -264,7 +277,25 @@ export class ProductionPiWorkerRuntime implements ProductionWorkerRuntime {
   public async prepare(
     intent: EffectIntent<ProductionWorkerKind, ProductionWorkerInput>,
   ): Promise<PreparedWorkerAttempt> {
-    const { assignment, binding } = await this.options.attempts.prepare(intent);
+    let handoffReport: HandoffReference | undefined;
+    if (intent.action === "worker.execute" && typeof intent.input.fixRound === "number" &&
+        intent.input.fixRound > 0 && typeof intent.input.taskId === "string" &&
+        this.options.journal !== undefined && this.options.handoffRoot !== undefined) {
+      try {
+        const built = buildHandoffReport(await this.options.journal.read(), intent.input.taskId);
+        const path = join(
+          this.options.handoffRoot,
+          intent.input.taskId,
+          `round-${intent.input.fixRound}-${built.hash.slice(7, 23)}.json`,
+        );
+        await writeHandoffReport(path, built);
+        await verifyHandoffReport(path, built.hash);
+        handoffReport = { path, hash: built.hash, previousCommit: built.report.previousCommit };
+      } catch (error) {
+        throw new HandoffReportBlockedError(error instanceof Error ? error.message : "report unavailable");
+      }
+    }
+    const { assignment, binding } = await this.options.attempts.prepare(intent, handoffReport);
     let session: {
       readonly sessionId: string;
       readonly sessionDir: string;

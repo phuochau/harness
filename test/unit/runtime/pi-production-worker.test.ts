@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import type { EffectIntent } from "../../../src/actions/types.js";
+import type { HarnessEvent } from "../../../src/contracts/events.js";
 import { createAssignment, type WorkerAssignment } from "../../../src/core/assignment.js";
 import type { WorkerResult } from "../../../src/contracts/worker-result.js";
 import type { LifecycleWorktreeBinding } from "../../../src/git/worktrees.js";
@@ -12,6 +13,7 @@ import type { PiWorkerRuntime } from "../../../src/runtime/pi-worker/runtime.js"
 import { TaskSessionStore } from "../../../src/runtime/pi-worker/task-session.js";
 import { ProductionPiWorkerRuntime } from "../../../src/runtime/production/pi-worker.js";
 import { DurableRecordStore } from "../../../src/runtime/production/records.js";
+import type { Journal } from "../../../src/state/journal.js";
 import { sha256 } from "../../../src/shared/sha256.js";
 import { fixtureResolvedProfiles } from "../../support/factories.js";
 import { processRecord } from "../../support/pi-process-fixtures.js";
@@ -136,7 +138,7 @@ async function fixture() {
     cancel: vi.fn(async () => ({ attemptId: process.attemptId, signals: ["SIGINT"], exit: null })),
   };
   const attempts = {
-    prepare: vi.fn(async () => ({ assignment, binding })),
+    prepare: vi.fn(async (_intent: unknown, _handoff?: unknown) => ({ assignment, binding })),
     stagePrompt: vi.fn(async () => ".harness-output/assignment.md"),
     accept: vi.fn(async () => undefined),
     release: vi.fn(async () => undefined),
@@ -145,6 +147,7 @@ async function fixture() {
   const records = new DurableRecordStore(join(root, "records"));
   const sessions = new TaskSessionStore({ root: join(root, "sessions") });
   return {
+    root,
     assignment,
     binding,
     result,
@@ -165,6 +168,41 @@ async function fixture() {
     }),
   };
 }
+
+it("binds a verified journal handoff report into a fix assignment", async () => {
+  const value = await fixture();
+  const created = await value.sessions.create({ taskId: "T001", generation: 1, profileId: value.assignment.profileId });
+  await writeFile(
+    join(created.sessionDir, `2026-09-30_${created.sessionId}.jsonl`),
+    `${JSON.stringify({ type: "session", id: created.sessionId })}\n`,
+    { mode: 0o600 },
+  );
+  const accepted = [{
+    sequence: 1, entityId: "implement:T001", eventType: "worker.result_observed",
+    payload: { outcome: "completed", role: "implementation", commit, evidence: [] },
+  }, {
+    sequence: 2, entityId: "review:T001", eventType: "review.changes_requested",
+    payload: { commit, findings: ["Fix Unicode parser case"] },
+  }] as unknown as HarnessEvent[];
+  const runtime = new ProductionPiWorkerRuntime({
+    runtime: value.pi as unknown as PiWorkerRuntime,
+    profiles: fixtureResolvedProfiles(), attempts: value.attempts,
+    records: value.records, processRoot: join(value.root, "processes"),
+    sessions: value.sessions,
+    journal: { read: async () => accepted } as unknown as Journal,
+    handoffRoot: join(value.root, "handoff"),
+  });
+  await runtime.prepare({
+    ...value.intent,
+    input: { ...value.intent.input, fixRound: 1, localAttempt: 1 },
+  });
+  const handoff = value.attempts.prepare.mock.calls[0]?.[1] as unknown as {
+    path: string; hash: string; previousCommit: string;
+  };
+  expect(handoff.previousCommit).toBe(commit);
+  expect(handoff.path).toContain("/handoff/T001/round-1-");
+  expect(await readFile(handoff.path, "utf8")).toContain("Fix Unicode parser case");
+});
 
 it("creates a managed session for the first tiered implementation attempt", async () => {
   const value = await fixture();

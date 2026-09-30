@@ -300,6 +300,8 @@ export async function composeProductionRun(
             records,
             processRoot: join(initialized.paths.root, "processes"),
             sessions: new TaskSessionStore({ root: initialized.paths.sessions }),
+            journal,
+            handoffRoot: join(initialized.paths.root, "handoff"),
           })
     );
     const registry = createProductionActionRegistry({
@@ -445,6 +447,8 @@ export async function createStandaloneProductionEffects(input: {
           records,
           processRoot: join(paths.root, "processes"),
           sessions: new TaskSessionStore({ root: paths.sessions }),
+          journal,
+          handoffRoot: join(paths.root, "handoff"),
         })
   );
   const planningSealer = new ProductionPlanningArtifactSealer(

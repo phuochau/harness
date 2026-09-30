@@ -300,7 +300,7 @@ export function createWorkflowLifecycle(): WorkflowLifecycle {
           "Inspect external state, then retry recovery or resolve the effect manually.",
         )];
       }
-      if (code === "SESSION_CONTINUATION_BLOCKED") {
+      if (code === "SESSION_CONTINUATION_BLOCKED" || code === "HANDOFF_REPORT_BLOCKED") {
         return [blocked(
           intent,
           bound.jobId,

@@ -1,7 +1,7 @@
 import type { EffectIntent } from "../../actions/types.js";
 import { lstat, readFile, realpath, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { createAssignment, type WorkerAssignment } from "../../core/assignment.js";
+import { createAssignment, type HandoffReference, type WorkerAssignment } from "../../core/assignment.js";
 import { validateEvidence } from "../../core/evidence.js";
 import type { WorkerKind } from "../../core/routing.js";
 import type { RunState } from "../../core/state.js";
@@ -140,6 +140,7 @@ export class GitWorkerAttemptPort implements ProductionWorkerAttemptPort {
 
   public async prepare(
     intent: EffectIntent<ProductionWorkerKind, ProductionWorkerInput>,
+    handoffReport?: HandoffReference,
   ): Promise<PreparedAttemptBinding> {
     const bound = inputRecord(intent, this.options.profiles);
     const graph = this.options.graph();
@@ -184,6 +185,7 @@ export class GitWorkerAttemptPort implements ProductionWorkerAttemptPort {
           requiredDisciplines: disciplines(role),
           verificationCommands: this.options.taskVerification,
           planningArtifacts: artifacts,
+          ...(handoffReport === undefined ? {} : { handoffReport }),
           worktree: {
             role: "implementation",
             path: binding.path,

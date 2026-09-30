@@ -57,6 +57,14 @@ export function buildWorkerPrompt(
     "- If the spec or architecture is wrong, return outcome=blocked with reason, evidence, and suggestedChange; do not edit planning artifacts.",
   ];
   if (assignment.role === "implementation") {
+    if (assignment.handoffReport !== undefined) {
+      sections.push(
+        `Previous accepted implementation commit: ${assignment.handoffReport.previousCommit}`,
+        `Verified handoff report: ${assignment.handoffReport.path}`,
+        `Handoff report SHA-256: ${assignment.handoffReport.hash}`,
+        "Read the complete report and address every open review finding before implementing the next fix.",
+      );
+    }
     sections.push(
       `- Write exactly one schemaVersion 1 JSON result to ${resultPath}.`,
       "- Every evidence item is {kind,path,sha256}; path must be a regular file below .harness-output and sha256 must equal the file bytes.",

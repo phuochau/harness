@@ -13,6 +13,12 @@ export interface WorktreeBinding {
   readonly writable: boolean;
 }
 
+export interface HandoffReference {
+  readonly path: string;
+  readonly hash: `sha256:${string}`;
+  readonly previousCommit: string;
+}
+
 export interface AssignmentInput {
   readonly runId: string;
   readonly stageId: string;
@@ -34,6 +40,7 @@ export interface AssignmentInput {
   readonly requiredDisciplines: readonly string[];
   readonly verificationCommands: readonly (readonly string[])[];
   readonly planningArtifacts: readonly string[];
+  readonly handoffReport?: HandoffReference;
   readonly worktree: WorktreeBinding;
 }
 
