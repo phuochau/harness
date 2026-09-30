@@ -3,6 +3,7 @@ import { createAssignment } from "../../../src/core/assignment.js";
 import {
   PolicyBlocker,
   selectInitialComplexityRoute,
+  selectNextFixRoute,
   selectProfile,
   type RouteCandidate,
 } from "../../../src/core/routing.js";
@@ -221,5 +222,123 @@ describe("initial complexity route", () => {
       profileId: "implementer-standard-a",
       actualTier: "standard",
     });
+  });
+});
+
+describe("next fix route", () => {
+  it("resumes the original profile and transcript for fix rounds 1 through 3", () => {
+    for (const fixRound of [0, 1, 2] as const) {
+      const route = selectNextFixRoute({
+        fixRound,
+        originalProfileId: "implementer-standard-a",
+        originalTier: "standard",
+        runner: complexityRunner,
+        capabilities: capabilitySnapshot({}),
+      });
+      expect(route).toEqual({
+        profileId: "implementer-standard-a",
+        tier: "standard",
+        nextFixRound: fixRound + 1,
+        cause: "review_fix",
+        freshTranscript: false,
+        candidates: ["implementer-standard-a"],
+      });
+    }
+  });
+
+  it("escalates to the nearest stronger declared tier at fix round 4", () => {
+    const route = selectNextFixRoute({
+      fixRound: 3,
+      originalProfileId: "implementer-fast",
+      originalTier: "mechanical",
+      runner: complexityRunner,
+      capabilities: capabilitySnapshot({
+        "implementer-standard-a": false,
+        "implementer-standard-b": true,
+        "implementer-strong": true,
+      }),
+    });
+    expect(route).toEqual({
+      profileId: "implementer-standard-b",
+      tier: "standard",
+      nextFixRound: 4,
+      cause: "escalation",
+      freshTranscript: true,
+      candidates: [
+        "implementer-standard-a",
+        "implementer-standard-b",
+        "implementer-strong",
+      ],
+    });
+  });
+
+  it("escalates again for fix round 5", () => {
+    const route = selectNextFixRoute({
+      fixRound: 4,
+      originalProfileId: "implementer-standard-a",
+      originalTier: "standard",
+      runner: complexityRunner,
+      capabilities: capabilitySnapshot({ "implementer-strong": true }),
+    });
+    expect(route).toEqual({
+      profileId: "implementer-strong",
+      tier: "complex",
+      nextFixRound: 5,
+      cause: "escalation",
+      freshTranscript: true,
+      candidates: ["implementer-strong"],
+    });
+  });
+
+  it("never treats a same-tier or weaker profile as an escalation", () => {
+    const route = selectNextFixRoute({
+      fixRound: 3,
+      originalProfileId: "implementer-standard-a",
+      originalTier: "standard",
+      runner: complexityRunner,
+      capabilities: capabilitySnapshot({
+        "implementer-fast": true,
+        "implementer-standard-b": true,
+        "implementer-strong": false,
+      }),
+    });
+    expect(route).toEqual({ blockReason: "no_escalation_profile" });
+  });
+
+  it("blocks with no_escalation_profile at the strongest declared tier", () => {
+    const route = selectNextFixRoute({
+      fixRound: 3,
+      originalProfileId: "implementer-strong",
+      originalTier: "complex",
+      runner: complexityRunner,
+      capabilities: capabilitySnapshot({
+        "implementer-fast": true,
+        "implementer-standard-a": true,
+        "implementer-strong": true,
+      }),
+    });
+    expect(route).toEqual({ blockReason: "no_escalation_profile" });
+  });
+
+  it("blocks with no_escalation_profile when no stronger-tier profile is available", () => {
+    const route = selectNextFixRoute({
+      fixRound: 3,
+      originalProfileId: "implementer-standard-a",
+      originalTier: "standard",
+      runner: complexityRunner,
+      capabilities: capabilitySnapshot({ "implementer-strong": false }),
+    });
+    expect(route).toEqual({ blockReason: "no_escalation_profile" });
+  });
+
+  it("stops automatic fixes after a reviewed round 5", () => {
+    const route = selectNextFixRoute({
+      fixRound: 5,
+      originalProfileId: "implementer-standard-a",
+      originalTier: "standard",
+      runner: complexityRunner,
+      capabilities: capabilitySnapshot({ "implementer-strong": true }),
+    });
+    expect(route).toEqual({ blockReason: "fix_rounds_exhausted" });
   });
 });

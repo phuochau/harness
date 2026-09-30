@@ -111,3 +111,62 @@ export function selectInitialComplexityRoute(input: {
   }
   return { blockReason: "no_available_profile" };
 }
+
+export const maxFixRounds = 5;
+export const escalationStartsAtFixRound = 4;
+
+export type NextFixRoute =
+  | {
+      readonly profileId: string;
+      readonly tier: TaskComplexity;
+      readonly nextFixRound: number;
+      readonly cause: "review_fix" | "escalation";
+      readonly freshTranscript: boolean;
+      readonly candidates: readonly string[];
+    }
+  | { readonly blockReason: string };
+
+export function selectNextFixRoute(input: {
+  readonly fixRound: number;
+  readonly originalProfileId: string;
+  readonly originalTier: TaskComplexity;
+  readonly runner: ComplexityRunner;
+  readonly capabilities: ProfileCapabilitySnapshot;
+}): NextFixRoute {
+  const nextFixRound = input.fixRound + 1;
+  if (nextFixRound > maxFixRounds) {
+    return { blockReason: "fix_rounds_exhausted" };
+  }
+  if (nextFixRound < escalationStartsAtFixRound) {
+    return {
+      profileId: input.originalProfileId,
+      tier: input.originalTier,
+      nextFixRound,
+      cause: "review_fix",
+      freshTranscript: false,
+      candidates: [input.originalProfileId],
+    };
+  }
+  const strongerTiers = complexityTierOrder.slice(
+    complexityTierOrder.indexOf(input.originalTier) + 1,
+  );
+  const candidates = strongerTiers.flatMap(
+    (tier) => input.runner.by_complexity[tier],
+  );
+  for (const tier of strongerTiers) {
+    const selected = input.runner.by_complexity[tier].find(
+      (profileId) => input.capabilities[profileId]?.available === true,
+    );
+    if (selected !== undefined) {
+      return {
+        profileId: selected,
+        tier,
+        nextFixRound,
+        cause: "escalation",
+        freshTranscript: true,
+        candidates,
+      };
+    }
+  }
+  return { blockReason: "no_escalation_profile" };
+}

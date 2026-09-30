@@ -4,6 +4,7 @@ import type {
   HarnessEvent,
 } from "../contracts/events.js";
 import { validateHarnessEvent } from "../contracts/events.js";
+import { complexityTierOrder } from "../contracts/workflow.js";
 import { canonicalJson } from "../shared/canonical-json.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 import { sha256 } from "../shared/sha256.js";
@@ -13,7 +14,11 @@ import {
   taskIdForJob,
   transitionJob,
 } from "./lifecycle.js";
-import type { PendingDecision, RunState } from "./state.js";
+import type {
+  ImplementationLineage,
+  PendingDecision,
+  RunState,
+} from "./state.js";
 
 export class ReducerError extends Error {}
 
@@ -166,6 +171,130 @@ function applyOperatorIntent(state: RunState, event: HarnessEvent): void {
   state.operator.lastIntent = event.idempotencyKey;
 }
 
+function applyLineageRoute(state: RunState, event: HarnessEvent): void {
+  if (event.eventType !== "worker.routed") return;
+  const { taskId, tier, cause, worker } = event.payload;
+  if (taskId === undefined || tier === undefined || cause === undefined) return;
+  const lineage = state.implementationLineages[taskId];
+  if (cause === "initial") {
+    if (lineage === undefined) {
+      state.implementationLineages[taskId] = {
+        taskId,
+        fixRound: 0,
+        generation: 1,
+        originalProfileId: worker,
+        originalTier: tier,
+        activeProfileId: worker,
+        activeTier: tier,
+        acceptedReviews: [],
+        globalAttemptSeq: 0,
+      };
+      return;
+    }
+    if (lineage.originalProfileId !== worker || lineage.originalTier !== tier) {
+      throw new ReducerError(`conflicting initial route for ${taskId}`);
+    }
+    return;
+  }
+  if (cause === "operator_reroute" && lineage !== undefined) {
+    lineage.activeProfileId = worker;
+    lineage.activeTier = tier;
+  }
+}
+
+function applyLineageReview(
+  state: RunState,
+  event: HarnessEvent,
+): "duplicate" | "recorded" | "no_lineage" {
+  if (event.eventType !== "review.changes_requested") return "no_lineage";
+  const taskId = taskIdForJob(event.entityId);
+  const lineage: ImplementationLineage | undefined =
+    taskId === undefined
+      ? undefined
+      : state.implementationLineages[taskId];
+  if (lineage === undefined) return "no_lineage";
+  const commit = event.payload.commit;
+  if (lineage.pendingReview?.commit === commit) return "duplicate";
+  if (lineage.acceptedReviews.some((review) => review.commit === commit)) {
+    return "duplicate";
+  }
+  if (lineage.pendingReview !== undefined) {
+    throw new ReducerError(`conflicting review findings for ${taskId}`);
+  }
+  lineage.pendingReview = {
+    commit,
+    findings: event.payload.findings,
+    reviewedFixRound: lineage.fixRound,
+    reviewEventKey: event.idempotencyKey,
+  };
+  return "recorded";
+}
+
+function applyFixDispatch(state: RunState, event: HarnessEvent): void {
+  if (event.eventType !== "implementation.fix_dispatched") return;
+  const payload = event.payload;
+  const lineage = state.implementationLineages[payload.taskId];
+  if (lineage === undefined) {
+    throw new ReducerError(`fix dispatch for unrouted task ${payload.taskId}`);
+  }
+  if (lineage.dispatchKey === event.idempotencyKey) return;
+  const pending = lineage.pendingReview;
+  if (pending === undefined) {
+    throw new ReducerError(
+      `fix dispatch for ${payload.taskId} without a pending review`,
+    );
+  }
+  if (pending.commit !== payload.reviewedCommit) {
+    throw new ReducerError(
+      `fix dispatch for ${payload.taskId} does not match the reviewed commit`,
+    );
+  }
+  if (
+    payload.fixRound !== pending.reviewedFixRound + 1 ||
+    payload.fixRound !== lineage.fixRound + 1
+  ) {
+    throw new ReducerError(
+      `fix dispatch round mismatch for ${payload.taskId}`,
+    );
+  }
+  if (payload.generation !== lineage.generation + 1) {
+    throw new ReducerError(
+      `fix dispatch generation mismatch for ${payload.taskId}`,
+    );
+  }
+  if (payload.fixRound <= 3) {
+    if (
+      payload.cause !== "review_fix" ||
+      payload.profileId !== lineage.originalProfileId ||
+      payload.tier !== lineage.originalTier
+    ) {
+      throw new ReducerError(
+        `fix dispatch for ${payload.taskId} must resume the original profile`,
+      );
+    }
+  } else if (
+    payload.cause !== "escalation" ||
+    complexityTierOrder.indexOf(payload.tier) <=
+      complexityTierOrder.indexOf(lineage.originalTier)
+  ) {
+    throw new ReducerError(
+      `fix dispatch for ${payload.taskId} requires a strictly stronger tier`,
+    );
+  }
+  lineage.acceptedReviews.push(pending);
+  delete lineage.pendingReview;
+  lineage.fixRound = payload.fixRound;
+  lineage.generation = payload.generation;
+  lineage.activeProfileId = payload.profileId;
+  lineage.activeTier = payload.tier;
+  lineage.dispatchKey = event.idempotencyKey;
+  for (const [jobId, job] of Object.entries(state.jobs)) {
+    if (taskIdForJob(jobId) !== payload.taskId) continue;
+    job.attempt = 0;
+    delete job.firstAttemptAt;
+  }
+}
+
 function applyPlanningEvent(state: RunState, event: HarnessEvent): void {
   switch (event.eventType) {
     case "planning.queued":
@@ -231,9 +360,15 @@ function applyEvent(state: RunState, event: HarnessEvent): void {
     case "job.ready":
       transitionJob(state, event.entityId, ["PENDING", "RETRY"], "READY");
       break;
-    case "attempt.started":
+    case "attempt.started": {
       startAttempt(state, event);
+      const taskId = taskIdForJob(event.entityId);
+      const lineage = taskId === undefined
+        ? undefined
+        : state.implementationLineages[taskId];
+      if (lineage !== undefined) lineage.globalAttemptSeq += 1;
       break;
+    }
     case "worker.routed": {
       const job = ensureJob(state, event.entityId);
       job.worker = event.payload.worker;
@@ -251,6 +386,7 @@ function applyEvent(state: RunState, event: HarnessEvent): void {
             ? {}
             : { fixRound: event.payload.fixRound }),
         };
+        applyLineageRoute(state, event);
       }
       break;
     }
@@ -263,6 +399,7 @@ function applyEvent(state: RunState, event: HarnessEvent): void {
       break;
     case "review.changes_requested":
       if (operatorCancelled(state, event.entityId)) break;
+      if (applyLineageReview(state, event) === "duplicate") break;
       transitionJob(state, event.entityId, "VERIFYING", "RETRY");
       ensureJob(state, event.entityId).retryReason = "changes_requested";
       break;
@@ -301,6 +438,9 @@ function applyEvent(state: RunState, event: HarnessEvent): void {
         tasksSemanticHash: event.payload.tasksSemanticHash,
       };
       delete state.integrationPipeline;
+      break;
+    case "implementation.fix_dispatched":
+      applyFixDispatch(state, event);
       break;
     case "effect.intent":
       state.outstandingEffects[event.payload.idempotencyKey] = event.payload;

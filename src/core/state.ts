@@ -28,6 +28,27 @@ export interface AcceptedRoute {
   fixRound?: number;
 }
 
+export interface ImplementationLineageReview {
+  readonly commit: string;
+  readonly findings: readonly string[];
+  readonly reviewedFixRound: number;
+  readonly reviewEventKey: string;
+}
+
+export interface ImplementationLineage {
+  readonly taskId: string;
+  fixRound: number;
+  generation: number;
+  readonly originalProfileId: string;
+  readonly originalTier: TaskComplexity;
+  activeProfileId: string;
+  activeTier: TaskComplexity;
+  pendingReview?: ImplementationLineageReview;
+  readonly acceptedReviews: ImplementationLineageReview[];
+  dispatchKey?: string;
+  globalAttemptSeq: number;
+}
+
 export interface JobState {
   state: JobStatus;
   attempt: number;
@@ -82,6 +103,7 @@ export interface RunState {
     taskId: string;
     status: "preparing_candidate" | "verifying_candidate";
   };
+  implementationLineages: Record<string, ImplementationLineage>;
   operator: { paused: boolean; lastIntent?: string };
   planning: PlanningState;
 }
@@ -99,6 +121,7 @@ export function initialRunState(runId: string, revision: string): RunState {
     processedCommands: {},
     outstandingEffects: {},
     finalizedTasks: {},
+    implementationLineages: {},
     operator: { paused: false },
     planning: { status: "idle" },
   }) as RunState;

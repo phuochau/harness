@@ -284,6 +284,24 @@ export const HarnessEventSchema = Type.Union([
       { additionalProperties: false },
     ),
   ),
+  event(
+    "implementation.fix_dispatched",
+    Type.Object(
+      {
+        taskId: Type.String({ minLength: 1 }),
+        fixRound: Type.Integer({ minimum: 1, maximum: 5 }),
+        generation: Type.Integer({ minimum: 2 }),
+        profileId: Type.String({ minLength: 1 }),
+        tier: TaskComplexitySchema,
+        cause: Type.Union([
+          Type.Literal("review_fix"),
+          Type.Literal("escalation"),
+        ]),
+        reviewedCommit: Type.String({ minLength: 1 }),
+      },
+      { additionalProperties: false },
+    ),
+  ),
   event("effect.intent", EffectIntentPayloadSchema),
   event("effect.observed", EffectObservationPayloadSchema),
   event("effect.failed", EffectFailurePayloadSchema),
