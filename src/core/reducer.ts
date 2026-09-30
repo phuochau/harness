@@ -289,12 +289,22 @@ function applyFixDispatch(state: RunState, event: HarnessEvent): void {
   lineage.activeTier = payload.tier;
   lineage.dispatchKey = event.idempotencyKey;
   const implement = ensureJob(state, event.entityId);
+  const priorRoute = implement.route;
   implement.worker = payload.profileId;
   implement.route = {
     profileId: payload.profileId,
     cause: payload.cause,
     tier: payload.tier,
     fixRound: payload.fixRound,
+    ...(priorRoute?.complexity === undefined
+      ? {}
+      : { complexity: priorRoute.complexity }),
+    ...(priorRoute?.complexityReason === undefined
+      ? {}
+      : { complexityReason: priorRoute.complexityReason }),
+    ...(priorRoute?.candidates === undefined
+      ? {}
+      : { candidates: priorRoute.candidates }),
   };
   for (const [jobId, job] of Object.entries(state.jobs)) {
     if (taskIdForJob(jobId) !== payload.taskId) continue;
@@ -390,6 +400,12 @@ function applyEvent(state: RunState, event: HarnessEvent): void {
           ...(event.payload.complexity === undefined
             ? {}
             : { complexity: event.payload.complexity }),
+          ...(event.payload.complexityReason === undefined
+            ? {}
+            : { complexityReason: event.payload.complexityReason }),
+          ...(event.payload.candidates === undefined
+            ? {}
+            : { candidates: event.payload.candidates }),
           ...(event.payload.fixRound === undefined
             ? {}
             : { fixRound: event.payload.fixRound }),

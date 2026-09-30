@@ -7,8 +7,10 @@ export interface ExplainOptions extends RunOperationOptions {
 
 export async function explain(options: ExplainOptions): Promise<readonly HarnessEvent[]> {
   const { events } = await loadRun(options);
+  const taskSuffix = `:${options.target}`;
   return events.filter((event) =>
     event.entityId === options.target ||
+    event.entityId.endsWith(taskSuffix) ||
     event.idempotencyKey === options.target ||
     (event.eventType === "effect.intent" && event.payload.idempotencyKey === options.target),
   );

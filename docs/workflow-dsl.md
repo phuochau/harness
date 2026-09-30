@@ -98,6 +98,89 @@ The current default inventory declares Codex CLI and Devin CLI only. The core
 profile schema is intentionally provider-extensible; adding another provider
 does not create another global orchestrator.
 
+## Complexity-aware implementer routing
+
+A task-scoped `worker.execute` stage may opt into tiered routing with the closed
+`by_complexity` runner form:
+
+```yaml
+  - id: implement
+    uses: worker.execute
+    runner:
+      by_complexity:
+        mechanical: [implementer-fast]
+        standard: [implementer-standard]
+        complex: [implementer-strong]
+    needs: [{ stage: tasks, scope: all }]
+    foreach: { source: stages.tasks.outputs.graph, key: task.id }
+    gate: task.dependencies_done
+    isolation: worktree
+    retry: { max_attempts: 3, max_elapsed_seconds: 86400 }
+```
+
+All three tiers are required. Each names one or more profile IDs declared in
+`.harness/profiles.yaml` with `role: implementation`, unique across tiers. Tier
+order is `mechanical < standard < complex`. The form is valid only on a
+task-scoped `worker.execute` stage; review, planning, and other stages keep
+`runner: <profile>` or `runner: { prefer: [...] }`.
+
+The Spec Kit tasks stage then assesses every task: the planner writes
+`| complexity=<tier> | why="<reason>" |` into each tasks.md line and the v2 task
+graph (`harness/task-graph/v2`) carries matching `complexity` /
+`complexityReason` fields. A tiered runner paired with a v1 task graph fails at
+preflight with a migration instruction — reseal `tasks.md` through the tasks
+stage. Legacy runners continue to accept v1 (and v2) graphs unchanged.
+
+### Initial route and capability preflight
+
+At run creation the controller probes each declared candidate once — provider
+registered, exact model row in the profile's `pi --list-models` output,
+authentication ready, managed resources verified — and freezes the capability
+snapshot in the run's durable configuration. See
+[coding model profiles](model-profiles.md) for declaring, discovering, and
+authenticating a profile.
+
+Initial selection tries the task's tier in declaration order and falls **upward
+only**: a `mechanical` task may land on `standard` or `complex`, but a task is
+never silently routed to a weaker tier. When no declared candidate at or above
+the task's tier is ready, the job blocks with `no_available_profile` and
+per-profile evidence. The accepted route — task, assessment, candidates,
+selected profile and actual tier — is journaled and replayed identically after
+a controller restart; a later catalog or auth change cannot silently substitute
+a different profile.
+
+### Review-driven fix rounds
+
+`retry.max_attempts` remains a per-generation execution-retry budget; review
+findings use a separate durable `fixRound` counter. Only an accepted task review
+with `changes_requested` consumes a fix round — launch failures, transport
+errors, and `verification_failed` retries do not.
+
+- **Rounds 1–3** resume the same managed Pi session on the originally selected
+  profile and tier, with the review findings and the verified handoff report.
+- **Rounds 4–5** start a fresh transcript on a declared profile at least one
+  tier stronger than the original actual tier.
+- After a fifth reviewed round, or when no stronger ready profile exists, the
+  task blocks (`fix_rounds_exhausted` or `no_escalation_profile`) and the open
+  findings stay recorded for operator adjudication. The task is never marked
+  done while findings are unresolved.
+
+`harness status <run-id>` shows each task's assessed complexity and reason,
+selected tier/profile, `fixRound`, pending findings, and any routing block under
+`tasks.<task-id>`; `implementationLineages` holds the full accepted lineage.
+`harness explain <run-id> T001` returns the journaled route, review, fix
+dispatch, and block events for that task, and `harness graph <run-id>`
+annotates each job node with its worker, accepted route, and blocker. In Pi,
+`/harness-task T001` shows the same routing and lineage detail.
+
+### Operator reroute
+
+An operator may reroute a blocked or failed task (`/harness-reroute` in Pi, or
+the `reroute` operator intent) to any profile declared by the implementation
+stage — including a lower tier. A reroute is journaled with cause
+`operator_reroute`, never resets `fixRound`, and a profile change always starts
+a fresh Pi transcript rather than appending to the previous model's session.
+
 ## DAG and concurrency rules
 
 - `foreach` creates one keyed job per task.

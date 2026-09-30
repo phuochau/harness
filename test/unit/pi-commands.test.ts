@@ -60,6 +60,63 @@ it("keeps status commands read-only and free of model calls", async () => {
   expect(run.notices.join("\n")).toContain("implement:T001");
 });
 
+it("includes implementation lineage and routing detail for a task", async () => {
+  const notices: string[] = [];
+  const backend: HarnessCommandBackend = {
+    snapshot: async () => ({
+      runId: "F023",
+      paused: false,
+      jobs: {
+        "implement:T001": { state: "RUNNING", attempt: 1, worker: "implementer-strong" },
+        "review:T001": { state: "PENDING", attempt: 0 },
+      },
+      implementationLineages: {
+        T001: {
+          taskId: "T001",
+          fixRound: 2,
+          generation: 3,
+          originalProfileId: "implementer-standard",
+          originalTier: "standard",
+          activeProfileId: "implementer-strong",
+          activeTier: "complex",
+          pendingReview: {
+            commit: "9".repeat(40),
+            findings: ["Fix failing parser case"],
+            reviewedFixRound: 2,
+            reviewEventKey: "review-changes:review:T001:2",
+          },
+          acceptedReviews: [],
+          globalAttemptSeq: 4,
+        },
+      },
+      tasks: {
+        T001: {
+          taskId: "T001",
+          complexity: "standard",
+          complexityReason: "Touches parser and CLI contract",
+          tier: "complex",
+          fixRound: 2,
+        },
+      },
+    }),
+    graph: async () => ({}),
+    logs: async () => [],
+    doctor: async () => ({ ready: true, summary: "ready" }),
+    previewRun: async () => { throw new Error("unused"); },
+    enqueue: async () => {},
+  };
+  const service = new HarnessCommandService(backend);
+  await service.execute("harness-task", "T001", {
+    notify: (message) => notices.push(message),
+    confirm: async () => true,
+  });
+  const text = notices.join("\n");
+  expect(text).toContain("implementer-strong");
+  expect(text).toContain("fixRound");
+  expect(text).toContain("Fix failing parser case");
+  expect(text).toContain("Touches parser and CLI contract");
+});
+
 it("shows the full run plan before enqueueing an approved operator intent", async () => {
   const run = fixture(true);
   await run.service.execute("harness-run", "F023", run.ui);

@@ -192,3 +192,50 @@ is ready, so leaving the default runners in place keeps Codex/Devin as the
 fallback. The examples are opt-in conveniences, not quality endorsements:
 passing configuration checks means the profile is launchable, not that the
 model performs well on your tasks.
+
+## Assigning a profile to a complexity tier
+
+A task-scoped `worker.execute` stage can route by the planner's assessed task
+complexity. Declare the implementation profiles as usual, then name them in a
+closed `by_complexity` runner (see
+[workflow DSL](workflow-dsl.md#complexity-aware-implementer-routing) for the
+full stage shape):
+
+```yaml
+# .harness/workflow.yaml
+    - id: implement
+      uses: worker.execute
+      runner:
+        by_complexity:
+          mechanical: [implementer-fast]
+          standard: [implementer-standard]
+          complex: [implementer-strong]
+```
+
+Every tier needs a nonempty list and each profile may appear in only one tier.
+Tier membership is your judgment of that profile's capability for this workflow
+— model names and prices imply nothing to the router.
+
+Discovery and preflight:
+
+1. List the provider/model catalog the profile sees with `pi --list-models`
+   (run it inside the profile's managed environment, or consult the provider's
+   catalog) and pin the exact `provider`/`model` row — prefix matching is
+   rejected.
+2. Authenticate the one profile (`harness auth <profile> .` for interactive
+   providers, or export the declared `api_key_env` before setup).
+3. Assign the profile to a tier and start the run. At run creation the
+   controller probes every declared tier candidate once — provider registered,
+   exact model available, authentication ready, managed resources verified —
+   and freezes the result as the run's capability snapshot. Recovery replays
+   that snapshot; it never re-probes mid-run or substitutes a different
+   profile.
+
+The initial route tries the assessed tier first and falls back **upward only**
+— a weaker tier is never chosen. If every candidate at or above the tier is
+unavailable the task blocks with `no_available_profile` and per-profile
+evidence instead of guessing. Review-driven fix rounds 1–3 resume the original
+implementer's session on the same profile; rounds 4–5 escalate to a fresh
+session on a stronger tier, blocking with `no_escalation_profile` when no
+stronger ready profile is declared. `harness status <run-id>` shows the frozen
+decision per task.

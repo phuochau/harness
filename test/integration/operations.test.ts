@@ -4,7 +4,8 @@ import { status } from "../../src/cli/status.js";
 import { explain } from "../../src/cli/explain.js";
 import { recoverRun } from "../../src/controller/reconcile-run.js";
 import type { JsonValue } from "../../src/contracts/common.js";
-import { journalFixture } from "../support/state-fixtures.js";
+import type { HarnessEvent } from "../../src/contracts/events.js";
+import { journalFixture, type JournalFixture } from "../support/state-fixtures.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -270,6 +271,235 @@ it("repairs a torn tail while keeping status and explain read-only", async () =>
     },
   );
   expect(recovered.repairedTail).toBe(true);
+});
+
+const workflowRevision = `sha256:${"a".repeat(64)}` as const;
+
+async function append(
+  fixture: JournalFixture,
+  eventType: HarnessEvent["eventType"],
+  entityId: string,
+  idempotencyKey: string,
+  payload: JsonValue,
+): Promise<void> {
+  await fixture.journal.append(
+    {
+      schemaVersion: 1,
+      timestamp: "2026-09-30T00:00:00.000Z",
+      runId: "F023",
+      entityId,
+      idempotencyKey,
+      eventType,
+      payload,
+    },
+    fixture.lease,
+  );
+}
+
+async function seedInitialComplexityRoute(fixture: JournalFixture): Promise<void> {
+  await append(fixture, "run.created", "run:F023", "run:create", {
+    workflowRevision,
+  });
+  await append(fixture, "job.ready", "implement:T001", "ready:implement:T001", {});
+  await append(fixture, "attempt.started", "implement:T001", "attempt:implement:T001:1", {
+    attempt: 1,
+    worker: "implementer-strong",
+  });
+  await append(fixture, "worker.routed", "implement:T001", "route:implement:T001:1", {
+    worker: "implementer-strong",
+    reason: "initial complexity route",
+    taskId: "T001",
+    complexity: "complex",
+    complexityReason: "Multi-stage contract migration",
+    candidates: ["implementer-strong"],
+    tier: "complex",
+    fixRound: 0,
+    cause: "initial",
+    workflowRevision,
+    tasksSemanticHash: `sha256:${"b".repeat(64)}`,
+  });
+}
+
+async function appendReviewChanges(
+  fixture: JournalFixture,
+  round: number,
+  commit: string,
+  findings: readonly string[],
+): Promise<void> {
+  await append(fixture, "job.ready", "review:T001", `ready:review:T001:${round}`, {});
+  await append(fixture, "attempt.started", "review:T001", `attempt:review:T001:${round}`, {
+    attempt: 1,
+    worker: "reviewer-codex",
+  });
+  await append(fixture, "worker.result_observed", "review:T001", `result:review:T001:${round}`, {
+    schemaVersion: 1,
+    assignmentHash: `sha256:${"c".repeat(64)}`,
+    role: "review",
+    outcome: "changes_requested",
+    reviewedCommit: commit,
+    findings: [...findings],
+    evidence: [],
+  });
+  await append(fixture, "review.changes_requested", "review:T001", `review-changes:review:T001:${round}`, {
+    commit,
+    reviewer: "reviewer-codex",
+    findings: [...findings],
+  });
+}
+
+async function appendFixDispatch(
+  fixture: JournalFixture,
+  round: number,
+  reviewedCommit: string,
+): Promise<void> {
+  await append(fixture, "implementation.fix_dispatched", "implement:T001", `fix-dispatch:T001:${round}`, {
+    taskId: "T001",
+    fixRound: round,
+    generation: round + 1,
+    profileId: "implementer-strong",
+    tier: "complex",
+    cause: "review_fix",
+    reviewedCommit,
+  });
+}
+
+function commitFor(round: number): string {
+  return `${round}`.padStart(40, "0");
+}
+
+it("reports the selected route, fix round, pending findings, and escalation block for a task", async () => {
+  const fixture = await journalFixture();
+  cleanups.push(fixture.cleanup);
+  await seedInitialComplexityRoute(fixture);
+  for (let round = 1; round <= 3; round += 1) {
+    await appendReviewChanges(fixture, round, commitFor(round - 1), [`round ${round} finding`]);
+    await appendFixDispatch(fixture, round, commitFor(round - 1));
+  }
+  await appendReviewChanges(fixture, 4, commitFor(3), ["Still failing lint gate"]);
+  await append(fixture, "job.blocked", "review:T001", `fix-block:T001:review:no_escalation_profile`, {
+    reason: "no_escalation_profile",
+    evidence: ["Still failing lint gate"],
+    suggestedChange: "Review the findings and explicitly reroute or resolve this task.",
+  });
+  await fixture.lease.release();
+
+  const summary = await status({ root: fixture.paths.repository, runId: "F023" });
+  expect(summary.implementationLineages.T001).toMatchObject({
+    fixRound: 3,
+    generation: 4,
+    originalProfileId: "implementer-strong",
+    originalTier: "complex",
+    activeProfileId: "implementer-strong",
+    activeTier: "complex",
+    pendingReview: {
+      commit: commitFor(3),
+      findings: ["Still failing lint gate"],
+      reviewedFixRound: 3,
+    },
+  });
+  expect(summary.tasks.T001).toMatchObject({
+    taskId: "T001",
+    complexity: "complex",
+    complexityReason: "Multi-stage contract migration",
+    candidates: ["implementer-strong"],
+    profileId: "implementer-strong",
+    tier: "complex",
+    cause: "review_fix",
+    fixRound: 3,
+    generation: 4,
+    pendingFindings: ["Still failing lint gate"],
+    pendingReviewCommit: commitFor(3),
+    block: {
+      jobId: "review:T001",
+      reason: "no_escalation_profile",
+      evidence: ["Still failing lint gate"],
+    },
+  });
+
+  const events = await explain({ root: fixture.paths.repository, runId: "F023", target: "T001" });
+  expect(events.length).toBeGreaterThan(0);
+  expect(events.every((event) => event.entityId.endsWith(":T001"))).toBe(true);
+  expect(events.map((event) => event.eventType)).toEqual(
+    expect.arrayContaining([
+      "worker.routed",
+      "review.changes_requested",
+      "implementation.fix_dispatched",
+      "job.blocked",
+    ]),
+  );
+  expect(
+    events.filter((event) => event.eventType === "implementation.fix_dispatched"),
+  ).toHaveLength(3);
+  const blocked = events.find((event) => event.eventType === "job.blocked");
+  expect(blocked?.payload).toMatchObject({ reason: "no_escalation_profile" });
+});
+
+it("reports an initial route block when no tier profile is available", async () => {
+  const fixture = await journalFixture();
+  cleanups.push(fixture.cleanup);
+  await append(fixture, "run.created", "run:F023", "run:create", { workflowRevision });
+  await append(fixture, "job.blocked", "implement:T001", "route-block:implement:T001:1", {
+    reason: "no_available_profile",
+    evidence: ["implementer-standard: model missing", "implementer-strong: authentication not ready"],
+    suggestedChange:
+      "Authenticate or repair a declared tier profile, then retry the tick or reroute the task.",
+  });
+  await fixture.lease.release();
+
+  const summary = await status({ root: fixture.paths.repository, runId: "F023" });
+  expect(summary.tasks.T001).toMatchObject({
+    taskId: "T001",
+    block: {
+      jobId: "implement:T001",
+      reason: "no_available_profile",
+      evidence: ["implementer-standard: model missing", "implementer-strong: authentication not ready"],
+    },
+  });
+  expect(summary.implementationLineages.T001).toBeUndefined();
+
+  const events = await explain({ root: fixture.paths.repository, runId: "F023", target: "T001" });
+  expect(events.map((event) => event.eventType)).toEqual(["job.blocked"]);
+});
+
+it("keeps a v1 run legible without routing metadata", async () => {
+  const fixture = await journalFixture();
+  cleanups.push(fixture.cleanup);
+  await append(fixture, "run.created", "run:F023", "run:create", { workflowRevision });
+  await append(fixture, "job.ready", "implement:T001", "ready:implement:T001", {});
+  await append(fixture, "attempt.started", "implement:T001", "attempt:implement:T001:1", {
+    attempt: 1,
+    worker: "devin",
+  });
+  await append(fixture, "worker.routed", "implement:T001", "route:implement:T001:1", {
+    worker: "devin",
+    reason: "workflow preference",
+  });
+  await append(fixture, "worker.result_observed", "implement:T001", "result:implement:T001:1", {
+    schemaVersion: 1,
+    assignmentHash: `sha256:${"c".repeat(64)}`,
+    role: "implementation",
+    outcome: "completed",
+    commit: commitFor(1),
+    evidence: [],
+  });
+  await fixture.lease.release();
+
+  const summary = await status({ root: fixture.paths.repository, runId: "F023" });
+  expect(summary.jobs["implement:T001"]).toMatchObject({ state: "VERIFYING", worker: "devin" });
+  expect(summary.implementationLineages).toEqual({});
+  expect(summary.tasks.T001).toMatchObject({ taskId: "T001", profileId: "devin" });
+  expect(summary.tasks.T001).not.toHaveProperty("complexity");
+  expect(summary.tasks.T001).not.toHaveProperty("tier");
+  expect(summary.tasks.T001).not.toHaveProperty("fixRound");
+  expect(summary.tasks.T001).not.toHaveProperty("pendingFindings");
+
+  const events = await explain({ root: fixture.paths.repository, runId: "F023", target: "T001" });
+  expect(events.map((event) => event.eventType)).toEqual([
+    "job.ready",
+    "attempt.started",
+    "worker.routed",
+    "worker.result_observed",
+  ]);
 });
 
 it("takes over only a provably dead, aged recovery lease", async () => {

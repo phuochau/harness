@@ -25,6 +25,8 @@ export interface AcceptedRoute {
   cause: RouteCause;
   tier?: TaskComplexity;
   complexity?: TaskComplexity;
+  complexityReason?: string;
+  candidates?: readonly string[];
   fixRound?: number;
 }
 

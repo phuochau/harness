@@ -13,6 +13,17 @@ included `spec-kit-codex.yaml` preset makes Codex the primary implementer.
 Additional hosted or local coding models can be declared as opt-in `pi-native`
 profiles — see [coding model profiles](docs/model-profiles.md).
 
+Implementation tasks can opt into complexity-aware routing: declare
+`runner.by_complexity` with `mechanical` / `standard` / `complex` profile tiers
+on the task-scoped `worker.execute` stage. The planner's per-task assessment
+then picks the first ready profile at or above the assessed tier (never below),
+and review findings drive up to five fix rounds — rounds 1–3 resume the
+original implementer's session, rounds 4–5 escalate to a fresh, stronger-tier
+profile. `harness status`, `graph`, and `explain` report the accepted route,
+fix round, pending findings, and block reasons per task. See the
+[workflow DSL](docs/workflow-dsl.md#complexity-aware-implementer-routing) for
+the exact configuration.
+
 ## Quick start
 
 Requirements: Node.js `>=22.22.2`, Git, Codex CLI and Devin CLI. Codex and Devin

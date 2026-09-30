@@ -18,9 +18,22 @@ export function renderTask(snapshot: unknown, taskId: string): string {
   if (typeof jobs !== "object" || jobs === null || Array.isArray(jobs)) {
     return `Task ${taskId}\n${stable(snapshot)}`;
   }
-  const selected = Object.fromEntries(
+  const selected: Record<string, unknown> = Object.fromEntries(
     Object.entries(jobs).filter(([id]) => id.includes(taskId)),
   );
+  const lineages = (snapshot as { implementationLineages?: unknown })
+    .implementationLineages;
+  if (
+    typeof lineages === "object" && lineages !== null && !Array.isArray(lineages)
+  ) {
+    const lineage = (lineages as Record<string, unknown>)[taskId];
+    if (lineage !== undefined) selected.lineage = lineage;
+  }
+  const tasks = (snapshot as { tasks?: unknown }).tasks;
+  if (typeof tasks === "object" && tasks !== null && !Array.isArray(tasks)) {
+    const routing = (tasks as Record<string, unknown>)[taskId];
+    if (routing !== undefined) selected.routing = routing;
+  }
   return `Task ${taskId}\n${stable(selected)}`;
 }
 

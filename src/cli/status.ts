@@ -1,6 +1,14 @@
-import type { HarnessEvent } from "../contracts/events.js";
-import { initialRunState, type JobState, type RunState } from "../core/state.js";
+import type { HarnessEvent, RouteCause } from "../contracts/events.js";
+import type { JsonValue } from "../contracts/common.js";
+import type { TaskComplexity } from "../contracts/task-graph.js";
+import {
+  initialRunState,
+  type ImplementationLineage,
+  type JobState,
+  type RunState,
+} from "../core/state.js";
 import { reduceEvent } from "../core/reducer.js";
+import { taskIdForJob } from "../core/lifecycle.js";
 import { Journal } from "../state/journal.js";
 import { resolveRunPaths } from "../state/paths.js";
 import type { RunPaths } from "../state/types.js";
@@ -32,6 +40,99 @@ export async function loadRun(options: RunOperationOptions): Promise<LoadedRun> 
   return { paths, events, state: replayRunEvents(events, options.runId) };
 }
 
+export interface TaskRoutingBlock {
+  readonly jobId: string;
+  readonly reason: string;
+  readonly evidence: readonly string[];
+  readonly suggestedChange?: string;
+}
+
+export interface TaskRoutingView {
+  readonly taskId: string;
+  readonly complexity?: TaskComplexity;
+  readonly complexityReason?: string;
+  readonly candidates?: readonly string[];
+  readonly profileId?: string;
+  readonly tier?: TaskComplexity;
+  readonly cause?: RouteCause;
+  readonly fixRound?: number;
+  readonly generation?: number;
+  readonly pendingFindings?: readonly string[];
+  readonly pendingReviewCommit?: string;
+  readonly block?: TaskRoutingBlock;
+}
+
+function routingBlock(jobId: string, blocker: JsonValue): TaskRoutingBlock {
+  const record =
+    typeof blocker === "object" && blocker !== null && !Array.isArray(blocker)
+      ? (blocker as Record<string, JsonValue>)
+      : {};
+  const suggestedChange =
+    typeof record.suggestedChange === "string" ? record.suggestedChange : undefined;
+  return {
+    jobId,
+    reason: typeof record.reason === "string" ? record.reason : "blocked",
+    evidence: Array.isArray(record.evidence)
+      ? record.evidence.filter((item): item is string => typeof item === "string")
+      : [],
+    ...(suggestedChange === undefined ? {} : { suggestedChange }),
+  };
+}
+
+function taskRoutingViews(state: RunState): Record<string, TaskRoutingView> {
+  const taskIds = new Set<string>(Object.keys(state.implementationLineages));
+  for (const jobId of Object.keys(state.jobs)) {
+    const taskId = taskIdForJob(jobId);
+    if (taskId !== undefined) taskIds.add(taskId);
+  }
+  const views: Record<string, TaskRoutingView> = {};
+  for (const taskId of [...taskIds].sort()) {
+    const lineage: ImplementationLineage | undefined =
+      state.implementationLineages[taskId];
+    const implement = state.jobs[`implement:${taskId}`];
+    const route = implement?.route;
+    const blocked = Object.entries(state.jobs)
+      .filter(
+        ([jobId, job]) =>
+          taskIdForJob(jobId) === taskId &&
+          job.state === "BLOCKED" &&
+          job.blocker !== undefined,
+      )
+      .sort(([left], [right]) => left.localeCompare(right))[0];
+    const pending = lineage?.pendingReview;
+    const profileId =
+      lineage?.activeProfileId ?? route?.profileId ?? implement?.worker;
+    const tier = lineage?.activeTier ?? route?.tier;
+    const fixRound = lineage?.fixRound ?? route?.fixRound;
+    const view: TaskRoutingView = {
+      taskId,
+      ...(route?.complexity === undefined ? {} : { complexity: route.complexity }),
+      ...(route?.complexityReason === undefined
+        ? {}
+        : { complexityReason: route.complexityReason }),
+      ...(route?.candidates === undefined ? {} : { candidates: route.candidates }),
+      ...(profileId === undefined ? {} : { profileId }),
+      ...(tier === undefined ? {} : { tier }),
+      ...(route?.cause === undefined ? {} : { cause: route.cause }),
+      ...(fixRound === undefined ? {} : { fixRound }),
+      ...(lineage?.generation === undefined
+        ? {}
+        : { generation: lineage.generation }),
+      ...(pending === undefined
+        ? {}
+        : {
+            pendingFindings: pending.findings,
+            pendingReviewCommit: pending.commit,
+          }),
+      ...(blocked === undefined
+        ? {}
+        : { block: routingBlock(blocked[0], blocked[1].blocker!) }),
+    };
+    views[taskId] = view;
+  }
+  return views;
+}
+
 export interface StatusResult {
   readonly runId: string;
   readonly workflowRevision: string;
@@ -39,6 +140,8 @@ export interface StatusResult {
   readonly paused: boolean;
   readonly planning: RunState["planning"];
   readonly jobs: Readonly<Record<string, JobState>>;
+  readonly tasks: Readonly<Record<string, TaskRoutingView>>;
+  readonly implementationLineages: RunState["implementationLineages"];
   readonly outstandingEffects: readonly string[];
 }
 
@@ -51,6 +154,8 @@ export async function status(options: RunOperationOptions): Promise<StatusResult
     paused: state.operator.paused,
     planning: state.planning,
     jobs: state.jobs,
+    tasks: taskRoutingViews(state),
+    implementationLineages: state.implementationLineages,
     outstandingEffects: Object.keys(state.outstandingEffects).sort(),
   };
 }
