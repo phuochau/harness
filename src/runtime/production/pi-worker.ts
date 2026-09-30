@@ -11,7 +11,7 @@ import { sha256 } from "../../shared/sha256.js";
 import type { PiProcessRecord } from "../pi-process/types.js";
 import type { TaskSessionStore } from "../pi-worker/task-session.js";
 import type { Journal } from "../../state/journal.js";
-import { buildHandoffReport, verifyHandoffReport, writeHandoffReport } from "../workers/handoff-report.js";
+import { buildVerifiedHandoffReport, verifyHandoffReport, writeHandoffReport } from "../workers/handoff-report.js";
 import {
   PiWorkerRuntime,
   type PreparedPiAttempt,
@@ -70,6 +70,7 @@ export interface ProductionPiWorkerRuntimeOptions {
   readonly sessions?: TaskSessionStore;
   readonly journal?: Journal;
   readonly handoffRoot?: string;
+  readonly evidenceRoot?: string;
 }
 
 export class SessionContinuationBlockedError extends Error {
@@ -282,7 +283,10 @@ export class ProductionPiWorkerRuntime implements ProductionWorkerRuntime {
         intent.input.fixRound > 0 && typeof intent.input.taskId === "string" &&
         this.options.journal !== undefined && this.options.handoffRoot !== undefined) {
       try {
-        const built = buildHandoffReport(await this.options.journal.read(), intent.input.taskId);
+        if (this.options.evidenceRoot === undefined) throw new Error("verified evidence store unavailable");
+        const built = await buildVerifiedHandoffReport(
+          await this.options.journal.read(), intent.input.taskId, this.options.evidenceRoot,
+        );
         const path = join(
           this.options.handoffRoot,
           intent.input.taskId,

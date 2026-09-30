@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { initialRunState } from "../../../src/core/state.js";
@@ -78,6 +78,7 @@ it("binds an implementation attempt to Git, validates it, and persists its seale
     readState: async () => initialRunState("F100", manifest.workflowRevision),
     taskVerification: [],
     profiles: fixtureResolvedProfiles(),
+    evidenceRoot: join(repo.path, ".preserved-evidence"),
   });
   const intent = {
     action: "worker.execute" as const,
@@ -127,5 +128,7 @@ it("binds an implementation attempt to Git, validates it, and persists its seale
     changedPaths: ["src/feature.ts"],
   });
   await attempts.release(prepared.binding);
+  expect(await readFile(join(repo.path, ".preserved-evidence", sha256(evidenceBody).slice(7)), "utf8"))
+    .toBe(evidenceBody);
   await expect(attempts.release(prepared.binding)).resolves.toBeUndefined();
 });

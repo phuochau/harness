@@ -191,6 +191,7 @@ it("binds a verified journal handoff report into a fix assignment", async () => 
     sessions: value.sessions,
     journal: { read: async () => accepted } as unknown as Journal,
     handoffRoot: join(value.root, "handoff"),
+    evidenceRoot: join(value.root, "evidence"),
   });
   await runtime.prepare({
     ...value.intent,

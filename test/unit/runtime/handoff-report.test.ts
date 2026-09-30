@@ -5,10 +5,12 @@ import { afterEach, expect, it } from "vitest";
 import type { HarnessEvent } from "../../../src/contracts/events.js";
 import {
   buildHandoffReport,
+  buildVerifiedHandoffReport,
   maxHandoffReportBytes,
   verifyHandoffReport,
   writeHandoffReport,
 } from "../../../src/runtime/workers/handoff-report.js";
+import { sha256 } from "../../../src/shared/sha256.js";
 
 const dirs: string[] = [];
 afterEach(async () => { for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true }); });
@@ -58,6 +60,24 @@ it("writes a private hash-checked report and rejects tampering", async () => {
   expect((await verifyHandoffReport(path, built.hash)).previousCommit).toBe("commit-1");
   await writeFile(path, (await readFile(path, "utf8")).replace("commit-1", "commit-2"));
   await expect(verifyHandoffReport(path, built.hash)).rejects.toThrow("handoff_report_corrupt");
+});
+
+it("includes verified test log content even after the attempt worktree is gone", async () => {
+  const root = await mkdtemp(join(tmpdir(), "harness-evidence-"));
+  dirs.push(root);
+  const content = "unit tests: 18 passed\n";
+  const evidenceHash = sha256(content);
+  await writeFile(join(root, evidenceHash.slice(7)), content, { mode: 0o600 });
+  const built = await buildVerifiedHandoffReport([event(1, "implement:T001", "worker.result_observed", {
+    outcome: "completed", role: "implementation", commit: "commit-1",
+    evidence: [{ kind: "command:npm test", path: ".harness-output/test.log", sha256: evidenceHash }],
+  })], "T001", root);
+  expect(built.report.implementations[0]?.evidence[0]?.content).toBe(content);
+  await writeFile(join(root, evidenceHash.slice(7)), "tampered", { mode: 0o600 });
+  await expect(buildVerifiedHandoffReport([event(1, "implement:T001", "worker.result_observed", {
+    outcome: "completed", role: "implementation", commit: "commit-1",
+    evidence: [{ kind: "command:npm test", path: ".harness-output/test.log", sha256: evidenceHash }],
+  })], "T001", root)).rejects.toThrow("handoff_report_corrupt_evidence");
 });
 
 it("blocks a report larger than 1 MiB without dropping findings", () => {

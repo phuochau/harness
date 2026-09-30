@@ -288,6 +288,7 @@ export async function composeProductionRun(
       readState,
       taskVerification: [options.commands.task_verify ?? []].filter((argv) => argv.length > 0),
       profiles: workflow.profiles,
+      evidenceRoot: initialized.paths.evidence,
     });
     const effectivePiRuntime = options.piWorkerRuntime ?? options.managedPiRuntime?.workerRuntime;
     const workerRuntime = options.workerRuntime ?? (
@@ -302,6 +303,7 @@ export async function composeProductionRun(
             sessions: new TaskSessionStore({ root: initialized.paths.sessions }),
             journal,
             handoffRoot: join(initialized.paths.root, "handoff"),
+            evidenceRoot: initialized.paths.evidence,
           })
     );
     const registry = createProductionActionRegistry({
@@ -435,6 +437,7 @@ export async function createStandaloneProductionEffects(input: {
     readState,
     taskVerification: [input.commands.task_verify ?? []].filter((argv) => argv.length > 0),
     profiles: input.workflow.profiles,
+    evidenceRoot: paths.evidence,
   });
   const effectivePiRuntime = input.piWorkerRuntime ?? input.managedPiRuntime?.workerRuntime;
   const workerRuntime = input.workerRuntime ?? (
@@ -449,6 +452,7 @@ export async function createStandaloneProductionEffects(input: {
           sessions: new TaskSessionStore({ root: paths.sessions }),
           journal,
           handoffRoot: join(paths.root, "handoff"),
+          evidenceRoot: paths.evidence,
         })
   );
   const planningSealer = new ProductionPlanningArtifactSealer(

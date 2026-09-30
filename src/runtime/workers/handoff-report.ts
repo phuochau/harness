@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { lstat, link, mkdir, open, readFile, unlink } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import type { HarnessEvent } from "../../contracts/events.js";
 import { taskIdForJob } from "../../core/lifecycle.js";
 import { canonicalJson } from "../../shared/canonical-json.js";
@@ -14,7 +14,7 @@ export interface HandoffReport {
   readonly previousCommit: string;
   readonly implementations: readonly {
     readonly commit: string;
-    readonly evidence: readonly { readonly kind: string; readonly path: string; readonly sha256: string }[];
+    readonly evidence: readonly { readonly kind: string; readonly path: string; readonly sha256: string; readonly content?: string }[];
   }[];
   readonly reviews: readonly {
     readonly commit: string;
@@ -65,6 +65,33 @@ export function buildHandoffReport(events: readonly HarnessEvent[], taskId: stri
   const previousCommit = implementations.at(-1)?.commit;
   if (previousCommit === undefined) throw new Error(`task ${taskId} has no accepted implementation commit`);
   const report: HandoffReport = { schemaVersion: 1, taskId, previousCommit, implementations, reviews, verifications };
+  const encoded = reportBytes(report);
+  if (encoded.byteLength > maxHandoffReportBytes) throw new Error("handoff_report_oversize");
+  return { report, hash: sha256(encoded), bytes: encoded.byteLength };
+}
+
+export async function buildVerifiedHandoffReport(
+  events: readonly HarnessEvent[],
+  taskId: string,
+  evidenceRoot: string,
+): Promise<BuiltHandoffReport> {
+  const base = buildHandoffReport(events, taskId);
+  const implementations = await Promise.all(base.report.implementations.map(async (implementation) => ({
+    ...implementation,
+    evidence: await Promise.all(implementation.evidence.map(async (item) => {
+      if (!/^sha256:[0-9a-f]{64}$/.test(item.sha256)) throw new Error("handoff_report_corrupt_evidence");
+      const path = join(evidenceRoot, item.sha256.slice(7));
+      const info = await lstat(path);
+      if (info.isSymbolicLink() || !info.isFile() || (info.mode & 0o077) !== 0 || info.size > maxHandoffReportBytes) {
+        throw new Error("handoff_report_corrupt_evidence");
+      }
+      const bytes = await readFile(path);
+      if (sha256(bytes) !== item.sha256) throw new Error("handoff_report_corrupt_evidence");
+      const content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      return { ...item, content };
+    })),
+  })));
+  const report: HandoffReport = { ...base.report, implementations };
   const encoded = reportBytes(report);
   if (encoded.byteLength > maxHandoffReportBytes) throw new Error("handoff_report_oversize");
   return { report, hash: sha256(encoded), bytes: encoded.byteLength };

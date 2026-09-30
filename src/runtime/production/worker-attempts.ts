@@ -1,5 +1,5 @@
 import type { EffectIntent } from "../../actions/types.js";
-import { lstat, readFile, realpath, writeFile } from "node:fs/promises";
+import { link, lstat, mkdir, open, readFile, realpath, unlink, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { createAssignment, type HandoffReference, type WorkerAssignment } from "../../core/assignment.js";
 import { validateEvidence } from "../../core/evidence.js";
@@ -34,6 +34,41 @@ export interface GitWorkerAttemptOptions {
   readonly readState: () => Promise<RunState>;
   readonly taskVerification: readonly (readonly string[])[];
   readonly profiles: ResolvedProfiles;
+  readonly evidenceRoot?: string;
+}
+
+async function preserveVerifiedEvidence(
+  assignment: WorkerAssignment,
+  result: WorkerResult,
+  root: string,
+): Promise<void> {
+  if (!("evidence" in result)) return;
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  for (const item of result.evidence) {
+    if (typeof item === "string") continue;
+    const source = resolve(assignment.worktree.path, item.path);
+    const info = await lstat(source);
+    if (info.isSymbolicLink() || !info.isFile() || info.size > 1024 * 1024) {
+      throw new Error("handoff_report_oversize_or_invalid_evidence");
+    }
+    const bytes = await readFile(source);
+    if (sha256(bytes) !== item.sha256) throw new Error("verified evidence changed before preservation");
+    const destination = join(root, item.sha256.slice(7));
+    const temporary = `${destination}.tmp-${process.pid}-${crypto.randomUUID()}`;
+    const file = await open(temporary, "wx", 0o600);
+    try { await file.writeFile(bytes); await file.sync(); } finally { await file.close(); }
+    try {
+      try {
+        await link(temporary, destination);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        const existing = await readFile(destination);
+        if (sha256(existing) !== item.sha256) throw new Error("preserved evidence hash mismatch");
+      }
+    } finally {
+      await unlink(temporary).catch(() => undefined);
+    }
+  }
 }
 
 function inputRecord(
@@ -305,6 +340,9 @@ export class GitWorkerAttemptPort implements ProductionWorkerAttemptPort {
     if (result.outcome === "blocked" || result.outcome === "failed") return;
     await validateEvidenceArtifacts(assignment, result);
     await validateEvidence(assignment, result, this.evidence);
+    if (this.options.evidenceRoot !== undefined) {
+      await preserveVerifiedEvidence(assignment, result, this.options.evidenceRoot);
+    }
     if (assignment.role === "implementation") {
       if (result.outcome !== "completed" || result.role !== "implementation") {
         throw new Error("implementation result is not completed");
