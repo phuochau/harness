@@ -21,6 +21,7 @@ import {
   PiSessionModelPort,
   PiSessionPlanningProfileStore,
 } from "../../pi/planning-profile-port.js";
+import { stageProfileIds } from "../../contracts/workflow.js";
 import { PlanningAction } from "../../speckit/planning-action.js";
 import type { ArtifactPaths } from "../../speckit/artifacts.js";
 import { Journal } from "../../state/journal.js";
@@ -132,8 +133,7 @@ function managedPlanningAgent(input: {
   const routes: Record<string, string> = {};
   const ports: Record<string, ChildPiPlanningPort> = {};
   for (const stage of input.workflow.stages.filter((stage) => stage.uses.startsWith("spec-kit."))) {
-    const runner = stage.runner;
-    const profileId = typeof runner === "string" ? runner : runner?.prefer[0];
+    const profileId = stageProfileIds(stage)[0];
     if (profileId === undefined) throw new Error(`planning stage ${stage.id} has no profile`);
     routes[stage.uses.slice("spec-kit.".length)] = profileId;
     if (ports[profileId] !== undefined) continue;

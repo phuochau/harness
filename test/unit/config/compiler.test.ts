@@ -1,5 +1,5 @@
 import fc from "fast-check";
-import { expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { compileWorkflow } from "../../../src/config/compile.js";
 import {
   compileInputCase,
@@ -108,4 +108,142 @@ it("freezes active-run profiles and records their independent hash", () => {
     "openai-codex/gpt-5.6-luna",
   );
   expect(Object.isFrozen(run.profiles)).toBe(true);
+});
+
+describe("complexity-tiered runners", () => {
+  const tieredRunner = () => ({
+    by_complexity: {
+      mechanical: ["implementer-codex"],
+      standard: ["implementer-devin"],
+      complex: ["implementer-claude"],
+    },
+  });
+
+  function withRunner(stageId: string, runner: unknown) {
+    const input = structuredClone(fixtureCompileInput());
+    const stage = input.workflow.stages.find((item) => item.id === stageId);
+    if (stage === undefined) throw new Error(`fixture lacks stage ${stageId}`);
+    (stage as { runner: unknown }).runner = runner;
+    return input;
+  }
+
+  it("accepts an exact three-tier runner on a task-scoped worker.execute stage", () => {
+    const compiled = compileWorkflow(withRunner("implement", tieredRunner()));
+    const implement = compiled.stages.find((stage) => stage.id === "implement")!;
+    expect(implement.runner).toEqual(tieredRunner());
+  });
+
+  it("lists every declared tier candidate in tier order for preview and assembly", async () => {
+    const { stageProfileIds } = await import("../../../src/contracts/index.js");
+    const compiled = compileWorkflow(
+      withRunner("implement", {
+        by_complexity: {
+          mechanical: ["implementer-devin"],
+          standard: ["implementer-codex"],
+          complex: ["implementer-claude"],
+        },
+      }),
+    );
+    const stage = (id: string) =>
+      compiled.stages.find((item) => item.id === id)!;
+    expect(stageProfileIds(stage("implement"))).toEqual([
+      "implementer-devin",
+      "implementer-codex",
+      "implementer-claude",
+    ]);
+    expect(stageProfileIds(stage("tasks"))).toEqual(["planner-codex"]);
+    expect(stageProfileIds(stage("review"))).toEqual([
+      "reviewer-codex",
+      "reviewer-claude",
+      "reviewer-devin",
+    ]);
+    expect(stageProfileIds(stage("verify"))).toEqual([]);
+  });
+
+  it("rejects tiered runners with missing or empty tiers and extra keys", () => {
+    for (const mutate of [
+      (runner: { by_complexity: Record<string, string[]> }) => {
+        delete runner.by_complexity["complex"];
+      },
+      (runner: { by_complexity: Record<string, string[]> }) => {
+        runner.by_complexity["mechanical"] = [];
+      },
+      (runner: { by_complexity: Record<string, string[]> }) => {
+        runner.by_complexity["expert"] = ["implementer-codex"];
+      },
+      (runner: Record<string, unknown>) => {
+        runner["fallback"] = ["implementer-codex"];
+      },
+      (runner: Record<string, unknown>) => {
+        runner["prefer"] = ["implementer-codex"];
+      },
+    ]) {
+      const runner = tieredRunner();
+      mutate(runner);
+      expect(() => compileWorkflow(withRunner("implement", runner))).toThrow();
+    }
+  });
+
+  it("rejects a profile declared in multiple complexity tiers", () => {
+    const runner = tieredRunner();
+    runner.by_complexity.complex = ["implementer-codex"];
+    expect(() => compileWorkflow(withRunner("implement", runner))).toThrow(
+      /multiple complexity tiers/,
+    );
+  });
+
+  it("rejects tiered runners with unknown profiles or wrong roles", () => {
+    const unknown = tieredRunner();
+    unknown.by_complexity.standard = ["implementer-ghost"];
+    expect(() => compileWorkflow(withRunner("implement", unknown))).toThrow(
+      /unknown profile implementer-ghost/,
+    );
+
+    const reviewer = tieredRunner();
+    reviewer.by_complexity.complex = ["reviewer-codex"];
+    expect(() => compileWorkflow(withRunner("implement", reviewer))).toThrow(
+      /expected implementation/,
+    );
+  });
+
+  it("rejects tiered runners outside task-scoped worker.execute stages", () => {
+    const onReview = withRunner("review", {
+      by_complexity: {
+        mechanical: ["reviewer-codex"],
+        standard: ["reviewer-claude"],
+        complex: ["reviewer-devin"],
+      },
+    });
+    expect(() => compileWorkflow(onReview)).toThrow(
+      /task-scoped worker\.execute/,
+    );
+
+    const onPlanning = withRunner("tasks", tieredRunner());
+    expect(() => compileWorkflow(onPlanning)).toThrow(
+      /task-scoped worker\.execute/,
+    );
+
+    const singleton = structuredClone(fixtureCompileInput());
+    singleton.workflow.stages.push({
+      id: "solo_implement",
+      uses: "worker.execute",
+      runner: tieredRunner(),
+    } as unknown as (typeof singleton.workflow.stages)[number]);
+    expect(() => compileWorkflow(singleton)).toThrow(
+      /task-scoped worker\.execute/,
+    );
+  });
+
+  it("keeps legacy string and prefer runner forms unchanged", () => {
+    const compiled = compileWorkflow(fixtureCompileInput());
+    const stage = (id: string) =>
+      compiled.stages.find((item) => item.id === id)!;
+    expect(stage("tasks").runner).toBe("planner-codex");
+    expect(stage("implement").runner).toEqual({
+      prefer: ["implementer-devin", "implementer-codex", "implementer-claude"],
+    });
+    expect(stage("review").runner).toEqual({
+      prefer: ["reviewer-codex", "reviewer-claude", "reviewer-devin"],
+    });
+  });
 });

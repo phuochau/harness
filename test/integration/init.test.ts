@@ -128,6 +128,33 @@ describe("harness init", () => {
     expect(ignore).not.toContain(".pi/settings.json");
   });
 
+  it("keeps the default runner on prefer and accepts the closed tiered form", async () => {
+    const root = await fixture("node");
+    await initProject({ root });
+    const workflow = await yaml(join(root, ".harness/workflow.yaml"));
+    const implement = workflow.stages.find(
+      (stage: { id: string }) => stage.id === "implement",
+    );
+    expect(implement.runner).toEqual({
+      prefer: ["implementer-devin", "implementer-codex"],
+    });
+    implement.runner = {
+      by_complexity: {
+        mechanical: ["implementer-codex"],
+        standard: ["implementer-devin"],
+        complex: ["implementer-devin"],
+      },
+    };
+    expect(() => validateWorkflow(workflow)).not.toThrow();
+    implement.runner = {
+      by_complexity: {
+        mechanical: ["implementer-codex"],
+        standard: ["implementer-devin"],
+      },
+    };
+    expect(() => validateWorkflow(workflow)).toThrow();
+  });
+
   it("detects pytest commands without executing project code", async () => {
     const root = await fixture("python");
     await initProject({ root });

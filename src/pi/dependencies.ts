@@ -6,7 +6,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { parse } from "yaml";
 import type { ControllerCommand } from "../contracts/controller-command.js";
-import { validateEnvironmentAndLock } from "../contracts/index.js";
+import { stageProfileIds, validateEnvironmentAndLock } from "../contracts/index.js";
 import { compileWorkflow, type CompiledWorkflow } from "../config/compile.js";
 import { loadEnvironment, loadWorkflow } from "../config/load.js";
 import { ControllerCommandQueue } from "../controller/command-queue.js";
@@ -300,7 +300,7 @@ class ProjectCommandBackend implements HarnessCommandBackend {
     const profiles = new Set<string>();
     for (const stage of stages) {
       if (typeof stage.runner === "object") {
-        stage.runner.prefer.forEach((item) => workers.add(item));
+        stageProfileIds(stage).forEach((item) => workers.add(item));
       }
       if (stage.model_profile) profiles.add(stage.model_profile);
     }

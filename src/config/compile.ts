@@ -1,5 +1,7 @@
 import type { TSchema } from "typebox";
 import {
+  complexityTierOrder,
+  stageProfileIds,
   validateEnvironment,
   validateWorkflow,
   type EnvironmentDocument,
@@ -41,11 +43,6 @@ export interface CompiledWorkflow {
   readonly revision: `sha256:${string}`;
 }
 
-function stageProfileIds(stage: StageDocument): readonly string[] {
-  if (stage.runner === undefined) return [];
-  return typeof stage.runner === "string" ? [stage.runner] : stage.runner.prefer;
-}
-
 function expectedRole(stage: StageDocument): "planning" | "implementation" | "review" | undefined {
   if (stage.uses.startsWith("spec-kit.")) return "planning";
   if (stage.uses === "worker.execute") return "implementation";
@@ -69,6 +66,28 @@ function validateStageProfiles(
           `profile ${profileId} has role ${profile.role}, expected ${role} for ${stage.id}`,
         );
       }
+    }
+  }
+}
+
+function validateComplexityRunner(stage: StageDocument): void {
+  const runner = stage.runner;
+  if (typeof runner !== "object" || !("by_complexity" in runner)) return;
+  if (stage.uses !== "worker.execute" || stage.foreach === undefined) {
+    throw new Error(
+      `by_complexity runner on ${stage.id} requires a task-scoped worker.execute stage`,
+    );
+  }
+  const declared = new Map<string, string>();
+  for (const tier of complexityTierOrder) {
+    for (const profileId of runner.by_complexity[tier]) {
+      const existing = declared.get(profileId);
+      if (existing !== undefined) {
+        throw new Error(
+          `profile ${profileId} declared in multiple complexity tiers (${existing}, ${tier}) for ${stage.id}`,
+        );
+      }
+      declared.set(profileId, tier);
     }
   }
 }
@@ -175,6 +194,7 @@ export function compileWorkflow(input: CompileInput): CompiledWorkflow {
     ...(input.actionSchemas ?? {}),
   };
   const ordered = topologicalStages(document.stages);
+  for (const stage of ordered) validateComplexityRunner(stage);
   if (input.profiles !== undefined) validateStageProfiles(ordered, profiles);
   validateRemediationTargets(ordered);
   const stages = ordered.map((stage) => ({

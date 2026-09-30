@@ -1,5 +1,6 @@
 import { Type, type Static } from "typebox";
 import { validator } from "./common.js";
+import type { TaskComplexity } from "./task-graph.js";
 
 export const NeedSchema = Type.Object(
   {
@@ -9,17 +10,42 @@ export const NeedSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const complexityTierOrder = [
+  "mechanical",
+  "standard",
+  "complex",
+] as const satisfies readonly TaskComplexity[];
+
+const ProfileIdSchema = Type.String({ pattern: "^[a-z][a-z0-9-]*$" });
+const ProfileIdListSchema = Type.Array(ProfileIdSchema, {
+  minItems: 1,
+  uniqueItems: true,
+});
+
+export const ComplexityRunnerSchema = Type.Object(
+  {
+    by_complexity: Type.Object(
+      {
+        mechanical: ProfileIdListSchema,
+        standard: ProfileIdListSchema,
+        complex: ProfileIdListSchema,
+      },
+      { additionalProperties: false },
+    ),
+  },
+  { additionalProperties: false },
+);
+export type ComplexityRunner = Static<typeof ComplexityRunnerSchema>;
+
 export const RunnerSchema = Type.Union([
-  Type.String({ pattern: "^[a-z][a-z0-9-]*$" }),
+  ProfileIdSchema,
   Type.Object(
     {
-      prefer: Type.Array(Type.String({ pattern: "^[a-z][a-z0-9-]*$" }), {
-        minItems: 1,
-        uniqueItems: true,
-      }),
+      prefer: ProfileIdListSchema,
     },
     { additionalProperties: false },
   ),
+  ComplexityRunnerSchema,
 ]);
 
 const ForeachSchema = Type.Object(
@@ -116,3 +142,11 @@ export const WorkflowSchema = Type.Object(
 export type StageDocument = Static<typeof StageSchema>;
 export type WorkflowDocument = Static<typeof WorkflowSchema>;
 export const validateWorkflow = validator(WorkflowSchema);
+
+export function stageProfileIds(stage: StageDocument): readonly string[] {
+  const runner = stage.runner;
+  if (runner === undefined) return [];
+  if (typeof runner === "string") return [runner];
+  if ("prefer" in runner) return runner.prefer;
+  return complexityTierOrder.flatMap((tier) => runner.by_complexity[tier]);
+}

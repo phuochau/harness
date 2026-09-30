@@ -1,6 +1,7 @@
 import type { EffectIntent } from "../actions/types.js";
 import type { JsonValue } from "../contracts/common.js";
 import type { DecisionEventDraft } from "../contracts/events.js";
+import { stageProfileIds } from "../contracts/workflow.js";
 import type {
   AcceptedCommandRecord,
   CommandDeriver,
@@ -30,8 +31,7 @@ export function emptyTaskGraph(): ValidatedTaskGraph {
 }
 
 function workerPreference(stage: CompiledStage): readonly string[] {
-  if (stage.runner === undefined) return [];
-  return typeof stage.runner === "string" ? [stage.runner] : stage.runner.prefer;
+  return stageProfileIds(stage);
 }
 
 function implementationWorker(state: RunState, taskId: string): string | undefined {
