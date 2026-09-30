@@ -1,10 +1,15 @@
 import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { afterEach, expect, it } from "vitest";
 import { status } from "../../src/cli/status.js";
+import { loadRun } from "../../src/cli/status.js";
 import { explain } from "../../src/cli/explain.js";
+import { compileWorkflow } from "../../src/config/compile.js";
 import { recoverRun } from "../../src/controller/reconcile-run.js";
 import type { JsonValue } from "../../src/contracts/common.js";
 import type { HarnessEvent } from "../../src/contracts/events.js";
+import { createWorkflowCommandDeriver } from "../../src/core/workflow-engine.js";
+import { validateGraph } from "../../src/core/task-graph.js";
+import { diamondTaskGraph, fixtureCompileInput, fixtureGraphContextFor } from "../support/factories.js";
 import { journalFixture, type JournalFixture } from "../support/state-fixtures.js";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -366,6 +371,91 @@ async function appendFixDispatch(
 function commitFor(round: number): string {
   return `${round}`.padStart(40, "0");
 }
+
+it("replays an accepted review before fix dispatch without scheduling the fix twice", async () => {
+  const fixture = await journalFixture();
+  cleanups.push(fixture.cleanup);
+  const input = structuredClone(fixtureCompileInput());
+  input.workflow.stages.find((stage) => stage.id === "implement")!.runner = {
+    by_complexity: {
+      mechanical: ["implementer-claude"],
+      standard: ["implementer-codex"],
+      complex: ["implementer-devin"],
+    },
+  };
+  const base = diamondTaskGraph();
+  const graph = {
+    schema: "harness/task-graph/v2" as const,
+    tasksSemanticHash: base.tasksSemanticHash,
+    tasks: [{ ...base.tasks[0]!, complexity: "standard" as const, complexityReason: "Parser change" }],
+  };
+  const derive = createWorkflowCommandDeriver({
+    workflow: compileWorkflow(input),
+    graph: validateGraph(graph, fixtureGraphContextFor(graph)),
+    profileCapabilities: {
+      "implementer-codex": { available: true, evidence: ["managed profile resources verified"] },
+      "implementer-devin": { available: true, evidence: ["managed profile resources verified"] },
+    },
+  });
+  await append(fixture, "run.created", "run:F023", "run:create", { workflowRevision });
+  for (const [jobId, worker] of [["prepare", "system"], ["tasks", "pi"]] as const) {
+    await append(fixture, "job.ready", jobId, `ready:${jobId}`, {});
+    await append(fixture, "attempt.started", jobId, `attempt:${jobId}:1`, { attempt: 1, worker });
+    await append(fixture, "job.done", jobId, `done:${jobId}`, { requiresTaskFinalization: false });
+  }
+  await append(fixture, "job.ready", "implement:T001", "ready:implement:T001", {});
+  await append(fixture, "attempt.started", "implement:T001", "attempt:implement:T001:1", {
+    attempt: 1, worker: "implementer-codex",
+  });
+  await append(fixture, "worker.routed", "implement:T001", "route:implement:T001:1", {
+    worker: "implementer-codex",
+    reason: "initial complexity route",
+    taskId: "T001",
+    complexity: "standard",
+    complexityReason: "Parser change",
+    candidates: ["implementer-codex", "implementer-devin"],
+    tier: "standard",
+    fixRound: 0,
+    cause: "initial",
+    workflowRevision,
+    tasksSemanticHash: graph.tasksSemanticHash,
+  });
+  await append(fixture, "job.done", "implement:T001", "done:implement:T001", {
+    requiresTaskFinalization: false,
+  });
+  await appendReviewChanges(fixture, 1, commitFor(0), ["Fix failing parser case"]);
+
+  const pending = await loadRun({ root: fixture.paths.repository, runId: "F023" });
+  const command = (key: string) => ({
+    command: {
+      schemaVersion: 1 as const,
+      source: "timer" as const,
+      kind: "tick" as const,
+      idempotencyKey: key,
+      payload: { reason: "schedule" as const },
+    },
+    acceptedAt: "2026-09-30T00:00:01.000Z",
+    acceptedSequence: 1,
+    stateRevision: 1,
+  });
+  const first = derive(pending.state, command("tick:fix"));
+  expect(first.events.filter((event) => event.eventType === "implementation.fix_dispatched"))
+    .toHaveLength(1);
+  for (const event of first.events) {
+    await append(fixture, event.eventType as HarnessEvent["eventType"], event.entityId, event.idempotencyKey, event.payload);
+  }
+
+  const resumed = await loadRun({ root: fixture.paths.repository, runId: "F023" });
+  expect(resumed.state.implementationLineages.T001).toMatchObject({
+    fixRound: 1, generation: 2,
+  });
+  expect(resumed.state.implementationLineages.T001?.pendingReview).toBeUndefined();
+  const second = derive(resumed.state, command("tick:resumed"));
+  expect(second.events.some((event) => event.eventType === "implementation.fix_dispatched"))
+    .toBe(false);
+  expect(second.effects.find((effect) => effect.action === "worker.execute")?.idempotencyKey)
+    .toBe("worker.execute:implement:T001:1:g2");
+});
 
 it("reports the selected route, fix round, pending findings, and escalation block for a task", async () => {
   const fixture = await journalFixture();
