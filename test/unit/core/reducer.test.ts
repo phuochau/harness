@@ -593,6 +593,30 @@ it("updates the active route on operator reroute without resetting the fix round
   });
 });
 
+it("starts a lineage when an operator reroutes a task blocked before its first route", () => {
+  let state = initialRunState("reroute-first", `sha256:${"a".repeat(64)}`);
+  state = pushDraft(state, {
+    eventType: "worker.routed",
+    entityId: "implement:T001",
+    idempotencyKey: "route:implement:T001:operator-first",
+    payload: {
+      worker: "implementer-strong",
+      reason: "operator reroute",
+      taskId: "T001",
+      complexity: "standard",
+      candidates: ["implementer-strong"],
+      tier: "complex",
+      fixRound: 0,
+      cause: "operator_reroute",
+    },
+  });
+  expect(state.implementationLineages.T001).toMatchObject({
+    fixRound: 0,
+    originalProfileId: "implementer-strong",
+    originalTier: "complex",
+  });
+});
+
 it("rejects a conflicting initial route for an established lineage", () => {
   const state = lineageBase();
   expect(() =>

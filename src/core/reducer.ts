@@ -176,7 +176,7 @@ function applyLineageRoute(state: RunState, event: HarnessEvent): void {
   const { taskId, tier, cause, worker } = event.payload;
   if (taskId === undefined || tier === undefined || cause === undefined) return;
   const lineage = state.implementationLineages[taskId];
-  if (cause === "initial") {
+  if (cause === "initial" || (cause === "operator_reroute" && lineage === undefined)) {
     if (lineage === undefined) {
       state.implementationLineages[taskId] = {
         taskId,
