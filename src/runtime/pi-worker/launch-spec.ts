@@ -13,6 +13,7 @@ export interface BuildPiLaunchSpecInput {
   readonly cwd: string;
   readonly sessionId: string;
   readonly sessionDir: string;
+  readonly resumeTranscriptPath?: string;
   readonly prompt: string;
 }
 
@@ -50,9 +51,15 @@ export function buildPiLaunchSpec(input: BuildPiLaunchSpecInput): PiLaunchSpec {
   ]);
   appendPaths(argv, "--skill", input.managed.piSkillPaths);
   appendPaths(argv, "--prompt-template", input.managed.promptTemplatePaths);
+  if (input.resumeTranscriptPath === undefined) {
+    argv.push(
+      "--session-id", input.sessionId,
+      "--session-dir", input.sessionDir,
+    );
+  } else {
+    argv.push("--session", input.resumeTranscriptPath);
+  }
   argv.push(
-    "--session-id", input.sessionId,
-    "--session-dir", input.sessionDir,
     "--",
     input.prompt,
   );

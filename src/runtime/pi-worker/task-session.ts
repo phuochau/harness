@@ -12,6 +12,12 @@ export interface TaskSessionDescriptor {
   readonly sessionId: string;
   readonly sessionDir: string;
   readonly transcriptPath?: string;
+  readonly profileId?: string;
+}
+
+export interface TaskSessionSelector {
+  readonly generation?: string | number;
+  readonly profileId?: string;
 }
 
 export type TaskSessionBlockReason =
@@ -20,6 +26,7 @@ export type TaskSessionBlockReason =
   | "transcript_missing"
   | "transcript_corrupt"
   | "transcript_oversize"
+  | "profile_mismatch"
   | "writer_active";
 
 export type TaskSessionCheck =
@@ -61,6 +68,8 @@ interface TaskSessionRecord {
   readonly schemaVersion: 1;
   readonly taskId: string;
   readonly sessionId: string;
+  readonly generation?: string;
+  readonly profileId?: string;
   readonly createdAt: string;
 }
 
@@ -94,14 +103,23 @@ export class TaskSessionStore {
     this.maxTranscriptBytes = options.maxTranscriptBytes ?? DEFAULT_MAX_TRANSCRIPT_BYTES;
   }
 
-  private taskDir(taskId: string): string {
+  private sessionDir(taskId: string, generation?: string | number): string {
     if (!TASK_ID_PATTERN.test(taskId)) {
       throw new Error(`invalid task session identifier: ${taskId}`);
     }
-    return join(this.options.root, taskId);
+    if (generation === undefined) return join(this.options.root, taskId);
+    const key = String(generation);
+    if (!TASK_ID_PATTERN.test(key)) {
+      throw new Error(`invalid task session generation: ${key}`);
+    }
+    return join(this.options.root, `${taskId}+${key}`);
   }
 
-  private async readRecord(dir: string, taskId: string): Promise<TaskSessionRecord | undefined> {
+  private async readRecord(
+    dir: string,
+    taskId: string,
+    generation?: string | number,
+  ): Promise<TaskSessionRecord | undefined> {
     let raw: string;
     try {
       raw = await readFile(join(dir, RECORD_FILE), "utf8");
@@ -115,11 +133,14 @@ export class TaskSessionStore {
     } catch {
       return undefined;
     }
+    const generationKey = generation === undefined ? undefined : String(generation);
     if (
       record.schemaVersion !== 1 ||
       record.taskId !== taskId ||
+      record.generation !== generationKey ||
       typeof record.sessionId !== "string" ||
-      !SESSION_ID_PATTERN.test(record.sessionId)
+      !SESSION_ID_PATTERN.test(record.sessionId) ||
+      (record.profileId !== undefined && typeof record.profileId !== "string")
     ) {
       return undefined;
     }
@@ -129,11 +150,16 @@ export class TaskSessionStore {
   public async create(input: {
     readonly taskId: string;
     readonly sessionId?: string;
+    readonly generation?: string | number;
+    readonly profileId?: string;
   }): Promise<TaskSessionDescriptor> {
-    const dir = this.taskDir(input.taskId);
+    const dir = this.sessionDir(input.taskId, input.generation);
     const sessionId = input.sessionId ?? randomUUID();
     if (!SESSION_ID_PATTERN.test(sessionId)) {
       throw new Error(`invalid Pi session id: ${sessionId}`);
+    }
+    if (input.profileId !== undefined && input.profileId === "") {
+      throw new Error("invalid task session profile id");
     }
     await mkdir(dir, { recursive: true, mode: 0o700 });
     const dirInfo = await lstat(dir);
@@ -145,6 +171,8 @@ export class TaskSessionStore {
       taskId: input.taskId,
       sessionId,
       createdAt: new Date().toISOString(),
+      ...(input.generation === undefined ? {} : { generation: String(input.generation) }),
+      ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
     };
     try {
       await writeFile(join(dir, RECORD_FILE), `${JSON.stringify(record)}\n`, {
@@ -152,11 +180,16 @@ export class TaskSessionStore {
         mode: 0o600,
         flag: "wx",
       });
-      return { taskId: input.taskId, sessionId, sessionDir: dir };
+      return {
+        taskId: input.taskId,
+        sessionId,
+        sessionDir: dir,
+        ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
+      };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
-    const existing = await this.readRecord(dir, input.taskId);
+    const existing = await this.readRecord(dir, input.taskId, input.generation);
     if (existing === undefined) {
       throw new Error(`task session directory already exists without a valid record: ${input.taskId}`);
     }
@@ -165,11 +198,24 @@ export class TaskSessionStore {
         `task session already registered under a different session id: ${input.taskId}`,
       );
     }
-    return { taskId: existing.taskId, sessionId: existing.sessionId, sessionDir: dir };
+    if (input.profileId !== undefined && existing.profileId !== input.profileId) {
+      throw new Error(
+        `task session already registered under a different profile: ${input.taskId}`,
+      );
+    }
+    return {
+      taskId: existing.taskId,
+      sessionId: existing.sessionId,
+      sessionDir: dir,
+      ...(existing.profileId === undefined ? {} : { profileId: existing.profileId }),
+    };
   }
 
-  public async verify(taskId: string): Promise<TaskSessionCheck> {
-    const dir = this.taskDir(taskId);
+  public async verify(
+    taskId: string,
+    selector: TaskSessionSelector = {},
+  ): Promise<TaskSessionCheck> {
+    const dir = this.sessionDir(taskId, selector.generation);
     const dirInfo = await lstatOrNull(dir);
     if (dirInfo === null) {
       return blocked("session_missing", `task session directory does not exist: ${taskId}`);
@@ -196,7 +242,7 @@ export class TaskSessionStore {
     if ((recordInfo.mode & 0o077) !== 0) {
       return blocked("session_corrupt", "task session record is not private");
     }
-    const record = await this.readRecord(dir, taskId);
+    const record = await this.readRecord(dir, taskId, selector.generation);
     if (record === undefined) {
       return blocked("session_corrupt", "task session record is unreadable or mismatched");
     }
@@ -204,7 +250,15 @@ export class TaskSessionStore {
       taskId,
       sessionId: record.sessionId,
       sessionDir: dir,
+      ...(record.profileId === undefined ? {} : { profileId: record.profileId }),
     };
+    if (selector.profileId !== undefined && record.profileId !== selector.profileId) {
+      return blocked(
+        "profile_mismatch",
+        `task session is bound to a different profile: ${record.profileId ?? "unbound"}`,
+        session,
+      );
+    }
 
     const suffix = `_${record.sessionId}.jsonl`;
     const candidates = (await readdir(dir)).filter((entry) => entry.endsWith(suffix));
@@ -253,8 +307,12 @@ export class TaskSessionStore {
     return { status: "ok", session: located };
   }
 
-  public async acquireWriter(taskId: string, owner: string): Promise<TaskSessionAcquisition> {
-    const dir = this.taskDir(taskId);
+  public async acquireWriter(
+    taskId: string,
+    owner: string,
+    selector: TaskSessionSelector = {},
+  ): Promise<TaskSessionAcquisition> {
+    const dir = this.sessionDir(taskId, selector.generation);
     if (owner === "") throw new Error("task session writer requires an owner");
     const dirInfo = await lstatOrNull(dir);
     if (dirInfo === null) {
@@ -302,12 +360,16 @@ export class TaskSessionStore {
     return { status: "acquired", writer };
   }
 
-  public async resume(taskId: string, owner: string): Promise<TaskSessionResume> {
-    const check = await this.verify(taskId);
+  public async resume(
+    taskId: string,
+    owner: string,
+    selector: TaskSessionSelector = {},
+  ): Promise<TaskSessionResume> {
+    const check = await this.verify(taskId, selector);
     if (check.status === "blocked") {
       return { status: "blocked", reason: check.reason, detail: check.detail };
     }
-    const acquisition = await this.acquireWriter(taskId, owner);
+    const acquisition = await this.acquireWriter(taskId, owner, selector);
     if (acquisition.status === "blocked") return acquisition;
     return { status: "resumable", session: check.session, writer: acquisition.writer };
   }

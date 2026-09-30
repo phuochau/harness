@@ -279,4 +279,100 @@ describe("TaskSessionStore", () => {
     if (fourth.status === "blocked") expect(fourth.reason).toBe("writer_active");
     await third.writer.release();
   });
+
+  it("shares the original generation transcript and isolates fix rounds 4-5", async () => {
+    const store = new TaskSessionStore({ root: await tempRoot() });
+    const original = await store.create({
+      taskId: "T20",
+      generation: 1,
+      profileId: "implementer-devin",
+    });
+    const transcript = await writeTranscript(original.sessionDir, original.sessionId);
+
+    // Generations 1-4 (initial attempt plus fix rounds 1-3) resume the original slot.
+    for (const round of [2, 3, 4]) {
+      const decision = await store.resume("T20", `attempt-${round}`, {
+        generation: 1,
+        profileId: "implementer-devin",
+      });
+      expect(decision.status).toBe("resumable");
+      if (decision.status === "resumable") {
+        expect(decision.session.sessionId).toBe(original.sessionId);
+        expect(decision.session.sessionDir).toBe(original.sessionDir);
+        expect(decision.session.transcriptPath).toBe(transcript);
+        await decision.writer.release();
+      }
+    }
+
+    // Generations 5 and 6 (fix rounds 4-5) each start a distinct fresh session.
+    const fifth = await store.create({
+      taskId: "T20",
+      generation: 5,
+      profileId: "implementer-opus",
+    });
+    const sixth = await store.create({
+      taskId: "T20",
+      generation: 6,
+      profileId: "implementer-opus",
+    });
+    expect(new Set([original.sessionId, fifth.sessionId, sixth.sessionId]).size).toBe(3);
+    expect(fifth.sessionDir).not.toBe(original.sessionDir);
+    expect(sixth.sessionDir).not.toBe(fifth.sessionDir);
+
+    await writeTranscript(fifth.sessionDir, fifth.sessionId);
+    const escalated = await store.resume("T20", "attempt-5", {
+      generation: 5,
+      profileId: "implementer-opus",
+    });
+    expect(escalated.status).toBe("resumable");
+    if (escalated.status === "resumable") {
+      expect(escalated.session.sessionId).toBe(fifth.sessionId);
+      expect(escalated.session.profileId).toBe("implementer-opus");
+      await escalated.writer.release();
+    }
+
+    // A generation slot never sees a sibling slot's transcript.
+    const empty = await store.verify("T20", { generation: 4 });
+    expect(empty.status).toBe("blocked");
+    if (empty.status === "blocked") expect(empty.reason).toBe("session_missing");
+
+    // Writer locks are per transcript, so slots fence independently.
+    const escalatedWriter = await store.acquireWriter("T20", "attempt-5b", { generation: 5 });
+    expect(escalatedWriter.status).toBe("acquired");
+    const originalWriter = await store.acquireWriter("T20", "attempt-1b", { generation: 1 });
+    expect(originalWriter.status).toBe("acquired");
+    if (escalatedWriter.status === "acquired") await escalatedWriter.writer.release();
+    if (originalWriter.status === "acquired") await originalWriter.writer.release();
+  });
+
+  it("binds a stored session to its profile and rejects a different profile", async () => {
+    const store = new TaskSessionStore({ root: await tempRoot() });
+    const session = await store.create({
+      taskId: "T21",
+      generation: 1,
+      profileId: "implementer-devin",
+    });
+    await writeTranscript(session.sessionDir, session.sessionId);
+
+    const same = await store.verify("T21", { generation: 1, profileId: "implementer-devin" });
+    expect(same.status).toBe("ok");
+
+    const check = await store.verify("T21", { generation: 1, profileId: "implementer-opus" });
+    expect(check.status).toBe("blocked");
+    if (check.status === "blocked") {
+      expect(check.reason).toBe("profile_mismatch");
+      expect(check.session?.profileId).toBe("implementer-devin");
+    }
+    const resume = await store.resume("T21", "attempt-2", {
+      generation: 1,
+      profileId: "implementer-opus",
+    });
+    expect(resume.status).toBe("blocked");
+    if (resume.status === "blocked") expect(resume.reason).toBe("profile_mismatch");
+
+    // Re-registering the slot under another profile is refused loudly.
+    await expect(
+      store.create({ taskId: "T21", generation: 1, profileId: "implementer-opus" }),
+    ).rejects.toThrow(/different profile/i);
+  });
 });
