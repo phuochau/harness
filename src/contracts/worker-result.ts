@@ -1,5 +1,6 @@
 import { Type, type Static } from "typebox";
 import { HashSchema, VersionSchema, validator } from "./common.js";
+import { TaskComplexitySchema } from "./task-graph.js";
 
 export const EvidenceSchema = Type.Object(
   {
@@ -14,7 +15,10 @@ export const BlockerSchema = Type.Object(
   {
     reason: Type.String({ minLength: 1 }),
     evidence: Type.Array(Type.String()),
-    suggestedChange: Type.String({ minLength: 1 }),
+      suggestedChange: Type.String({ minLength: 1 }),
+      complexity: Type.Optional(TaskComplexitySchema),
+      complexityReason: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
+      candidates: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
   },
   { additionalProperties: false },
 );

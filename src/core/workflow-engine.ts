@@ -652,6 +652,9 @@ export function createWorkflowCommandDeriver(
                   }),
                 suggestedChange:
                   "Authenticate or repair a declared tier profile, then retry the tick or reroute the task.",
+                complexity: assessed.complexity,
+                complexityReason: assessed.complexityReason,
+                candidates: [...tieredRouteCandidates(runner, assessed.complexity)],
               },
             });
             continue;

@@ -638,7 +638,12 @@ it("blocks a tiered task with per-candidate diagnostics when no declared profile
     (event) =>
       event.eventType === "job.blocked" && event.entityId === "implement:T001",
   );
-  expect(blocked?.payload).toMatchObject({ reason: "no_available_profile" });
+  expect(blocked?.payload).toMatchObject({
+    reason: "no_available_profile",
+    complexity: "complex",
+    complexityReason: "assessment for T001",
+    candidates: ["implementer-devin"],
+  });
   const evidence = (blocked?.payload as { evidence: string[] }).evidence;
   expect(evidence.join("\n")).toContain("implementer-devin");
   expect(evidence.join("\n")).toContain("authentication not ready");

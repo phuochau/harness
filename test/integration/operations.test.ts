@@ -443,12 +443,18 @@ it("reports an initial route block when no tier profile is available", async () 
     evidence: ["implementer-standard: model missing", "implementer-strong: authentication not ready"],
     suggestedChange:
       "Authenticate or repair a declared tier profile, then retry the tick or reroute the task.",
+    complexity: "standard",
+    complexityReason: "Touches parser and CLI contract",
+    candidates: ["implementer-standard", "implementer-strong"],
   });
   await fixture.lease.release();
 
   const summary = await status({ root: fixture.paths.repository, runId: "F023" });
   expect(summary.tasks.T001).toMatchObject({
     taskId: "T001",
+    complexity: "standard",
+    complexityReason: "Touches parser and CLI contract",
+    candidates: ["implementer-standard", "implementer-strong"],
     block: {
       jobId: "implement:T001",
       reason: "no_available_profile",

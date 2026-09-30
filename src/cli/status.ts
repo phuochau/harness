@@ -91,6 +91,10 @@ function taskRoutingViews(state: RunState): Record<string, TaskRoutingView> {
       state.implementationLineages[taskId];
     const implement = state.jobs[`implement:${taskId}`];
     const route = implement?.route;
+    const initialBlock = implement?.blocker !== undefined &&
+      typeof implement.blocker === "object" && !Array.isArray(implement.blocker)
+        ? implement.blocker as Record<string, JsonValue>
+        : undefined;
     const blocked = Object.entries(state.jobs)
       .filter(
         ([jobId, job]) =>
@@ -106,11 +110,15 @@ function taskRoutingViews(state: RunState): Record<string, TaskRoutingView> {
     const fixRound = lineage?.fixRound ?? route?.fixRound;
     const view: TaskRoutingView = {
       taskId,
-      ...(route?.complexity === undefined ? {} : { complexity: route.complexity }),
-      ...(route?.complexityReason === undefined
+      ...(route?.complexity === undefined && typeof initialBlock?.complexity !== "string"
         ? {}
-        : { complexityReason: route.complexityReason }),
-      ...(route?.candidates === undefined ? {} : { candidates: route.candidates }),
+        : { complexity: (route?.complexity ?? initialBlock?.complexity) as TaskComplexity }),
+      ...(route?.complexityReason === undefined && typeof initialBlock?.complexityReason !== "string"
+        ? {}
+        : { complexityReason: (route?.complexityReason ?? initialBlock?.complexityReason) as string }),
+      ...(route?.candidates === undefined && !Array.isArray(initialBlock?.candidates)
+        ? {}
+        : { candidates: (route?.candidates ?? initialBlock?.candidates) as string[] }),
       ...(profileId === undefined ? {} : { profileId }),
       ...(tier === undefined ? {} : { tier }),
       ...(route?.cause === undefined ? {} : { cause: route.cause }),
