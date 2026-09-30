@@ -483,6 +483,40 @@ it("keeps findings pending and blocks escalation when the original tier is stron
   expect(state.implementationLineages.T001?.pendingReview?.findings).toEqual(["Fix failing parser case"]);
 });
 
+it("lets an operator reroute unresolved findings to any declared tier without resetting fixRound", () => {
+  const workflow = compileWorkflow(tieredCompileInput());
+  const document = singleTaskV2Graph("complex");
+  const derive = createWorkflowCommandDeriver({
+    workflow, graph: validateGraph(document, fixtureGraphContextFor(document)),
+    profileCapabilities: capabilitySnapshot({ "implementer-claude": true, "implementer-devin": true }),
+  });
+  let state = pendingTieredReview(3, "complex");
+  const override = derive(state, accepted({
+    schemaVersion: 1,
+    source: "operator",
+    kind: "operator_intent",
+    idempotencyKey: "manual-reroute:T001",
+    payload: { operation: "reroute", target: "T001", arguments: { worker: "implementer-claude" } },
+  }));
+  expect(override.effects).toEqual([]);
+  expect(override.events).toContainEqual(expect.objectContaining({
+    eventType: "implementation.operator_override",
+    payload: expect.objectContaining({ profileId: "implementer-claude", tier: "mechanical", generation: 5 }),
+  }));
+  for (const draft of override.events) {
+    state = reduceEvent(state, nextHarnessEvent(state, {
+      eventType: draft.eventType as HarnessEvent["eventType"], entityId: draft.entityId,
+      idempotencyKey: draft.idempotencyKey, payload: draft.payload,
+    }));
+  }
+  expect(state.implementationLineages.T001).toMatchObject({ fixRound: 3, generation: 5, activeProfileId: "implementer-claude" });
+  expect(state.implementationLineages.T001?.pendingReview).toBeUndefined();
+  const next = derive(state, tick("tick:manual-reroute"));
+  expect(workerFor(next.effects, "implement:T001")?.input).toMatchObject({
+    worker: "implementer-claude", fixRound: 3, fixGeneration: 5, routeCause: "operator_reroute",
+  });
+});
+
 it("uses distinct effect and assignment identities after a fix generation resets local attempts", () => {
   const workflow = compileWorkflow(tieredCompileInput());
   const document = singleTaskV2Graph("standard");

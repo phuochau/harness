@@ -213,6 +213,24 @@ it("creates a managed session for the first tiered implementation attempt", asyn
   expect(selected.resumeTranscriptPath).toBeUndefined();
 });
 
+it("starts a fresh transcript for an operator override without resetting the fix round", async () => {
+  const value = await fixture();
+  const intent = {
+    ...value.intent,
+    input: {
+      ...value.intent.input,
+      fixRound: 3,
+      fixGeneration: 5,
+      localAttempt: 1,
+      routeCause: "operator_reroute",
+    },
+  };
+  await value.runtime.prepare(intent);
+  const selected = value.pi.prepare.mock.calls[0]?.[1];
+  expect(selected?.sessionDir).toContain("/sessions/T001+5");
+  expect(selected?.resumeTranscriptPath).toBeUndefined();
+});
+
 it("resumes the verified original transcript for review fix rounds", async () => {
   const value = await fixture();
   const created = await value.sessions.create({ taskId: "T001", generation: 1, profileId: value.assignment.profileId });

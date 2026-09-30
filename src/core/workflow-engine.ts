@@ -22,6 +22,7 @@ import { selectInitialComplexityRoute, selectNextFixRoute } from "./routing.js";
 import type { RunState } from "./state.js";
 import type { ValidatedTaskGraph } from "./task-graph.js";
 import { globalAttemptNumber, scopedAttemptKey } from "./attempt-identity.js";
+import { taskIdForJob } from "./lifecycle.js";
 
 export interface WorkflowCommandDeriverOptions {
   readonly workflow: CompiledWorkflow;
@@ -294,6 +295,56 @@ export function createWorkflowCommandDeriver(
           };
         }
         if (operation === "retry" || operation === "reroute") {
+          if (operation === "reroute") {
+            const taskId = /^T[0-9]{3,}$/.test(target) ? target : taskIdForJob(target);
+            const lineage = taskId === undefined ? undefined : state.implementationLineages[taskId];
+            const implementJob = taskId === undefined ? undefined : materialized.jobs[`implement:${taskId}`];
+            const implementStage = implementJob === undefined ? undefined : stages.get(implementJob.stageId);
+            const runner = implementStage === undefined ? undefined : tieredRunner(implementStage);
+            if (lineage !== undefined && implementJob !== undefined && runner !== undefined) {
+              const worker = argumentsValue.worker;
+              if (typeof worker !== "string") throw new Error("reroute requires a worker");
+              const tier = complexityTierOrder.find((item) => runner.by_complexity[item].includes(worker));
+              if (tier === undefined) throw new Error(`worker ${worker} is not declared for ${implementJob.id}`);
+              const implementationStatus = state.jobs[implementJob.id]?.state;
+              if (implementationStatus === "RUNNING") throw new Error("reroute requires an idle task");
+              if (lineage.pendingReview !== undefined ||
+                  implementationStatus === "BLOCKED" || implementationStatus === "FAILED" || implementationStatus === "RETRY") {
+                const reviewJob = Object.values(materialized.jobs).find(
+                  (job) => job.taskId === taskId && stages.get(job.stageId)?.uses === "worker.review",
+                );
+                const path = lineage.pendingReview !== undefined && reviewJob !== undefined
+                  ? remediationPath(materialized.jobs, reviewJob.id, implementJob.id)
+                  : [implementJob.id];
+                prefixEvents.push({
+                  eventType: "implementation.operator_override",
+                  entityId: implementJob.id,
+                  idempotencyKey: `operator-override:${accepted.command.idempotencyKey}`,
+                  payload: {
+                    taskId: taskId!,
+                    generation: lineage.generation + 1,
+                    profileId: worker,
+                    tier,
+                    ...(lineage.pendingReview === undefined ? {} : { reviewedCommit: lineage.pendingReview.commit }),
+                  },
+                });
+                for (const pathId of path) {
+                  const pathState = state.jobs[pathId];
+                  if (pathState === undefined || pathState.state === "PENDING") continue;
+                  prefixEvents.push({
+                    eventType: "job.invalidated",
+                    entityId: pathId,
+                    idempotencyKey: `operator-override-invalidate:${accepted.command.idempotencyKey}:${pathId}`,
+                    payload: {
+                      supersededGeneration: Math.max(1, pathState.attempt),
+                      reason: "operator reroute",
+                    },
+                  });
+                }
+                return { events: prefixEvents, effects: [] };
+              }
+            }
+          }
           const resolvedTarget = taskOperatorTarget(
             target,
             state,
@@ -677,6 +728,7 @@ export function createWorkflowCommandDeriver(
                 localAttempt: attempt,
                 fixRound: state.implementationLineages[job.taskId]?.fixRound ?? 0,
                 fixGeneration: state.implementationLineages[job.taskId]?.generation ?? 1,
+                routeCause: state.jobs[job.id]?.route?.cause ?? "initial",
               }
             : {}),
           worker,

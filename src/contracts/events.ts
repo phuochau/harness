@@ -302,6 +302,19 @@ export const HarnessEventSchema = Type.Union([
       { additionalProperties: false },
     ),
   ),
+  event(
+    "implementation.operator_override",
+    Type.Object(
+      {
+        taskId: Type.String({ pattern: "^T[0-9]{3,}$" }),
+        generation: Type.Integer({ minimum: 2 }),
+        profileId: Type.String({ minLength: 1 }),
+        tier: TaskComplexitySchema,
+        reviewedCommit: Type.Optional(Type.String({ minLength: 1 })),
+      },
+      { additionalProperties: false },
+    ),
+  ),
   event("effect.intent", EffectIntentPayloadSchema),
   event("effect.observed", EffectObservationPayloadSchema),
   event("effect.failed", EffectFailurePayloadSchema),

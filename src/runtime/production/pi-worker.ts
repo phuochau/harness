@@ -307,14 +307,19 @@ export class ProductionPiWorkerRuntime implements ProductionWorkerRuntime {
         typeof intent.input.localAttempt === "number" && assignment.taskId !== undefined) {
       const fixRound = intent.input.fixRound;
       const localAttempt = intent.input.localAttempt;
+      const override = intent.input.routeCause === "operator_reroute";
+      const fixGeneration = intent.input.fixGeneration ?? (override ? undefined : fixRound + 1);
       if (!Number.isInteger(fixRound) || fixRound < 0 || fixRound > 5 ||
           !Number.isInteger(localAttempt) || localAttempt < 1) {
         throw new Error("invalid implementation session selection");
       }
-      const generation = fixRound >= 4 ? fixRound + 1 : 1;
+      if (!Number.isInteger(fixGeneration) || Number(fixGeneration) < 1) {
+        throw new Error("invalid implementation fix generation");
+      }
+      const generation = override || fixRound >= 4 ? Number(fixGeneration) : 1;
       managedSession = { taskId: assignment.taskId, generation };
       const selector = { generation, profileId: assignment.profileId };
-      if (localAttempt === 1 && (fixRound === 0 || fixRound >= 4)) {
+      if (localAttempt === 1 && (fixRound === 0 || fixRound >= 4 || override)) {
         const created = await this.options.sessions.create({ taskId: assignment.taskId, ...selector });
         session = { sessionId: created.sessionId, sessionDir: created.sessionDir };
       } else {

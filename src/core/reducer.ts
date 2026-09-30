@@ -313,6 +313,41 @@ function applyFixDispatch(state: RunState, event: HarnessEvent): void {
   }
 }
 
+function applyOperatorOverride(state: RunState, event: HarnessEvent): void {
+  if (event.eventType !== "implementation.operator_override") return;
+  const payload = event.payload;
+  const lineage = state.implementationLineages[payload.taskId];
+  if (lineage === undefined || payload.generation !== lineage.generation + 1) {
+    throw new ReducerError(`invalid operator override generation for ${payload.taskId}`);
+  }
+  if (lineage.pendingReview !== undefined) {
+    if (payload.reviewedCommit !== lineage.pendingReview.commit) {
+      throw new ReducerError(`operator override review mismatch for ${payload.taskId}`);
+    }
+    lineage.acceptedReviews.push(lineage.pendingReview);
+    delete lineage.pendingReview;
+  } else if (payload.reviewedCommit !== undefined) {
+    throw new ReducerError(`operator override has no pending review for ${payload.taskId}`);
+  }
+  lineage.generation = payload.generation;
+  lineage.activeProfileId = payload.profileId;
+  lineage.activeTier = payload.tier;
+  lineage.dispatchKey = event.idempotencyKey;
+  const implement = ensureJob(state, event.entityId);
+  implement.worker = payload.profileId;
+  implement.route = {
+    profileId: payload.profileId,
+    cause: "operator_reroute",
+    tier: payload.tier,
+    fixRound: lineage.fixRound,
+  };
+  for (const [jobId, job] of Object.entries(state.jobs)) {
+    if (taskIdForJob(jobId) !== payload.taskId) continue;
+    job.attempt = 0;
+    delete job.firstAttemptAt;
+  }
+}
+
 function applyPlanningEvent(state: RunState, event: HarnessEvent): void {
   switch (event.eventType) {
     case "planning.queued":
@@ -465,6 +500,9 @@ function applyEvent(state: RunState, event: HarnessEvent): void {
       break;
     case "implementation.fix_dispatched":
       applyFixDispatch(state, event);
+      break;
+    case "implementation.operator_override":
+      applyOperatorOverride(state, event);
       break;
     case "effect.intent":
       state.outstandingEffects[event.payload.idempotencyKey] = event.payload;
