@@ -39,6 +39,7 @@ import type {
   ProfileCapabilities,
 } from "../pi-worker/runtime.js";
 import { ProductionPiWorkerRuntime } from "./pi-worker.js";
+import { TaskSessionStore } from "../pi-worker/task-session.js";
 import { JournalVerificationObservations } from "./journal-observations.js";
 import { loadRunTaskGraph, ProductionPlanningArtifactSealer } from "./planning-artifacts.js";
 import { DurableRecordStore } from "./records.js";
@@ -298,6 +299,7 @@ export async function composeProductionRun(
             attempts,
             records,
             processRoot: join(initialized.paths.root, "processes"),
+            sessions: new TaskSessionStore({ root: initialized.paths.sessions }),
           })
     );
     const registry = createProductionActionRegistry({
@@ -442,6 +444,7 @@ export async function createStandaloneProductionEffects(input: {
           attempts,
           records,
           processRoot: join(paths.root, "processes"),
+          sessions: new TaskSessionStore({ root: paths.sessions }),
         })
   );
   const planningSealer = new ProductionPlanningArtifactSealer(

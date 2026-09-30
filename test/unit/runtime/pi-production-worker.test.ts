@@ -1,5 +1,5 @@
 import { createPublicKey } from "node:crypto";
-import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -9,6 +9,7 @@ import type { WorkerResult } from "../../../src/contracts/worker-result.js";
 import type { LifecycleWorktreeBinding } from "../../../src/git/worktrees.js";
 import type { PiProcessRecord } from "../../../src/runtime/pi-process/types.js";
 import type { PiWorkerRuntime } from "../../../src/runtime/pi-worker/runtime.js";
+import { TaskSessionStore } from "../../../src/runtime/pi-worker/task-session.js";
 import { ProductionPiWorkerRuntime } from "../../../src/runtime/production/pi-worker.js";
 import { DurableRecordStore } from "../../../src/runtime/production/records.js";
 import { sha256 } from "../../../src/shared/sha256.js";
@@ -117,7 +118,11 @@ async function fixture() {
     receiptPublicKey: value.launch.receiptPublicKey,
   });
   const pi = {
-    prepare: vi.fn(async () => prepared),
+    prepare: vi.fn(async (_assignment: WorkerAssignment, _session?: {
+      readonly sessionId: string;
+      readonly sessionDir: string;
+      readonly resumeTranscriptPath?: string;
+    }) => prepared),
     launch: vi.fn(async (value: any) => ({
       attemptId: process.attemptId,
       process: bindProcess(value),
@@ -138,6 +143,7 @@ async function fixture() {
     abort: vi.fn(async () => undefined),
   };
   const records = new DurableRecordStore(join(root, "records"));
+  const sessions = new TaskSessionStore({ root: join(root, "sessions") });
   return {
     assignment,
     binding,
@@ -148,15 +154,60 @@ async function fixture() {
     pi,
     attempts,
     records,
+    sessions,
     runtime: new ProductionPiWorkerRuntime({
       runtime: pi as unknown as PiWorkerRuntime,
       profiles: fixtureResolvedProfiles(),
       attempts,
       records,
       processRoot: join(root, "processes"),
+      sessions,
     }),
   };
 }
+
+it("creates a managed session for the first tiered implementation attempt", async () => {
+  const value = await fixture();
+  const intent = { ...value.intent, input: { ...value.intent.input, fixRound: 0, localAttempt: 1 } };
+  await value.runtime.prepare(intent);
+  const selected = value.pi.prepare.mock.calls[0]?.[1] as { sessionDir: string; resumeTranscriptPath?: string };
+  expect(selected.sessionDir).toContain("/sessions/T001+1");
+  expect(selected.resumeTranscriptPath).toBeUndefined();
+});
+
+it("resumes the verified original transcript for review fix rounds", async () => {
+  const value = await fixture();
+  const created = await value.sessions.create({ taskId: "T001", generation: 1, profileId: value.assignment.profileId });
+  const transcriptPath = join(created.sessionDir, `2026-09-30_${created.sessionId}.jsonl`);
+  await writeFile(transcriptPath, `${JSON.stringify({ type: "session", id: created.sessionId })}\n`, { mode: 0o600 });
+  const intent = { ...value.intent, input: { ...value.intent.input, fixRound: 1, localAttempt: 1 } };
+  await value.runtime.prepare(intent);
+  const selected = value.pi.prepare.mock.calls[0]?.[1] as { resumeTranscriptPath?: string };
+  expect(selected.resumeTranscriptPath).toBe(transcriptPath);
+});
+
+it("blocks continuation when the original transcript is missing", async () => {
+  const value = await fixture();
+  const intent = { ...value.intent, input: { ...value.intent.input, fixRound: 1, localAttempt: 1 } };
+  await expect(value.runtime.prepare(intent)).rejects.toMatchObject({
+    code: "SESSION_CONTINUATION_BLOCKED",
+    message: "session_continuation_blocked: session_missing",
+  });
+  expect(value.pi.prepare).not.toHaveBeenCalled();
+});
+
+it("holds one transcript writer through execution and releases it after cleanup", async () => {
+  const value = await fixture();
+  const intent = { ...value.intent, input: { ...value.intent.input, fixRound: 0, localAttempt: 1 } };
+  const prepared = await value.runtime.prepare(intent);
+  await value.runtime.execute(prepared, intent);
+  const competing = await value.sessions.acquireWriter("T001", "another-attempt", { generation: 1 });
+  expect(competing).toMatchObject({ status: "blocked", reason: "writer_active" });
+  await value.runtime.afterCompleted(prepared, value.result);
+  const next = await value.sessions.acquireWriter("T001", "another-attempt", { generation: 1 });
+  expect(next.status).toBe("acquired");
+  if (next.status === "acquired") await next.writer.release();
+});
 
 it("launches one durable Pi process and accepts its structured result", async () => {
   const value = await fixture();

@@ -672,6 +672,13 @@ export function createWorkflowCommandDeriver(
           stageId: job.stageId,
           ...(job.taskId === undefined ? {} : { taskId: job.taskId }),
           attempt: globalAttemptNumber(job.id, attempt, state),
+          ...(runner !== undefined && stage.uses === "worker.execute" && job.taskId !== undefined
+            ? {
+                localAttempt: attempt,
+                fixRound: state.implementationLineages[job.taskId]?.fixRound ?? 0,
+                fixGeneration: state.implementationLineages[job.taskId]?.generation ?? 1,
+              }
+            : {}),
           worker,
         } as JsonValue,
       });

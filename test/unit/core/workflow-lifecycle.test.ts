@@ -3,6 +3,21 @@ import type { EffectIntent } from "../../../src/actions/types.js";
 import type { JsonValue } from "../../../src/contracts/common.js";
 import { createWorkflowLifecycle } from "../../../src/core/workflow-lifecycle.js";
 import { IndeterminateEffect } from "../../../src/actions/executor.js";
+import { SessionContinuationBlockedError } from "../../../src/runtime/production/pi-worker.js";
+
+it("blocks a task whose verified Pi continuation is missing", () => {
+  const events = createWorkflowLifecycle().failed(
+    intent("worker.execute", {
+      entityId: "implement:T001", jobId: "implement:T001", stageId: "implement",
+      taskId: "T001", worker: "implementer-devin", attempt: 2,
+    }),
+    new SessionContinuationBlockedError("transcript_missing"),
+  );
+  expect(events).toContainEqual(expect.objectContaining({
+    eventType: "job.blocked",
+    payload: expect.objectContaining({ reason: "session_continuation_blocked: transcript_missing" }),
+  }));
+});
 
 const hash = `sha256:${"a".repeat(64)}` as const;
 

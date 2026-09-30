@@ -373,4 +373,20 @@ export class TaskSessionStore {
     if (acquisition.status === "blocked") return acquisition;
     return { status: "resumable", session: check.session, writer: acquisition.writer };
   }
+
+  public async releaseWriter(
+    taskId: string,
+    owner: string,
+    selector: TaskSessionSelector = {},
+  ): Promise<void> {
+    const lockPath = join(this.sessionDir(taskId, selector.generation), WRITER_LOCK);
+    let current: { owner?: unknown };
+    try {
+      current = JSON.parse(await readFile(lockPath, "utf8")) as { owner?: unknown };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    if (current.owner === owner) await rm(lockPath, { force: true });
+  }
 }

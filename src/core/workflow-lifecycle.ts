@@ -300,6 +300,15 @@ export function createWorkflowLifecycle(): WorkflowLifecycle {
           "Inspect external state, then retry recovery or resolve the effect manually.",
         )];
       }
+      if (code === "SESSION_CONTINUATION_BLOCKED") {
+        return [blocked(
+          intent,
+          bound.jobId,
+          message,
+          [],
+          "Inspect the task transcript and resolve the session before retrying.",
+        )];
+      }
       if (
         code === "WORKER_CANCELLED" ||
         code === "APPROVAL_PENDING" ||

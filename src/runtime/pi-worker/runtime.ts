@@ -204,7 +204,10 @@ export class PiWorkerRuntime {
     };
   }
 
-  public async prepare(assignment: WorkerAssignment): Promise<PreparedPiAttempt> {
+  public async prepare(
+    assignment: WorkerAssignment,
+    session?: { readonly sessionId: string; readonly sessionDir: string; readonly resumeTranscriptPath?: string },
+  ): Promise<PreparedPiAttempt> {
     const profile = this.options.profiles.byId[assignment.profileId];
     if (profile === undefined) throw new Error(`resolved profile is missing: ${assignment.profileId}`);
     if (profile.family !== assignment.profileFamily || profile.role !== assignment.role) {
@@ -238,8 +241,8 @@ export class PiWorkerRuntime {
       flag: "wx",
     });
     const id = attemptId(assignment);
-    const sessionId = randomUUID();
-    const sessionDir = join(output, "sessions", sha256(id).slice(7, 31));
+    const sessionId = session?.sessionId ?? randomUUID();
+    const sessionDir = session?.sessionDir ?? join(output, "sessions", sha256(id).slice(7, 31));
     const launch = buildPiLaunchSpec({
       attemptId: id,
       attemptToken: randomUUID(),
@@ -251,6 +254,9 @@ export class PiWorkerRuntime {
       cwd: assignment.worktree.path,
       sessionId,
       sessionDir,
+      ...(session?.resumeTranscriptPath === undefined
+        ? {}
+        : { resumeTranscriptPath: session.resumeTranscriptPath }),
       prompt: buildWorkerEntryInstruction(assignment),
     });
     return { attemptId: id, assignment, profile, launch, prompt, resultPath };

@@ -9,6 +9,7 @@ import type { ProfileFamily } from "../../contracts/profiles.js";
 import type { LifecycleWorktreeBinding } from "../../git/worktrees.js";
 import { sha256 } from "../../shared/sha256.js";
 import type { PiProcessRecord } from "../pi-process/types.js";
+import type { TaskSessionStore } from "../pi-worker/task-session.js";
 import {
   PiWorkerRuntime,
   type PreparedPiAttempt,
@@ -54,6 +55,7 @@ export interface PersistedPreparedPiAttempt {
   readonly resultPath: string;
   readonly attemptId: string;
   readonly launch: PreparedPiAttempt["launch"];
+  readonly managedSession?: { readonly taskId: string; readonly generation: number };
 }
 
 export interface ProductionPiWorkerRuntimeOptions {
@@ -62,6 +64,15 @@ export interface ProductionPiWorkerRuntimeOptions {
   readonly attempts: ProductionWorkerAttemptPort;
   readonly records: DurableRecordStore;
   readonly processRoot: string;
+  readonly sessions?: TaskSessionStore;
+}
+
+export class SessionContinuationBlockedError extends Error {
+  public readonly code = "SESSION_CONTINUATION_BLOCKED";
+
+  public constructor(reason: string) {
+    super(`session_continuation_blocked: ${reason}`);
+  }
 }
 
 function record(value: unknown): value is Record<string, any> {
@@ -155,6 +166,12 @@ function parsePrepared(
     ) ||
     typeof parsed.launch.receiptPublicKey !== "string" ||
     parsed.launch.receiptPublicKey.length === 0 ||
+    (parsed.managedSession !== undefined && (
+      !record(parsed.managedSession) ||
+      parsed.managedSession.taskId !== parsed.assignment.taskId ||
+      !Number.isInteger(parsed.managedSession.generation) ||
+      parsed.managedSession.generation < 1
+    )) ||
     !parsed.resultPath.startsWith(`${parsed.binding.path}/.harness-output/`) ||
     parsed.launch.controlDir.startsWith(`${parsed.binding.path}/`)
   ) throw new Error("persisted Pi worker attempt identity mismatch");
@@ -205,6 +222,27 @@ export class ProductionPiWorkerRuntime implements ProductionWorkerRuntime {
 
   public constructor(private readonly options: ProductionPiWorkerRuntimeOptions) {}
 
+  private async acquireSessionWriter(value: PersistedPreparedPiAttempt): Promise<void> {
+    if (value.managedSession === undefined || this.options.sessions === undefined) return;
+    const selected = await this.options.sessions.acquireWriter(
+      value.managedSession.taskId,
+      value.attemptId,
+      { generation: value.managedSession.generation, profileId: value.assignment.profileId },
+    );
+    if (selected.status === "blocked") {
+      throw new SessionContinuationBlockedError(selected.reason);
+    }
+  }
+
+  private async releaseSessionWriter(value: PersistedPreparedPiAttempt): Promise<void> {
+    if (value.managedSession === undefined || this.options.sessions === undefined) return;
+    await this.options.sessions.releaseWriter(
+      value.managedSession.taskId,
+      value.attemptId,
+      { generation: value.managedSession.generation },
+    );
+  }
+
   private async cleanupProcess(value: PersistedPreparedPiAttempt): Promise<void> {
     const process = await this.processRecord(value);
     if (process !== undefined) {
@@ -227,7 +265,42 @@ export class ProductionPiWorkerRuntime implements ProductionWorkerRuntime {
     intent: EffectIntent<ProductionWorkerKind, ProductionWorkerInput>,
   ): Promise<PreparedWorkerAttempt> {
     const { assignment, binding } = await this.options.attempts.prepare(intent);
-    const prepared = await this.options.runtime.prepare(assignment);
+    let session: {
+      readonly sessionId: string;
+      readonly sessionDir: string;
+      readonly resumeTranscriptPath?: string;
+    } | undefined;
+    let managedSession: { readonly taskId: string; readonly generation: number } | undefined;
+    if (intent.action === "worker.execute" && this.options.sessions !== undefined &&
+        typeof intent.input.fixRound === "number" &&
+        typeof intent.input.localAttempt === "number" && assignment.taskId !== undefined) {
+      const fixRound = intent.input.fixRound;
+      const localAttempt = intent.input.localAttempt;
+      if (!Number.isInteger(fixRound) || fixRound < 0 || fixRound > 5 ||
+          !Number.isInteger(localAttempt) || localAttempt < 1) {
+        throw new Error("invalid implementation session selection");
+      }
+      const generation = fixRound >= 4 ? fixRound + 1 : 1;
+      managedSession = { taskId: assignment.taskId, generation };
+      const selector = { generation, profileId: assignment.profileId };
+      if (localAttempt === 1 && (fixRound === 0 || fixRound >= 4)) {
+        const created = await this.options.sessions.create({ taskId: assignment.taskId, ...selector });
+        session = { sessionId: created.sessionId, sessionDir: created.sessionDir };
+      } else {
+        const checked = await this.options.sessions.verify(assignment.taskId, selector);
+        if (checked.status === "blocked" || checked.session.transcriptPath === undefined) {
+          throw new SessionContinuationBlockedError(
+            checked.status === "blocked" ? checked.reason : "transcript_missing",
+          );
+        }
+        session = {
+          sessionId: checked.session.sessionId,
+          sessionDir: checked.session.sessionDir,
+          resumeTranscriptPath: checked.session.transcriptPath,
+        };
+      }
+    }
+    const prepared = await this.options.runtime.prepare(assignment, session);
     const controlDir = attemptControlDir(this.options.processRoot, prepared.attemptId);
     const receiptKey = await prepareReceiptKey(controlDir);
     const launch = {
@@ -249,6 +322,7 @@ export class ProductionPiWorkerRuntime implements ProductionWorkerRuntime {
       resultPath: prepared.resultPath,
       attemptId: prepared.attemptId,
       launch,
+      ...(managedSession === undefined ? {} : { managedSession }),
     }) as unknown as PreparedWorkerAttempt;
   }
 
@@ -356,6 +430,7 @@ export class ProductionPiWorkerRuntime implements ProductionWorkerRuntime {
       return reconciled.output;
     }
     try {
+      await this.acquireSessionWriter(value);
       await this.launchOnce(prepared);
     } catch (error) {
       const recovered = await this.processRecord(value);
@@ -395,6 +470,7 @@ export class ProductionPiWorkerRuntime implements ProductionWorkerRuntime {
   ): Promise<void> {
     const value = parsePrepared(persisted, this.options.profiles, this.options.processRoot);
     await this.cleanupProcess(value);
+    await this.releaseSessionWriter(value);
     if (output.outcome === "blocked" || output.outcome === "failed") {
       await this.options.attempts.abort(value.binding);
     } else {
@@ -408,6 +484,7 @@ export class ProductionPiWorkerRuntime implements ProductionWorkerRuntime {
   ): Promise<void> {
     const value = parsePrepared(persisted, this.options.profiles, this.options.processRoot);
     await this.cleanupProcess(value);
+    await this.releaseSessionWriter(value);
     await this.options.attempts.abort(value.binding);
   }
 }
