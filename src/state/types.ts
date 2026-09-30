@@ -12,6 +12,7 @@ export interface RunPaths {
   readonly assignments: string;
   readonly workers: string;
   readonly evidence: string;
+  readonly sessions: string;
   readonly logs: string;
 }
 

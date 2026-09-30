@@ -39,6 +39,7 @@ export async function resolveRunPaths(
     assignments: join(root, "assignments"),
     workers: join(root, "workers"),
     evidence: join(root, "evidence"),
+    sessions: join(root, "sessions"),
     logs: join(root, "logs"),
   };
 }
