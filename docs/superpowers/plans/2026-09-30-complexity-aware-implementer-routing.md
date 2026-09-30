@@ -130,7 +130,13 @@
 
 ## Final verification
 
-- [ ] Run `npm run verify`; record exact result.
-- [ ] Run `git diff --check` and inspect the full branch diff against its base for spec coverage, stale paths, secrets, and unintended default-workflow changes.
-- [ ] Verify recovery from an accepted review awaiting fix dispatch and from an active implementation attempt; confirm no duplicate fix or concurrent transcript writer.
-- [ ] Report any real-provider or credentialed end-to-end tests that were not run. Do not claim model quality from protocol tests.
+- [x] Run `npm run verify`; record exact result.
+- [x] Run `git diff --check` and inspect the full branch diff against its base for spec coverage, stale paths, secrets, and unintended default-workflow changes.
+- [x] Verify recovery from an accepted review awaiting fix dispatch and from an active implementation attempt; confirm no duplicate fix or concurrent transcript writer.
+- [x] Report any real-provider or credentialed end-to-end tests that were not run. Do not claim model quality from protocol tests.
+
+## Implementation record (2026-09-30)
+
+Tasks 1–6 were implemented in the `complexity-routing` managed worktree, beginning at `a837023`. The final code and test commit is `f3ac514`. Sonnet 5.5 was unavailable because its daily quota was exhausted; Devin CLI `swe-2-max` completed Tasks 1–3, Task 4 lineage primitives, Task 5 session primitives, and Task 6 visibility. The remaining integration and self-review fixes were completed in the same worktree.
+
+Final verification on `f3ac514`: `npm run verify` passed (88 test files; 520 passed, 4 skipped), including typecheck, build, and package dry run. Journal replay tests cover an accepted review awaiting fix dispatch; process recovery and task session tests cover reattachment without a second launch and exclusive transcript writers. The pinned Pi CLI integration test resumes a real session from a second attempt worktree through a local OpenAI-compatible fake server and a `TaskSessionStore` verified transcript. No credentialed hosted-model or model-quality test was run. The worktree is preserved for review; no merge or push was performed.
