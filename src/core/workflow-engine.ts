@@ -21,6 +21,7 @@ import { materializeJobs, type MaterializedJob } from "./materialize.js";
 import { selectInitialComplexityRoute } from "./routing.js";
 import type { RunState } from "./state.js";
 import type { ValidatedTaskGraph } from "./task-graph.js";
+import { globalAttemptNumber, scopedAttemptKey } from "./attempt-identity.js";
 
 export interface WorkflowCommandDeriverOptions {
   readonly workflow: CompiledWorkflow;
@@ -340,7 +341,7 @@ export function createWorkflowCommandDeriver(
         prefixEvents.push({
           eventType: "job.blocked",
           entityId: job.id,
-          idempotencyKey: `policy-block:${job.id}:${current.attempt}`,
+          idempotencyKey: scopedAttemptKey("policy-block", job.id, current.attempt, state),
           payload: {
             reason: policy.block,
             evidence: [current.retryReason],
@@ -355,7 +356,7 @@ export function createWorkflowCommandDeriver(
         prefixEvents.push({
           eventType: "job.failed",
           entityId: job.id,
-          idempotencyKey: `retry-exhausted:${job.id}:${current.attempt}`,
+          idempotencyKey: scopedAttemptKey("retry-exhausted", job.id, current.attempt, state),
           payload: { reason: "retry budget exhausted" },
         });
         suppressed.add(job.id);
@@ -372,7 +373,7 @@ export function createWorkflowCommandDeriver(
         prefixEvents.push({
           eventType: "job.failed",
           entityId: job.id,
-          idempotencyKey: `remediation-exhausted:${job.id}:${current.attempt}`,
+          idempotencyKey: scopedAttemptKey("remediation-exhausted", job.id, current.attempt, state),
           payload: { reason: `remediation stage ${targetId} exhausted its retry budget` },
         });
         suppressed.add(job.id);
@@ -388,7 +389,7 @@ export function createWorkflowCommandDeriver(
           prefixEvents.push({
             eventType: "job.invalidated",
             entityId: pathId,
-            idempotencyKey: `remediate:${job.id}:${current.attempt}:${pathId}`,
+            idempotencyKey: `${scopedAttemptKey("remediate", job.id, current.attempt, state)}:${pathId}`,
             payload: {
               supersededGeneration: Math.max(1, pathState.attempt),
               reason: `${current.retryReason} at ${job.id}`,
@@ -418,7 +419,7 @@ export function createWorkflowCommandDeriver(
           prefixEvents.push({
             eventType: "job.failed",
             entityId: job.id,
-            idempotencyKey: `retry-exhausted:${job.id}:${state.jobs[job.id]?.attempt ?? 0}`,
+            idempotencyKey: scopedAttemptKey("retry-exhausted", job.id, state.jobs[job.id]?.attempt ?? 0, state),
             payload: { reason: "retry budget exhausted" },
           });
           budgetFailures.add(job.id);
@@ -574,27 +575,27 @@ export function createWorkflowCommandDeriver(
         events.push({
           eventType: "job.ready",
           entityId: job.id,
-          idempotencyKey: `ready:${job.id}:${attempt}`,
+          idempotencyKey: scopedAttemptKey("ready", job.id, attempt, state),
           payload: {},
         });
       }
       events.push({
         eventType: "attempt.started",
         entityId: job.id,
-        idempotencyKey: `attempt:${job.id}:${attempt}`,
+        idempotencyKey: scopedAttemptKey("attempt", job.id, attempt, state),
         payload: { attempt, worker },
       });
       if (routedPayload !== undefined) {
         events.push({
           eventType: "worker.routed",
           entityId: job.id,
-          idempotencyKey: `route:${job.id}:${attempt}`,
+          idempotencyKey: scopedAttemptKey("route", job.id, attempt, state),
           payload: routedPayload,
         });
       }
       effects.push({
         action: stage.action.kind,
-        idempotencyKey: `${stage.action.kind}:${job.id}:${attempt}`,
+        idempotencyKey: scopedAttemptKey(stage.action.kind, job.id, attempt, state),
         recovery: recoveryFor(stage),
         laneKey,
         input: {
@@ -603,7 +604,7 @@ export function createWorkflowCommandDeriver(
           jobId: job.id,
           stageId: job.stageId,
           ...(job.taskId === undefined ? {} : { taskId: job.taskId }),
-          attempt,
+          attempt: globalAttemptNumber(job.id, attempt, state),
           worker,
         } as JsonValue,
       });

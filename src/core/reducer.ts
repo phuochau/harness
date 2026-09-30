@@ -187,7 +187,7 @@ function applyLineageRoute(state: RunState, event: HarnessEvent): void {
         activeProfileId: worker,
         activeTier: tier,
         acceptedReviews: [],
-        globalAttemptSeq: 0,
+        globalAttemptSeq: ensureJob(state, event.entityId).attempt,
       };
       return;
     }

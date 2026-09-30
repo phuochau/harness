@@ -388,6 +388,43 @@ function workerFor(effects: readonly { input: unknown }[], jobId: string) {
   );
 }
 
+it("uses distinct effect and assignment identities after a fix generation resets local attempts", () => {
+  const workflow = compileWorkflow(tieredCompileInput());
+  const document = singleTaskV2Graph("standard");
+  const derive = createWorkflowCommandDeriver({
+    workflow,
+    graph: validateGraph(document, fixtureGraphContextFor(document)),
+    profileCapabilities: capabilitySnapshot({ "implementer-codex": true }),
+  });
+  const state = stateWithTasksDone("F036-identity");
+  state.implementationLineages.T001 = {
+    taskId: "T001",
+    fixRound: 1,
+    generation: 2,
+    originalProfileId: "implementer-codex",
+    originalTier: "standard",
+    activeProfileId: "implementer-codex",
+    activeTier: "standard",
+    acceptedReviews: [],
+    globalAttemptSeq: 3,
+  };
+  state.jobs["implement:T001"] = {
+    state: "RETRY",
+    attempt: 0,
+    worker: "implementer-codex",
+    route: { profileId: "implementer-codex", cause: "initial", tier: "standard", fixRound: 0 },
+  };
+  const decision = derive(state, tick("tick:identity"));
+  const effect = decision.effects.find((item) => item.action === "worker.execute");
+  expect(effect?.idempotencyKey).toBe("worker.execute:implement:T001:1:g2");
+  expect(effect?.input).toMatchObject({ attempt: 4, worker: "implementer-codex" });
+  expect(decision.events).toContainEqual(expect.objectContaining({
+    eventType: "attempt.started",
+    idempotencyKey: "attempt:implement:T001:1:g2",
+    payload: { attempt: 1, worker: "implementer-codex" },
+  }));
+});
+
 it("routes a tiered task to the first available declared candidate and journals route evidence", () => {
   const workflow = compileWorkflow(tieredCompileInput());
   const document = singleTaskV2Graph("standard");

@@ -8,6 +8,7 @@ import type { GitPushInput, GitPushOutput } from "../../actions/git-push.js";
 import type { PullRequestInput, PullRequestOutput } from "../../actions/github-pr.js";
 import type { EffectIntent, SealedImplementation } from "../../actions/types.js";
 import type { RunState } from "../../core/state.js";
+import { scopedAttemptKey } from "../../core/attempt-identity.js";
 import type { WorkerResult } from "../../contracts/worker-result.js";
 import type { WorktreeLifecycle } from "../../git/workspace-lifecycle.js";
 import type { LifecycleWorktreeBinding } from "../../git/worktrees.js";
@@ -74,7 +75,7 @@ function effectKey(
   if (!Number.isInteger(generation) || generation! < 1) {
     throw new Error(`missing attempt for ${jobId}`);
   }
-  return `${action}:${jobId}:${generation}`;
+  return scopedAttemptKey(action, jobId, generation!, state);
 }
 
 function validateSealed(value: unknown): SealedImplementation {
