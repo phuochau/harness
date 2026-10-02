@@ -3,13 +3,15 @@ import type {
   ArtifactBaseline,
   ArtifactPaths,
   PlanningStage,
+  QuickTaskKind,
 } from "../speckit/artifacts.js";
 import type { PiProcessRecord } from "../runtime/pi-process/types.js";
 
 export type PlanningCommand =
   | "/speckit.specify"
   | "/speckit.plan"
-  | "/speckit.tasks";
+  | "/speckit.tasks"
+  | "/harness.quick-plan";
 
 export interface PlanningRequest {
   readonly stage: PlanningStage;
@@ -17,6 +19,8 @@ export interface PlanningRequest {
   readonly correlationId: string;
   readonly artifactPaths: ArtifactPaths;
   readonly baseline: ArtifactBaseline;
+  readonly kind?: QuickTaskKind;
+  readonly brief?: string;
 }
 
 export interface PlanningEnqueueContext {

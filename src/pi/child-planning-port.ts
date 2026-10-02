@@ -18,6 +18,7 @@ import { buildPiLaunchSpec } from "../runtime/pi-worker/launch-spec.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 import { sha256 } from "../shared/sha256.js";
 import { planningArtifactContract, validatePlanningArtifacts } from "../speckit/artifacts.js";
+import { quickPlanningPrompt } from "./quick-planning-prompt.js";
 
 export interface ChildPiPlanningPortOptions {
   readonly root: string;
@@ -32,6 +33,7 @@ export interface ChildPiPlanningPortOptions {
 }
 
 function planningPrompt(request: PlanningRequest, instruction?: string): string {
+  if (request.stage === "quick") return quickPlanningPrompt(request);
   const contract = planningArtifactContract(request.stage, request.artifactPaths);
   return [
     `Execute ${request.command} as the Spec Kit planning stage.`,
@@ -40,7 +42,7 @@ function planningPrompt(request: PlanningRequest, instruction?: string): string 
     `Required artifacts: ${contract.required.map((name) => request.artifactPaths[name]).join(", ")}`,
     `Only change: ${contract.mustChange.map((name) => request.artifactPaths[name]).join(", ")}`,
     "Spec Kit artifacts are the source of truth. Do not alter architecture outside this stage.",
-    instruction?.trim() ?? "",
+    instruction?.trim() || request.brief?.trim() || "",
   ].filter(Boolean).join("\n");
 }
 
@@ -185,7 +187,11 @@ export class ChildPiPlanningPort implements PlanningAgent {
       };
     }
     try {
-      const contract = planningArtifactContract(receipt.request.stage, receipt.request.artifactPaths);
+      const contract = planningArtifactContract(
+        receipt.request.stage,
+        receipt.request.artifactPaths,
+        { kind: receipt.request.kind },
+      );
       const stageArtifacts = await validatePlanningArtifacts(
         this.options.root,
         contract,
@@ -201,7 +207,7 @@ export class ChildPiPlanningPort implements PlanningAgent {
         }
       }
       let artifacts: AcceptedPlanningArtifacts = stageArtifacts;
-      if (receipt.request.stage === "tasks") {
+      if (receipt.request.stage === "tasks" || receipt.request.stage === "quick") {
         if (this.options.sealer === undefined) throw new Error("task planning requires a planning artifact sealer");
         const sealed = await this.options.sealer.sealPlanningArtifacts(stageArtifacts.hashes);
         artifacts = { ...stageArtifacts, commit: sealed.commit };

@@ -54,11 +54,13 @@ export class PlanningAction implements PlanningAgent {
     try {
       const stageArtifacts = await validatePlanningArtifacts(
         this.options.root,
-        planningArtifactContract(pending.stage, pending.artifactPaths),
+        planningArtifactContract(pending.stage, pending.artifactPaths, {
+          kind: pending.kind,
+        }),
         pending.baseline,
       );
       let artifacts: AcceptedPlanningArtifacts = stageArtifacts;
-      if (pending.stage === "tasks") {
+      if (pending.stage === "tasks" || pending.stage === "quick") {
         if (this.options.sealer === undefined) {
           throw new Error("task planning requires a planning artifact sealer");
         }
@@ -91,7 +93,9 @@ export class PlanningAction implements PlanningAgent {
   ): Promise<PlanningObservation> {
     try {
       const contract = {
-        ...planningArtifactContract(request.stage, request.artifactPaths),
+        ...planningArtifactContract(request.stage, request.artifactPaths, {
+          kind: request.kind,
+        }),
         required: ["spec", "plan", "tasks", "graph"] as const,
         mustChange: [] as const,
         deriveGraph: false,

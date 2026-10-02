@@ -4,6 +4,7 @@ import type {
   PlanningRunReceipt,
 } from "../ports/planning.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
+import { quickPlanningPrompt } from "./quick-planning-prompt.js";
 
 export interface PiSessionInspection {
   readonly idle: boolean;
@@ -86,6 +87,7 @@ const commandsByStage: Readonly<Record<PlanningRequest["stage"], PlanningRequest
   specify: "/speckit.specify",
   plan: "/speckit.plan",
   tasks: "/speckit.tasks",
+  quick: "/harness.quick-plan",
 };
 
 function isPlanningRequest(value: unknown): value is PlanningRequestEntryData {
@@ -144,11 +146,11 @@ export class PiPlanningCorrelation {
         requestEntryId,
       });
       const marker = `<!-- harness-planning:${request.correlationId}:${generation} -->`;
-      const instruction = context.instruction?.trim();
-      await this.pi.sendUserMessage(
-        `${request.command}${instruction ? ` ${instruction}` : ""}\n\n${marker}`,
-        { expandPromptTemplates: true },
-      );
+      const instruction = context.instruction?.trim() || request.brief?.trim() || "";
+      const message = request.stage === "quick"
+        ? `${quickPlanningPrompt(request)}\n\n${marker}`
+        : `${request.command}${instruction ? ` ${instruction}` : ""}\n\n${marker}`;
+      await this.pi.sendUserMessage(message, { expandPromptTemplates: true });
       return receipt;
     } catch (error) {
       await this.profile?.abortBeforeDispatch(

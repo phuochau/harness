@@ -117,6 +117,60 @@ it("binds task completion to integration and semantic-hash evidence", () => {
   ]);
 });
 
+it("maps quick planning output through the planning lifecycle with its seal commit", () => {
+  const lifecycle = createWorkflowLifecycle();
+  const quickIntent = intent("harness.quick-plan", {
+    entityId: "quick_plan",
+    jobId: "quick_plan",
+    stageId: "quick_plan",
+    attempt: 1,
+    worker: "pi",
+    kind: "bugfix",
+    brief: "Fix the crash",
+  });
+  const events = lifecycle.observed(quickIntent, {
+    stage: "quick",
+    correlationId: "F030-quick-1",
+    command: "/harness.quick-plan",
+    sessionFile: "session.jsonl",
+    requestEntryId: "entry-1",
+    hashes: { "specs/f/tasks.md": hash },
+    commit: "c".repeat(40),
+  });
+  expect(events.map((event) => event.eventType)).toEqual([
+    "planning.queued",
+    "planning.completed",
+    "job.done",
+  ]);
+  expect(events[1]?.payload).toEqual({
+    stage: "quick",
+    correlationId: "F030-quick-1",
+    commit: "c".repeat(40),
+    hashes: { "specs/f/tasks.md": hash },
+  });
+});
+
+it("requires a seal commit on quick planning completion", () => {
+  const lifecycle = createWorkflowLifecycle();
+  const quickIntent = intent("harness.quick-plan", {
+    entityId: "quick_plan",
+    jobId: "quick_plan",
+    stageId: "quick_plan",
+    attempt: 1,
+    worker: "pi",
+  });
+  expect(() =>
+    lifecycle.observed(quickIntent, {
+      stage: "quick",
+      correlationId: "F030-quick-1",
+      command: "/harness.quick-plan",
+      sessionFile: "session.jsonl",
+      requestEntryId: "entry-1",
+      hashes: {},
+    }),
+  ).toThrow(/commit/);
+});
+
 it("fails closed for an unregistered custom action lifecycle", () => {
   const lifecycle = createWorkflowLifecycle();
   expect(() =>

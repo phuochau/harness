@@ -17,6 +17,7 @@ function fixture(confirm = true) {
     doctor: async () => ({ ready: true, summary: "ready" }),
     previewRun: async () => ({
       workflowHash: `sha256:${"a".repeat(64)}`,
+      kind: "large-feature",
       commands: { task_verify: ["npm", "test"] },
       workers: ["devin", "codex", "claude"],
       credentialProfiles: ["chatgpt-planning"],
@@ -128,6 +129,32 @@ it("shows the full run plan before enqueueing an approved operator intent", asyn
     idempotencyKey: "command-1",
     payload: { operation: "run", target: "F023" },
   });
+});
+
+it("binds the selected kind and literal brief into the run intent", async () => {
+  const run = fixture(true);
+  await run.service.execute(
+    "harness-run",
+    'F100 --kind bugfix -- fix "quoted" $(literal)',
+    run.ui,
+  );
+  expect(run.commands[0]).toMatchObject({
+    payload: {
+      operation: "run",
+      target: "F100",
+      kind: "bugfix",
+      brief: 'fix "quoted" $(literal)',
+    },
+  });
+});
+
+it("rejects malformed flagged run syntax before any preview", async () => {
+  const run = fixture();
+  await expect(
+    run.service.execute("harness-run", "F100 --kind hotfix -- x", run.ui),
+  ).rejects.toThrow(/hotfix/);
+  expect(run.commands).toHaveLength(0);
+  expect(run.notices).toHaveLength(0);
 });
 
 it("does not enqueue a denied run and emits typed retry/reroute intents", async () => {

@@ -47,6 +47,10 @@ import type { InitializedProductionRun } from "./run.js";
 import { GitWorkerAttemptPort } from "./worker-attempts.js";
 import { resolveRunPaths } from "../../state/paths.js";
 import { readRunManifest } from "../../state/run-manifest.js";
+import {
+  readResolvedRunConfig,
+  type RunSelection,
+} from "../../state/resolved-run-config.js";
 import { GitRepository } from "../../git/repository.js";
 import { initialRunState } from "../../core/state.js";
 import { reduceEvent } from "../../core/reducer.js";
@@ -58,6 +62,7 @@ import { ChildPiPlanningPort, RoutedChildPiPlanningPort } from "../../pi/child-p
 
 export interface ProductionRunSystem extends DurableHarnessSystem {
   readonly graph: () => ValidatedTaskGraph;
+  readonly selection: RunSelection;
 }
 
 export interface ComposeProductionRunOptions {
@@ -183,10 +188,12 @@ function managedPlanningAgent(input: {
 }): PlanningAgent {
   const routes: Record<string, string> = {};
   const ports: Record<string, ChildPiPlanningPort> = {};
-  for (const stage of input.workflow.stages.filter((stage) => stage.uses.startsWith("spec-kit."))) {
+  for (const stage of input.workflow.stages.filter(
+    (stage) => stage.uses.startsWith("spec-kit.") || stage.uses === "harness.quick-plan",
+  )) {
     const profileId = stageProfileIds(stage)[0];
     if (profileId === undefined) throw new Error(`planning stage ${stage.id} has no profile`);
-    routes[stage.uses.slice("spec-kit.".length)] = profileId;
+    routes[stage.uses === "harness.quick-plan" ? "quick" : stage.uses.slice("spec-kit.".length)] = profileId;
     if (ports[profileId] !== undefined) continue;
     const profile = input.workflow.profiles.byId[profileId];
     const managed = input.runtime.managedProfiles[profileId];
@@ -274,6 +281,14 @@ export async function composeProductionRun(
       });
     }
     const records = new DurableRecordStore(initialized.paths.artifacts);
+    let selection: RunSelection = { kind: "large-feature" };
+    try {
+      selection =
+        (await readResolvedRunConfig(initialized.paths.resolvedConfig))
+          .selection ?? selection;
+    } catch {
+      // Runs composed without a resolved config predate task-kind selection.
+    }
     let system: DurableHarnessSystem | undefined;
     const readState = async () => {
       if (system === undefined) throw new Error("production controller is not composed");
@@ -318,7 +333,7 @@ export async function composeProductionRun(
       workerRuntime,
       verificationObservations: new JournalVerificationObservations(journal),
       afterPlanningCompleted: async (output) => {
-        if (output.stage === "tasks") {
+        if (output.stage === "tasks" || output.stage === "quick") {
           currentGraph = await loadRunTaskGraph(git, initialized.manifest);
         }
       },
@@ -379,6 +394,7 @@ export async function composeProductionRun(
         await composed.drain();
       },
       graph: () => currentGraph,
+      selection,
       async dispose() {
         abort.abort();
         await composed.dispose();

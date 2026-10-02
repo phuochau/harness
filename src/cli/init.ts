@@ -33,6 +33,8 @@ const defaultAssets: Readonly<Record<string, string>> = {
   ".harness/workflows/spec-kit-codex.yaml": "workflows/spec-kit-codex.yaml",
   ".harness/workflows/spec-kit-devin.yaml": "workflows/spec-kit-devin.yaml",
   ".harness/workflows/mixed-workers.yaml": "workflows/mixed-workers.yaml",
+  ".harness/workflows/bugfix.yaml": "workflows/bugfix.yaml",
+  ".harness/workflows/small-feature.yaml": "workflows/small-feature.yaml",
   ".pi/settings.json": "pi-settings.json",
 };
 

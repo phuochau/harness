@@ -2,6 +2,11 @@ import { link, lstat, mkdir, open, readFile, unlink } from "node:fs/promises";
 import { dirname, isAbsolute } from "node:path";
 import type { CompiledWorkflow } from "../config/compile.js";
 import { contentRevision } from "../config/hash.js";
+import {
+  RUN_BRIEF_MAX_BYTES,
+  taskKinds,
+  type TaskKind,
+} from "../pi/run-request.js";
 import { canonicalJson } from "../shared/canonical-json.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 
@@ -13,6 +18,11 @@ export interface ProfileCapabilitySnapshotEntry {
 export type ProfileCapabilitySnapshot = Readonly<
   Record<string, ProfileCapabilitySnapshotEntry>
 >;
+
+export interface RunSelection {
+  readonly kind: TaskKind;
+  readonly brief?: string;
+}
 
 export interface ResolvedRunConfig {
   readonly schemaVersion: 1;
@@ -27,6 +37,7 @@ export interface ResolvedRunConfig {
   readonly workflow: CompiledWorkflow;
   readonly commands: Readonly<Record<string, readonly string[]>>;
   readonly profileCapabilities?: ProfileCapabilitySnapshot;
+  readonly selection?: RunSelection;
 }
 
 const digest = /^sha256:[0-9a-f]{64}$/;
@@ -66,6 +77,11 @@ function validateProfileCapabilitySnapshot(value: unknown): void {
   }
 }
 
+function actionInput(stage: unknown): Record<string, unknown> | undefined {
+  if (!record(stage) || !record(stage.action)) return undefined;
+  return record(stage.action.input) ? stage.action.input : undefined;
+}
+
 export function validateResolvedRunConfig(value: unknown): ResolvedRunConfig {
   if (
     !record(value) || value.schemaVersion !== 1 || !record(value.runtime) ||
@@ -73,23 +89,36 @@ export function validateResolvedRunConfig(value: unknown): ResolvedRunConfig {
   ) {
     throw new Error("invalid resolved run configuration");
   }
-  const topLevelKeys = canonicalJson(Object.keys(value).sort());
-  if (
-    topLevelKeys !==
-      canonicalJson(["commands", "runtime", "schemaVersion", "workflow"]) &&
-    topLevelKeys !==
-      canonicalJson([
-        "commands",
-        "profileCapabilities",
-        "runtime",
-        "schemaVersion",
-        "workflow",
-      ])
-  ) {
+  const expectedKeys = [
+    "commands", "runtime", "schemaVersion", "workflow",
+    ...(Object.hasOwn(value, "profileCapabilities") ? ["profileCapabilities"] : []),
+    ...(Object.hasOwn(value, "selection") ? ["selection"] : []),
+  ].sort();
+  if (canonicalJson(Object.keys(value).sort()) !== canonicalJson(expectedKeys)) {
     throw new Error("resolved run configuration has unknown or missing fields");
   }
   if (value.profileCapabilities !== undefined) {
     validateProfileCapabilitySnapshot(value.profileCapabilities);
+  }
+  if (value.selection !== undefined) {
+    const selection = value.selection;
+    const selectionKeys = record(selection)
+      ? canonicalJson(Object.keys(selection).sort())
+      : "";
+    if (
+      !record(selection) ||
+      (selectionKeys !== canonicalJson(["kind"]) &&
+        selectionKeys !== canonicalJson(["brief", "kind"])) ||
+      typeof selection.kind !== "string" ||
+      !(taskKinds as readonly string[]).includes(selection.kind) ||
+      (selection.brief !== undefined &&
+        (typeof selection.brief !== "string" ||
+          selection.brief.length === 0 ||
+          Buffer.byteLength(selection.brief, "utf8") > RUN_BRIEF_MAX_BYTES)) ||
+      (selection.kind !== "large-feature" && selection.brief === undefined)
+    ) {
+      throw new Error("invalid resolved run selection");
+    }
   }
   const runtime = value.runtime;
   if (
@@ -122,6 +151,34 @@ export function validateResolvedRunConfig(value: unknown): ResolvedRunConfig {
   const { revision: _revision, ...revisionInput } = workflow;
   if (contentRevision(revisionInput) !== workflow.revision) {
     throw new Error("resolved workflow revision does not match its content");
+  }
+  const quickStages = workflow.stages.filter(
+    (stage) => record(stage) && stage.uses === "harness.quick-plan",
+  );
+  const selection = value.selection as RunSelection | undefined;
+  if (quickStages.length > 0) {
+    const input = actionInput(quickStages[0]);
+    if (
+      quickStages.length !== 1 || selection === undefined ||
+      selection.kind === "large-feature" ||
+      input?.kind !== selection.kind || input.brief !== selection.brief
+    ) {
+      throw new Error("resolved run selection does not match its workflow");
+    }
+  } else {
+    const specifyStages = workflow.stages.filter(
+      (stage) => record(stage) && stage.uses === "spec-kit.specify",
+    );
+    const brief = specifyStages.length === 1
+      ? actionInput(specifyStages[0])?.brief
+      : undefined;
+    if (
+      (selection !== undefined && selection.kind !== "large-feature") ||
+      brief !== selection?.brief ||
+      (selection?.brief !== undefined && specifyStages.length !== 1)
+    ) {
+      throw new Error("resolved run selection does not match its workflow");
+    }
   }
   for (const [name, argv] of Object.entries(value.commands)) {
     if (!/^[a-z][a-z0-9_]*$/.test(name) || !Array.isArray(argv) || argv.some((item) => typeof item !== "string")) {

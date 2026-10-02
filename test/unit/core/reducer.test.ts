@@ -30,6 +30,54 @@ it("cannot mark a job done without integrated verification evidence", () => {
   ).toThrow(/integration evidence/);
 });
 
+it("completes quick planning only with a seal commit", () => {
+  const revision = `sha256:${"a".repeat(64)}`;
+  const state = initialRunState("F023", revision);
+  const queued = reduceEvent(
+    state,
+    nextHarnessEvent(state, {
+      eventType: "planning.queued",
+      entityId: "planning:quick",
+      idempotencyKey: "planning:queued:quick",
+      payload: {
+        stage: "quick",
+        sessionFile: "session.jsonl",
+        correlationId: "corr-quick",
+        requestEntryId: "entry-1",
+        command: "/harness.quick-plan",
+      },
+    }),
+  );
+  expect(queued.planning).toMatchObject({ status: "pending", stage: "quick" });
+  expect(() =>
+    nextHarnessEvent(queued, {
+      eventType: "planning.completed",
+      entityId: "planning:quick",
+      idempotencyKey: "planning:completed:quick",
+      payload: {
+        stage: "quick",
+        correlationId: "corr-quick",
+        hashes: {},
+      },
+    }),
+  ).toThrow();
+  const completed = reduceEvent(
+    queued,
+    nextHarnessEvent(queued, {
+      eventType: "planning.completed",
+      entityId: "planning:quick",
+      idempotencyKey: "planning:completed:quick",
+      payload: {
+        stage: "quick",
+        correlationId: "corr-quick",
+        commit: "c".repeat(40),
+        hashes: { "specs/f/tasks.md": revision },
+      },
+    }),
+  );
+  expect(completed.planning).toMatchObject({ status: "completed", stage: "quick" });
+});
+
 it("replay is deterministic", () => {
   const events = fixtureSuccessfulTaskEvents();
   expect(replay(events)).toEqual(replay(structuredClone(events)));

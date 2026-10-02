@@ -46,8 +46,11 @@ credential. Setup does not remove or edit global Pi packages, skills, plugins,
 or MCP configuration.
 
 Inside Pi, `/harness-run <feature-or-run-id>` previews effects and requests run
-approval. Operational commands include `harness status`, `graph`, `explain`,
-and `recover`, plus the corresponding `/harness-*` Pi commands.
+approval. Pass `--kind bugfix -- <brief>` or `--kind small-feature -- <brief>`
+to run the one-planning-turn workflow presets; the operator can override the
+suggested kind before approving the preview. Operational commands include
+`harness status`, `graph`, `explain`, and `recover`, plus the corresponding
+`/harness-*` Pi commands.
 
 ## Runtime shape
 

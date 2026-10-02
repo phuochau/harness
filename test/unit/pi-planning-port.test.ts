@@ -1,8 +1,11 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ResolvedProfile } from "../../src/config/profiles.js";
-import { ChildPiPlanningPort } from "../../src/pi/child-planning-port.js";
+import {
+  ChildPiPlanningPort,
+  RoutedChildPiPlanningPort,
+} from "../../src/pi/child-planning-port.js";
 import type { ManagedProfileView } from "../../src/runtime/managed/materialize.js";
 import type {
   PiLaunchSpec,
@@ -10,7 +13,11 @@ import type {
   PiProcessSupervisor,
 } from "../../src/runtime/pi-process/types.js";
 import { sha256 } from "../../src/shared/sha256.js";
-import { artifactPaths, planningProjectFixture } from "../support/planning-fixtures.js";
+import {
+  artifactPaths,
+  planningProjectFixture,
+  quickTaskDocumentFixture,
+} from "../support/planning-fixtures.js";
 
 class FakeSupervisor implements PiProcessSupervisor {
   public launches: PiLaunchSpec[] = [];
@@ -107,6 +114,14 @@ describe("ChildPiPlanningPort", () => {
       try { baseline[path] = sha256(await readFile(join(project.root, path))); } catch {}
     }
     const supervisor = new FakeSupervisor();
+    const sealer = {
+      sealPlanningArtifacts: vi.fn(
+        async (hashes: Readonly<Record<string, string>>) => ({
+          commit: "b".repeat(40),
+          hashes,
+        }),
+      ),
+    };
     const port = new ChildPiPlanningPort({
       root: project.root,
       profile,
@@ -115,8 +130,35 @@ describe("ChildPiPlanningPort", () => {
       piExecutable: "/bin/pi",
       transportExtensionPath: "/managed/transport.ts",
       sessionRoot: join(project.root, ".harness", "planning"),
+      sealer,
     });
-    return { project, baseline, supervisor, port };
+    return { project, baseline, supervisor, port, sealer };
+  }
+
+  function quickRequest(correlationId = "plan-F023-q1") {
+    return {
+      stage: "quick" as const,
+      command: "/harness.quick-plan" as const,
+      correlationId,
+      artifactPaths,
+      baseline: { hashes: {} },
+      kind: "bugfix" as const,
+      brief: "Fix the parser crash on empty input",
+    };
+  }
+
+  async function writeQuickArtifacts(root: string, tasksText = quickTaskDocumentFixture()) {
+    await writeFile(
+      join(root, artifactPaths.spec),
+      "# Specification\n\n- FR-001: Parser crash fixed\n- SC-001: Crash regression verified\n",
+      "utf8",
+    );
+    await writeFile(
+      join(root, artifactPaths.plan),
+      "# Plan\n\nAdd a failing regression test, then fix the parser.\n",
+      "utf8",
+    );
+    await writeFile(join(root, artifactPaths.tasks), tasksText, "utf8");
   }
 
   it("runs a correlated generation through planner-codex and records terminal proof", async () => {
@@ -174,5 +216,94 @@ describe("ChildPiPlanningPort", () => {
     });
     await writeFile(join(run.project.root, artifactPaths.spec), "# Specification\n\n- FR-001: Changed\n- SC-001: Verified\n");
     await expect(run.port.observe(receipt)).resolves.toEqual({ status: "pending" });
+  });
+
+  it("passes an optional specify brief through as literal prompt text", async () => {
+    const run = await fixture();
+    await run.port.enqueue({
+      stage: "specify",
+      command: "/speckit.specify",
+      correlationId: "plan-F023-4",
+      artifactPaths,
+      baseline: { hashes: run.baseline },
+      brief: "A cached key parser",
+    });
+    expect(run.supervisor.launches[0]?.argv.join(" ")).toContain("A cached key parser");
+  });
+
+  it("sends the frozen kind and brief in one quick planning prompt", async () => {
+    const run = await fixture();
+    const request = quickRequest();
+    const receipt = await run.port.enqueue(request);
+    const prompt = run.supervisor.launches[0]?.argv.join(" ") ?? "";
+    expect(prompt).toContain("harness-planning:plan-F023-q1");
+    expect(prompt).toContain("Fix the parser crash on empty input");
+    expect(prompt).toContain("bugfix");
+    expect(prompt).toContain(artifactPaths.spec);
+    expect(prompt).toContain(artifactPaths.tasks);
+    await writeQuickArtifacts(run.project.root);
+    run.supervisor.terminal = true;
+    const observation = await run.port.observe(receipt);
+    expect(observation).toMatchObject({
+      status: "completed",
+      artifacts: { commit: "b".repeat(40) },
+    });
+    expect(run.sealer.sealPlanningArtifacts).toHaveBeenCalledOnce();
+  });
+
+  it("blocks a quick child turn that produces more than one task", async () => {
+    const run = await fixture();
+    const receipt = await run.port.enqueue(quickRequest("plan-F023-q2"));
+    await writeQuickArtifacts(
+      run.project.root,
+      quickTaskDocumentFixture({ extraTask: true }),
+    );
+    run.supervisor.terminal = true;
+    await expect(run.port.observe(receipt)).resolves.toMatchObject({
+      status: "blocked",
+      reason: expect.stringMatching(/exactly one task/),
+    });
+    expect(run.sealer.sealPlanningArtifacts).not.toHaveBeenCalled();
+  });
+});
+
+describe("RoutedChildPiPlanningPort", () => {
+  it("routes the quick stage to the planning profile", async () => {
+    const prepare = vi.fn(async () => ({ correlationId: "c", generation: 1 }));
+    const enqueue = vi.fn(async () => ({ correlationId: "c", generation: 1 }));
+    const observe = vi.fn(async () => ({ status: "pending" as const }));
+    const port = { prepare, enqueue, observe } as unknown as ChildPiPlanningPort;
+    const routed = new RoutedChildPiPlanningPort(
+      { quick: "planner-codex", specify: "planner-codex" },
+      { "planner-codex": port },
+    );
+    const request = {
+      stage: "quick" as const,
+      command: "/harness.quick-plan" as const,
+      correlationId: "plan-q",
+      artifactPaths,
+      baseline: { hashes: {} },
+      kind: "small-feature" as const,
+      brief: "Add a flag",
+    };
+    await routed.prepare(request);
+    expect(prepare).toHaveBeenCalledWith(request, undefined);
+    await routed.enqueue(request);
+    expect(enqueue).toHaveBeenCalledWith(request, undefined);
+  });
+
+  it("rejects a stage with no routed planning profile", () => {
+    const routed = new RoutedChildPiPlanningPort({}, {});
+    expect(() =>
+      routed.enqueue({
+        stage: "quick",
+        command: "/harness.quick-plan",
+        correlationId: "plan-q",
+        artifactPaths,
+        baseline: { hashes: {} },
+        kind: "bugfix",
+        brief: "x",
+      }),
+    ).toThrow(/no managed Pi planning profile/);
   });
 });

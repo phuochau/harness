@@ -17,6 +17,7 @@ import {
   artifactPaths,
   exactTaskDocumentFixture,
   planningProjectFixture,
+  quickTaskDocumentFixture,
 } from "../../support/planning-fixtures.js";
 
 class FakePiPlanningPort implements PiPlanningPort {
@@ -179,12 +180,19 @@ describe("correlated Pi planning", () => {
           ? "/speckit.specify"
           : stage === "plan"
             ? "/speckit.plan"
-            : "/speckit.tasks",
+            : stage === "tasks"
+              ? "/speckit.tasks"
+              : "/harness.quick-plan",
       correlationId: `planning-${stage}`,
       artifactPaths,
       baseline: { hashes },
+      ...(stage === "quick"
+        ? { kind: "bugfix" as const, brief: "Fix the parser crash on empty input" }
+        : {}),
     };
-    const changeArtifacts = async () => {
+    const changeArtifacts = async (
+      tasksText = quickTaskDocumentFixture(),
+    ) => {
       if (stage === "specify") {
         await writeFile(
           join(project.root, artifactPaths.spec),
@@ -197,6 +205,18 @@ describe("correlated Pi planning", () => {
           "# Plan\n\nUse a changed deterministic parser.\n",
           "utf8",
         );
+      } else if (stage === "quick") {
+        await writeFile(
+          join(project.root, artifactPaths.spec),
+          "# Specification\n\n- FR-001: Parser crash fixed\n- SC-001: Crash regression verified\n",
+          "utf8",
+        );
+        await writeFile(
+          join(project.root, artifactPaths.plan),
+          "# Plan\n\nAdd a failing regression test, then fix the parser.\n",
+          "utf8",
+        );
+        await writeFile(join(project.root, artifactPaths.tasks), tasksText, "utf8");
       } else {
         await writeFile(
           join(project.root, artifactPaths.tasks),
@@ -267,6 +287,81 @@ describe("correlated Pi planning", () => {
       status: "blocked",
       reason: expect.stringMatching(/no safe terminal boundary/),
       evidence: ["later user entry exists"],
+    });
+  });
+
+  it("seals the complete quick artifact set from a single correlated turn", async () => {
+    const run = await fixture("quick");
+    const action = run.action();
+    const receipt = await action.execute(run.request);
+    await run.changeArtifacts();
+    run.pi.complete(receipt);
+    const observation = await action.observe(receipt);
+    expect(observation).toMatchObject({
+      status: "completed",
+      artifacts: {
+        commit: expect.any(String),
+        graph: expect.objectContaining({ schema: "harness/task-graph/v1" }),
+      },
+    });
+    expect(run.sealCalls).toHaveLength(1);
+    expect(run.pi.sentMessages[0]).toContain("harness-planning:planning-quick");
+    expect(run.pi.sentMessages[0]).toContain("Fix the parser crash on empty input");
+  });
+
+  it("blocks a quick turn that leaves a required artifact unchanged", async () => {
+    const run = await fixture("quick");
+    const action = run.action();
+    const receipt = await action.execute(run.request);
+    await writeFile(
+      join(run.root, artifactPaths.spec),
+      "# Specification\n\n- FR-001: Parser crash fixed\n- SC-001: Crash regression verified\n",
+      "utf8",
+    );
+    run.pi.complete(receipt);
+    await expect(action.observe(receipt)).resolves.toMatchObject({
+      status: "blocked",
+      reason: expect.stringMatching(/did not change/),
+    });
+  });
+
+  it("blocks a quick turn that produces more than one canonical task", async () => {
+    const run = await fixture("quick");
+    const action = run.action();
+    const receipt = await action.execute(run.request);
+    await run.changeArtifacts(quickTaskDocumentFixture({ extraTask: true }));
+    run.pi.complete(receipt);
+    await expect(action.observe(receipt)).resolves.toMatchObject({
+      status: "blocked",
+      reason: expect.stringMatching(/exactly one task/),
+    });
+  });
+
+  it("blocks a quick task missing the requested kind label", async () => {
+    const run = await fixture("quick");
+    const action = run.action();
+    const receipt = await action.execute(run.request);
+    await run.changeArtifacts(quickTaskDocumentFixture({ kind: "small-feature" }));
+    run.pi.complete(receipt);
+    await expect(action.observe(receipt)).resolves.toMatchObject({
+      status: "blocked",
+      reason: expect.stringMatching(/bugfix/),
+    });
+  });
+
+  it.each([
+    { options: { parallel: true }, reason: /non-parallel|parallel/i },
+    { options: { acceptanceRefs: [] }, reason: /acceptance reference/ },
+    { options: { ownedPaths: [] }, reason: /owned path/i },
+  ])("blocks a quick task violating the contract %o", async ({ options, reason }) => {
+    const run = await fixture("quick");
+    const action = run.action();
+    const receipt = await action.execute(run.request);
+    await run.changeArtifacts(quickTaskDocumentFixture(options));
+    run.pi.complete(receipt);
+    await expect(action.observe(receipt)).resolves.toMatchObject({
+      status: "blocked",
+      reason,
     });
   });
 

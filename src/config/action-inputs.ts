@@ -14,7 +14,20 @@ export const BuiltInActionInputSchemas = {
     { additionalProperties: false },
   ),
   "human.approval": EmptyInputSchema,
-  "spec-kit.specify": EmptyInputSchema,
+  "harness.quick-plan": Type.Object(
+    {
+      kind: Type.Union([
+        Type.Literal("bugfix"),
+        Type.Literal("small-feature"),
+      ]),
+      brief: Type.Optional(Type.String({ minLength: 1 })),
+    },
+    { additionalProperties: false },
+  ),
+  "spec-kit.specify": Type.Object(
+    { brief: Type.Optional(Type.String({ minLength: 1 })) },
+    { additionalProperties: false },
+  ),
   "spec-kit.plan": EmptyInputSchema,
   "spec-kit.tasks": EmptyInputSchema,
   "worker.execute": EmptyInputSchema,

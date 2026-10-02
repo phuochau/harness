@@ -85,6 +85,55 @@ The packaged default also contains `post_integrate_verify` and
 `record_task_done`; inspect `src/defaults/workflow.yaml` for the canonical full
 file.
 
+## Task-kind selection
+
+`/harness-run <id>` compiles `.harness/workflow.yaml` and runs the full
+multi-agent Spec Kit pipeline. Three task kinds select among fixed,
+project-owned workflows:
+
+```text
+/harness-run <id> --kind bugfix -- <literal brief>
+/harness-run <id> --kind small-feature -- <literal brief>
+/harness-run <id> --kind large-feature [-- <brief>]
+```
+
+An agent may suggest a kind, but the suggestion is advisory only: the operator
+explicitly approves the shown workflow, and may rerun the command with a
+different `--kind` before approving. Unknown kinds and external workflow paths
+are rejected; there is no agent-generated DAG. This release does not run an
+automatic LLM classifier — ambiguous or unflagged work defaults to
+`large-feature`.
+
+- `bugfix` and `small-feature` compile `.harness/workflows/bugfix.yaml` or
+  `small-feature.yaml` (installed by `harness init`). They open with a single
+  durable `harness.quick-plan` stage that produces `spec.md`, `plan.md`, and
+  `tasks.md` in one correlated planning turn; the controller derives,
+  validates, and seals `task-graph.json`. The task list must contain exactly
+  one non-parallel task with the matching kind label, at least one owned path,
+  and at least one acceptance reference. Every downstream gate is unchanged:
+  independent review, per-task verification, integration, post-integration
+  verification, task finalization, final verification and review, push, and
+  PR. There is no separate plan-approval stage because the operator approval
+  itself is the gate.
+- `large-feature` keeps `.harness/workflow.yaml`, including `approve_plan`.
+  An explicit `--kind large-feature -- <brief>` run injects the brief into
+  `spec-kit.specify`; the unflagged form leaves the workflow untouched.
+
+Quick planning currently emits v1 task metadata, so its presets use
+`runner.prefer`. A quick preset with `runner.by_complexity` is rejected during
+preview because tiered routing requires a v2 task complexity assessment.
+
+The text after `--` is literal data. It is never executed, resolved as a path,
+or interpolated into the workflow — the harness injects it into the selected
+workflow's planning stage after compilation.
+
+The preview binds the kind, brief, selected workflow revision, commands,
+profiles, permissions, and effect kinds into one hash. If the kind, brief, or
+preset file changes before approval, the stale hash is rejected. Once approved,
+the selected workflow and brief are frozen in the run's resolved configuration;
+recovery replays that frozen selection even if the project presets change
+afterward.
+
 ## Change the workflow
 
 Edit `runner.prefer` to change routing without changing orchestration code. For

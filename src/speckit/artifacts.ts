@@ -9,7 +9,8 @@ import { sealTaskGraph } from "./seal-task-graph.js";
 import { semanticHash } from "./semantic-hash.js";
 import { parseSpecKitTasks } from "./task-records.js";
 
-export type PlanningStage = "specify" | "plan" | "tasks";
+export type PlanningStage = "specify" | "plan" | "tasks" | "quick";
+export type QuickTaskKind = "bugfix" | "small-feature";
 export type ArtifactName = "spec" | "plan" | "tasks" | "graph";
 
 export interface ArtifactPaths {
@@ -26,6 +27,7 @@ export interface PlanningArtifactContract {
   readonly mustChange: readonly ArtifactName[];
   readonly deriveGraph: boolean;
   readonly validateGraph: boolean;
+  readonly singleTaskKind?: QuickTaskKind;
 }
 
 export interface ArtifactBaseline {
@@ -49,7 +51,22 @@ export class PlanningArtifactError extends Error {}
 export function planningArtifactContract(
   stage: PlanningStage,
   paths: ArtifactPaths,
+  options: { readonly kind?: QuickTaskKind | undefined } = {},
 ): PlanningArtifactContract {
+  if (stage === "quick") {
+    if (options.kind === undefined) {
+      throw new PlanningArtifactError("quick planning requires a task kind");
+    }
+    return {
+      stage,
+      paths,
+      required: ["spec", "plan", "tasks"],
+      mustChange: ["spec", "plan", "tasks"],
+      deriveGraph: true,
+      validateGraph: true,
+      singleTaskKind: options.kind,
+    };
+  }
   if (stage === "specify") {
     return {
       stage,
@@ -175,6 +192,32 @@ export async function validatePlanningArtifacts(
     } catch (error) {
       throw new PlanningArtifactError(
         `derived graph is invalid: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  if (contract.singleTaskKind !== undefined) {
+    if (graph === undefined || graph.tasks.length !== 1) {
+      throw new PlanningArtifactError(
+        "quick planning must produce exactly one task",
+      );
+    }
+    const task = graph.tasks[0]!;
+    if (!task.labels.includes(contract.singleTaskKind)) {
+      throw new PlanningArtifactError(
+        `quick task must carry the ${contract.singleTaskKind} label`,
+      );
+    }
+    if (task.parallelEligible) {
+      throw new PlanningArtifactError("quick task must be non-parallel");
+    }
+    if (task.ownedPaths.length === 0) {
+      throw new PlanningArtifactError(
+        "quick task must declare at least one owned path",
+      );
+    }
+    if (task.acceptanceRefs.length === 0) {
+      throw new PlanningArtifactError(
+        "quick task must reference at least one acceptance reference",
       );
     }
   }

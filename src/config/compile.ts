@@ -44,7 +44,7 @@ export interface CompiledWorkflow {
 }
 
 function expectedRole(stage: StageDocument): "planning" | "implementation" | "review" | undefined {
-  if (stage.uses.startsWith("spec-kit.")) return "planning";
+  if (stage.uses.startsWith("spec-kit.") || stage.uses === "harness.quick-plan") return "planning";
   if (stage.uses === "worker.execute") return "implementation";
   if (stage.uses === "worker.review") return "review";
   return undefined;
@@ -216,5 +216,33 @@ export function compileWorkflow(input: CompileInput): CompiledWorkflow {
     profiles,
     resolvedProfilesHash: profiles.hash,
   };
+  return deepFreeze({ ...normalized, revision: contentRevision(normalized) });
+}
+
+export function injectCompiledActionInput(
+  workflow: CompiledWorkflow,
+  uses: string,
+  additions: Readonly<Record<string, unknown>>,
+): CompiledWorkflow {
+  if (!workflow.stages.some((stage) => stage.uses === uses)) {
+    throw new Error(`workflow has no stage using ${uses}`);
+  }
+  const stages = workflow.stages.map((stage) =>
+    stage.uses === uses
+      ? {
+          ...stage,
+          action: {
+            ...stage.action,
+            input: validateActionInput(
+              stage.uses,
+              { ...stage.action.input, ...additions },
+              BuiltInActionInputSchemas,
+            ),
+          },
+        }
+      : stage,
+  );
+  const { revision: _revision, ...rest } = workflow;
+  const normalized = { ...rest, stages };
   return deepFreeze({ ...normalized, revision: contentRevision(normalized) });
 }
