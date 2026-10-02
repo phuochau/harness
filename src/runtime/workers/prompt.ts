@@ -14,6 +14,10 @@ export function buildWorkerPrompt(
   const sections = [
     "# Harness worker assignment",
     "",
+    ...(assignment.taskObjective === undefined ? [] : ["Objective:", assignment.taskObjective, ""]),
+    ...(assignment.acceptanceCriteria === undefined ? [] : [
+      ...lines("Acceptance criteria:", assignment.acceptanceCriteria), "",
+    ]),
     `Assignment hash: ${assignment.assignmentHash}`,
     `Run: ${assignment.runId}`,
     `Job: ${assignment.jobId}`,

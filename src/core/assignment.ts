@@ -40,6 +40,8 @@ export interface AssignmentInput {
   readonly requiredDisciplines: readonly string[];
   readonly verificationCommands: readonly (readonly string[])[];
   readonly planningArtifacts: readonly string[];
+  readonly taskObjective?: string;
+  readonly acceptanceCriteria?: readonly string[];
   readonly handoffReport?: HandoffReference;
   readonly worktree: WorktreeBinding;
 }

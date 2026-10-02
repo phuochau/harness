@@ -6,6 +6,7 @@ import { validateEvidence } from "../../core/evidence.js";
 import type { WorkerKind } from "../../core/routing.js";
 import type { RunState } from "../../core/state.js";
 import type { ValidatedTaskGraph } from "../../core/task-graph.js";
+import type { TaskNode } from "../../contracts/task-graph.js";
 import type { WorkerResult } from "../../contracts/worker-result.js";
 import { taskBranchName } from "../../git/branches.js";
 import type { GitRepository } from "../../git/repository.js";
@@ -23,6 +24,7 @@ import type {
   ProductionWorkerKind,
 } from "./worker-action.js";
 import { sha256 } from "../../shared/sha256.js";
+import { acceptanceCriteriaForTask } from "../../speckit/acceptance-criteria.js";
 import type { ResolvedProfiles } from "../../config/profiles.js";
 
 export interface GitWorkerAttemptOptions {
@@ -133,6 +135,14 @@ function disciplines(role: "implementation" | "review"): readonly string[] {
     : ["requesting-code-review", "verification-before-completion"];
 }
 
+async function taskIntent(root: string, specPath: string, task: TaskNode) {
+  const spec = await readFile(join(root, specPath), "utf8");
+  return {
+    taskObjective: task.description,
+    acceptanceCriteria: acceptanceCriteriaForTask(spec, task.acceptanceRefs),
+  };
+}
+
 async function validateEvidenceArtifacts(
   assignment: WorkerAssignment,
   result: WorkerResult,
@@ -220,6 +230,7 @@ export class GitWorkerAttemptPort implements ProductionWorkerAttemptPort {
           requiredDisciplines: disciplines(role),
           verificationCommands: this.options.taskVerification,
           planningArtifacts: artifacts,
+          ...await taskIntent(binding.path, this.options.manifest.artifactPaths.spec, task),
           ...(handoffReport === undefined ? {} : { handoffReport }),
           worktree: {
             role: "implementation",
@@ -263,6 +274,7 @@ export class GitWorkerAttemptPort implements ProductionWorkerAttemptPort {
           requiredDisciplines: disciplines(role),
           verificationCommands: [],
           planningArtifacts: artifacts,
+          ...await taskIntent(binding.path, this.options.manifest.artifactPaths.spec, task),
           worktree: {
             role: "review",
             path: binding.path,

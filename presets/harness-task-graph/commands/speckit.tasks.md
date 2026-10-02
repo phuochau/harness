@@ -15,7 +15,12 @@ Render every phase heading as `## Phase N: <name>` and every task as exactly:
 | --- | --- |
 | `mechanical` | A complete prescription, a small isolated change, usually one or two files, little integration judgment. |
 | `standard` | Coordination across files, established patterns to adapt, ordinary debugging or integration decisions. |
-| `complex` | Architecture, ambiguous design judgment, broad codebase understanding, or subtle high-risk behavior. |
+| `complex` | Architecture, broad codebase understanding, or subtle high-risk behavior after the required behavior and design decisions are clear. |
+
+Complexity measures implementation difficulty, not requirement clarity. Do not
+classify an unresolved product or architecture decision as `complex` to route it
+to a stronger implementer. Resolve the decision during planning before emitting
+the task.
 
 `why` is a canonical JSON string naming task-specific evidence for the
 assessment — a generic statement such as "this is complex" does not satisfy

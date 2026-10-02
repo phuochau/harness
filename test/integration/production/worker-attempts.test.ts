@@ -10,6 +10,7 @@ import type { RunManifest } from "../../../src/state/run-manifest.js";
 import { createTempGitRepository } from "../../support/git-fixtures.js";
 import { sha256 } from "../../../src/shared/sha256.js";
 import { fixtureResolvedProfiles } from "../../support/factories.js";
+import { execa } from "execa";
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -18,12 +19,18 @@ afterEach(async () => {
 
 it("binds an implementation attempt to Git, validates it, and persists its sealed change", async () => {
   const repo = await createTempGitRepository("production worker attempts");
+  await mkdir(join(repo.path, "specs/feature"), { recursive: true });
+  await writeFile(join(repo.path, "specs/feature/spec.md"),
+    "# Specification\n\n- FR-001: Return a parsed value for valid input.\n");
+  await execa("git", ["add", "specs/feature/spec.md"], { cwd: repo.path });
+  await execa("git", ["commit", "-m", "test: add planning fixture"], { cwd: repo.path });
+  const planningCommit = (await execa("git", ["rev-parse", "HEAD"], { cwd: repo.path })).stdout;
   const worktreeRoot = join(repo.path, "..", `${repo.path.split("/").at(-1)}-attempts`);
   cleanup.push(async () => {
     await rm(worktreeRoot, { recursive: true, force: true });
     await repo.cleanup();
   });
-  const run = await repo.repository.ensureRunBranch("F100", repo.initialCommit);
+  const run = await repo.repository.ensureRunBranch("F100", planningCommit);
   const worktrees = await WorktreeLifecycle.open({
     repository: repo.repository,
     workspaceRoot: worktreeRoot,
@@ -54,7 +61,7 @@ it("binds an implementation attempt to Git, validates it, and persists its seale
     workflowRevision: `sha256:${"2".repeat(64)}`,
     repositoryRoot: repo.path,
     repositoryIdentity: `sha256:${"3".repeat(64)}`,
-    frozenBase: repo.initialCommit,
+    frozenBase: planningCommit,
     runRef: `refs/heads/${run.name}`,
     planningRef: "refs/heads/harness/plan-F100",
     artifactPaths: {
@@ -94,9 +101,12 @@ it("binds an implementation attempt to Git, validates it, and persists its seale
     },
   };
   const prepared = await attempts.prepare(intent);
+  expect(prepared.assignment).toMatchObject({
+    taskObjective: "Implement feature",
+    acceptanceCriteria: ["FR-001: Return a parsed value for valid input."],
+  });
   await mkdir(join(prepared.binding.path, "src"), { recursive: true });
   await writeFile(join(prepared.binding.path, "src/feature.ts"), "export const feature = true;\n");
-  const { execa } = await import("execa");
   await execa("git", ["add", "src/feature.ts"], { cwd: prepared.binding.path });
   await execa("git", ["commit", "-m", "feat: implement fixture"], { cwd: prepared.binding.path });
   const head = (await execa("git", ["rev-parse", "HEAD"], { cwd: prepared.binding.path })).stdout;
@@ -123,7 +133,7 @@ it("binds an implementation attempt to Git, validates it, and persists its seale
 
   await expect(records.get("sealed-change", "implement:T001")).resolves.toMatchObject({
     assignmentHash: prepared.assignment.assignmentHash,
-    baseCommit: repo.initialCommit,
+    baseCommit: planningCommit,
     headCommit: head,
     changedPaths: ["src/feature.ts"],
   });
