@@ -39,24 +39,24 @@ function fixture(confirm = true) {
 
 it("exposes every semantic harness command", () => {
   expect(harnessCommandNames).toEqual([
-    "harness-run",
-    "harness-status",
-    "harness-graph",
-    "harness-task",
-    "harness-logs",
-    "harness-retry",
-    "harness-reroute",
-    "harness-cancel",
-    "harness-pause",
-    "harness-resume",
-    "harness-doctor",
+    "harness:run",
+    "harness:status",
+    "harness:graph",
+    "harness:task",
+    "harness:logs",
+    "harness:retry",
+    "harness:reroute",
+    "harness:cancel",
+    "harness:pause",
+    "harness:resume",
+    "harness:doctor",
   ]);
 });
 
 it("keeps status commands read-only and free of model calls", async () => {
   const run = fixture();
-  await run.service.execute("harness-status", "", run.ui);
-  await run.service.execute("harness-task", "T001", run.ui);
+  await run.service.execute("harness:status", "", run.ui);
+  await run.service.execute("harness:task", "T001", run.ui);
   expect(run.commands).toHaveLength(0);
   expect(run.notices.join("\n")).toContain("implement:T001");
 });
@@ -107,7 +107,7 @@ it("includes implementation lineage and routing detail for a task", async () => 
     enqueue: async () => {},
   };
   const service = new HarnessCommandService(backend);
-  await service.execute("harness-task", "T001", {
+  await service.execute("harness:task", "T001", {
     notify: (message) => notices.push(message),
     confirm: async () => true,
   });
@@ -120,7 +120,7 @@ it("includes implementation lineage and routing detail for a task", async () => 
 
 it("shows the full run plan before enqueueing an approved operator intent", async () => {
   const run = fixture(true);
-  await run.service.execute("harness-run", "F023", run.ui);
+  await run.service.execute("harness:run", "F023", run.ui);
   expect(run.notices[0]).toContain("chatgpt-planning");
   expect(run.notices[0]).toContain("pull-request");
   expect(run.commands[0]).toMatchObject({
@@ -134,7 +134,7 @@ it("shows the full run plan before enqueueing an approved operator intent", asyn
 it("binds the selected kind and literal brief into the run intent", async () => {
   const run = fixture(true);
   await run.service.execute(
-    "harness-run",
+    "harness:run",
     'F100 --kind bugfix -- fix "quoted" $(literal)',
     run.ui,
   );
@@ -151,7 +151,7 @@ it("binds the selected kind and literal brief into the run intent", async () => 
 it("rejects malformed flagged run syntax before any preview", async () => {
   const run = fixture();
   await expect(
-    run.service.execute("harness-run", "F100 --kind hotfix -- x", run.ui),
+    run.service.execute("harness:run", "F100 --kind hotfix -- x", run.ui),
   ).rejects.toThrow(/hotfix/);
   expect(run.commands).toHaveLength(0);
   expect(run.notices).toHaveLength(0);
@@ -159,12 +159,12 @@ it("rejects malformed flagged run syntax before any preview", async () => {
 
 it("does not enqueue a denied run and emits typed retry/reroute intents", async () => {
   const denied = fixture(false);
-  await denied.service.execute("harness-run", "F023", denied.ui);
+  await denied.service.execute("harness:run", "F023", denied.ui);
   expect(denied.commands).toHaveLength(0);
 
   const run = fixture();
-  await run.service.execute("harness-retry", "T001", run.ui);
-  await run.service.execute("harness-reroute", "T001 implementer-strong", run.ui);
+  await run.service.execute("harness:retry", "T001", run.ui);
+  await run.service.execute("harness:reroute", "T001 implementer-strong", run.ui);
   expect(run.commands.map((command) => command.payload)).toEqual([
     { operation: "retry", target: "T001", arguments: {} },
     { operation: "reroute", target: "T001", arguments: { worker: "implementer-strong" } },

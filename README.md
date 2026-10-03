@@ -45,12 +45,16 @@ login, add `--reuse-local`; simply opening the extension never copies a
 credential. Setup does not remove or edit global Pi packages, skills, plugins,
 or MCP configuration.
 
-Inside Pi, `/harness-run <feature-or-run-id>` previews effects and requests run
-approval. Pass `--kind bugfix -- <brief>` or `--kind small-feature -- <brief>`
-to run the one-planning-turn workflow presets; the operator can override the
-suggested kind before approving the preview. Operational commands include
-`harness status`, `graph`, `explain`, and `recover`, plus the corresponding
-`/harness-*` Pi commands.
+Inside Pi, describe the work with `/harness:req <description>`. The current Pi
+model decides whether to continue the conversation, suggest one of the three
+project-owned workflows, or handle an operational request. A suggested run
+shows its kind, brief, workers, checks, and effects before requiring approval.
+If classification is unavailable or uncertain, Pi continues the conversation.
+Operators can choose a workflow directly with
+`/harness:run --kind bugfix -- <brief>` (or `small-feature` / `large-feature`).
+Operational Pi commands use `/harness:status`, `/harness:graph`,
+`/harness:task`, `/harness:logs`, and `/harness:doctor`; CLI commands remain
+`harness status`, `graph`, `explain`, and `recover`.
 
 ## Runtime shape
 

@@ -16,17 +16,17 @@ import { canonicalJson } from "../shared/canonical-json.js";
 import { sha256 } from "../shared/sha256.js";
 
 export const harnessCommandNames = [
-  "harness-run",
-  "harness-status",
-  "harness-graph",
-  "harness-task",
-  "harness-logs",
-  "harness-retry",
-  "harness-reroute",
-  "harness-cancel",
-  "harness-pause",
-  "harness-resume",
-  "harness-doctor",
+  "harness:run",
+  "harness:status",
+  "harness:graph",
+  "harness:task",
+  "harness:logs",
+  "harness:retry",
+  "harness:reroute",
+  "harness:cancel",
+  "harness:pause",
+  "harness:resume",
+  "harness:doctor",
 ] as const;
 
 export type HarnessCommandName = (typeof harnessCommandNames)[number];
@@ -84,29 +84,29 @@ export class HarnessCommandService {
     args: string,
     ui: HarnessCommandUi,
   ): Promise<void> {
-    if (command === "harness-status") {
+    if (command === "harness:status") {
       ui.notify(renderStatus(await this.backend.snapshot()), "info");
       return;
     }
-    if (command === "harness-graph") {
+    if (command === "harness:graph") {
       ui.notify(renderGraph(await this.backend.graph()), "info");
       return;
     }
-    if (command === "harness-task") {
+    if (command === "harness:task") {
       const target = requiredTarget(args, "task");
       ui.notify(renderTask(await this.backend.snapshot(), target), "info");
       return;
     }
-    if (command === "harness-logs") {
+    if (command === "harness:logs") {
       ui.notify((await this.backend.logs(args.trim() || undefined)).join("\n"), "info");
       return;
     }
-    if (command === "harness-doctor") {
+    if (command === "harness:doctor") {
       const result = await this.backend.doctor();
       ui.notify(result.summary, result.ready ? "info" : "warning");
       return;
     }
-    if (command === "harness-run") {
+    if (command === "harness:run") {
       const request = parseRunRequest(args);
       const preview = await this.backend.previewRun(request);
       ui.notify(renderRunPreview(preview), "info");
@@ -120,9 +120,9 @@ export class HarnessCommandService {
       });
       return;
     }
-    if (command === "harness-pause" || command === "harness-resume") {
+    if (command === "harness:pause" || command === "harness:resume") {
       await this.intent({
-        operation: command.slice("harness-".length),
+        operation: command.slice("harness:".length),
         target: "run",
         arguments: {},
       });
@@ -130,7 +130,7 @@ export class HarnessCommandService {
     }
     const parts = args.trim().split(/\s+/);
     const target = requiredTarget(args, command);
-    if (command === "harness-reroute") {
+    if (command === "harness:reroute") {
       const worker = parts[1];
       if (!worker || !/^[a-z][a-z0-9-]*$/.test(worker) || parts.length !== 2) {
         throw new Error("reroute requires TNNN and a declared profile ID");
@@ -139,7 +139,7 @@ export class HarnessCommandService {
       return;
     }
     await this.intent({
-      operation: command.slice("harness-".length),
+      operation: command.slice("harness:".length),
       target,
       arguments: {},
     });

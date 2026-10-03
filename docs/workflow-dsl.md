@@ -87,22 +87,24 @@ file.
 
 ## Task-kind selection
 
-`/harness-run <id>` compiles `.harness/workflow.yaml` and runs the full
-multi-agent Spec Kit pipeline. Three task kinds select among fixed,
-project-owned workflows:
+`/harness:req <description>` is the default entrypoint. The active Pi model
+classifies the description as a discussion, a proposed run, or a known
+operational request. Discussion continues in the ordinary Pi conversation.
+Proposed runs show their selected kind and full effects for human approval
+before any scheduling. An unavailable or invalid classification continues the
+conversation. Operators may select a fixed, project-owned workflow directly:
 
 ```text
-/harness-run <id> --kind bugfix -- <literal brief>
-/harness-run <id> --kind small-feature -- <literal brief>
-/harness-run <id> --kind large-feature [-- <brief>]
+/harness:run [<id>] --kind bugfix -- <literal brief>
+/harness:run [<id>] --kind small-feature -- <literal brief>
+/harness:run [<id>] --kind large-feature [-- <brief>]
 ```
 
-An agent may suggest a kind, but the suggestion is advisory only: the operator
-explicitly approves the shown workflow, and may rerun the command with a
-different `--kind` before approving. Unknown kinds and external workflow paths
-are rejected; there is no agent-generated DAG. This release does not run an
-automatic LLM classifier — ambiguous or unflagged work defaults to
-`large-feature`.
+The model's suggestion is advisory only: the operator explicitly approves the
+shown workflow, and may choose a different `--kind` before approving. Unknown
+kinds and external workflow paths are rejected; there is no model-generated DAG.
+The direct `/harness:run` command without a kind retains the full
+`large-feature` workflow.
 
 - `bugfix` and `small-feature` compile `.harness/workflows/bugfix.yaml` or
   `small-feature.yaml` (installed by `harness init`). They open with a single
@@ -220,11 +222,11 @@ selected tier/profile, `fixRound`, pending findings, and any routing block under
 `harness explain <run-id> T001` returns the journaled route, review, fix
 dispatch, and block events for that task, and `harness graph <run-id>`
 annotates each job node with its worker, accepted route, and blocker. In Pi,
-`/harness-task T001` shows the same routing and lineage detail.
+`/harness:task T001` shows the same routing and lineage detail.
 
 ### Operator reroute
 
-An operator may reroute a blocked or failed task (`/harness-reroute` in Pi, or
+An operator may reroute a blocked or failed task (`/harness:reroute` in Pi, or
 the `reroute` operator intent) to any profile declared by the implementation
 stage — including a lower tier. A reroute is journaled with cause
 `operator_reroute`, never resets `fixRound`, and a profile change always starts

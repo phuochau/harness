@@ -86,3 +86,8 @@ Receipts are diagnostic history, not current-health proof.
 There is no remote-control service in this release. `start` runs the local Pi
 orchestrator; durable child sessions and repository state are recovered with
 `harness recover` after interruption.
+
+Inside Pi, use `/harness:req <description>` for a new request. Direct controls
+use `/harness:run`, `/harness:status`, `/harness:graph`, `/harness:task`,
+`/harness:logs`, `/harness:retry`, `/harness:reroute`, `/harness:cancel`,
+`/harness:pause`, `/harness:resume`, and `/harness:doctor`.

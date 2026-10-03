@@ -38,19 +38,21 @@ it("loads the source extension through Pi's real resource loader", async () => {
   expect(result.errors).toEqual([]);
   expect(result.extensions).toHaveLength(1);
   const extension = result.extensions[0]!;
-  expect([...extension.commands.keys()].filter((name) => name.startsWith("harness-"))).toEqual([
-    "harness-run",
-    "harness-status",
-    "harness-graph",
-    "harness-task",
-    "harness-logs",
-    "harness-retry",
-    "harness-reroute",
-    "harness-cancel",
-    "harness-pause",
-    "harness-resume",
-    "harness-doctor",
+  expect([...extension.commands.keys()].filter((name) => name.startsWith("harness:"))).toEqual([
+    "harness:req",
+    "harness:run",
+    "harness:status",
+    "harness:graph",
+    "harness:task",
+    "harness:logs",
+    "harness:retry",
+    "harness:reroute",
+    "harness:cancel",
+    "harness:pause",
+    "harness:resume",
+    "harness:doctor",
   ]);
+  expect([...extension.commands.keys()].filter((name) => name.startsWith("harness-"))).toEqual([]);
   expect(extension.handlers.get("session_start")).toHaveLength(1);
   expect(extension.handlers.get("session_shutdown")).toHaveLength(1);
 }, 15_000);

@@ -8,21 +8,42 @@ import {
   type HarnessCommandName,
 } from "./commands.js";
 import { PiPlanningEventStateMachine } from "./events.js";
+import { classifyPiRequest } from "./request-classifier.js";
+import { routeHarnessRequest } from "./request-router.js";
 
 export function registerHarnessCommands(
   pi: ExtensionAPI,
   dependencies: LazyExtensionDependencies,
 ): void {
+  pi.registerCommand("harness:req", {
+    description: "Describe a request for discussion, implementation, or harness operations",
+    handler: async (args, ctx) => {
+      const service = dependencies.current()?.commands;
+      await routeHarnessRequest(args, {
+        classify: (description) => classifyPiRequest(description, ctx),
+        discuss: (description) => pi.sendUserMessage(description),
+        execute: async (command, commandArgs) => {
+          if (service === undefined) {
+            ctx.ui.notify("Harness session is not initialized for this project", "error");
+            return;
+          }
+          await service.execute(command as HarnessCommandName, commandArgs, ctx.ui);
+        },
+        notify: (message) => ctx.ui.notify(message, "info"),
+        confirm: (title, detail) => ctx.ui.confirm(title, detail),
+      });
+    },
+  });
   for (const command of harnessCommandNames) {
     pi.registerCommand(command, {
-      description: `Pi harness: ${command.slice("harness-".length)}`,
+      description: `Pi harness: ${command.slice("harness:".length)}`,
       handler: async (args, ctx) => {
         const service = dependencies.current()?.commands;
         if (service !== undefined) {
           await service.execute(command as HarnessCommandName, args, ctx.ui);
           return;
         }
-        if (command !== "harness-doctor") {
+        if (command !== "harness:doctor") {
           ctx.ui.notify("Harness session is not initialized for this project", "error");
           return;
         }
